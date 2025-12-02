@@ -1,0 +1,104 @@
+{
+  "family": "whatsapp-chat-gateway",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "gateway",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/whatsapp-chat-gateway:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "info"
+        },
+        {
+          "name": "PORT",
+          "value": "3000"
+        },
+        {
+          "name": "ALLOWED_ORIGINS",
+          "value": "https://chat.example.com"
+        },
+        {
+          "name": "AUTH_SERVICE_URL",
+          "value": "http://auth-service.local:3001"
+        },
+        {
+          "name": "USERS_SERVICE_URL",
+          "value": "http://users-service.local:3002"
+        },
+        {
+          "name": "CHATS_SERVICE_URL",
+          "value": "http://chats-service.local:3003"
+        },
+        {
+          "name": "MESSAGES_SERVICE_URL",
+          "value": "http://messages-service.local:3004"
+        },
+        {
+          "name": "MEDIA_SERVICE_URL",
+          "value": "http://media-service.local:3005"
+        },
+        {
+          "name": "NOTIFICATIONS_SERVICE_URL",
+          "value": "http://notifications-service.local:3006"
+        },
+        {
+          "name": "REDIS_HOST",
+          "value": "REDIS_ENDPOINT"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "6379"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "JWT_ACCESS_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:jwt-access-secret"
+        },
+        {
+          "name": "JWT_REFRESH_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:jwt-refresh-secret"
+        },
+        {
+          "name": "REDIS_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:redis-password"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/whatsapp-chat-gateway",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://localhost:3000/healthz', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
