@@ -4,7 +4,6 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ChatsLayout from './pages/ChatsLayout';
 import ChatView from './pages/ChatView';
-import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
 import StatusPage from './pages/StatusPage';
 
@@ -37,11 +36,7 @@ export const router = createBrowserRouter([
   },
   {
     path: '/profile',
-    element: (
-      <ProtectedRoute>
-        <ProfilePage />
-      </ProtectedRoute>
-    ),
+    element: <Navigate to="/settings?s=profile" replace />,
   },
   {
     path: '/settings',

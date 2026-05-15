@@ -1,0 +1,253 @@
+# Full Blabber stack: MongoDB, Redis, microservices, API gateway, static web UI.
+# Browser uses localhost ports → VITE_* must match host-mapped gateway (3000) and web (5173).
+#
+# Usage:
+#   docker compose -f docker-compose.full.yml up -d --build
+#   docker compose -f docker-compose.full.yml logs -f --tail=100
+#
+# URLs: Web UI http://localhost:5173  |  API + Socket.IO http://localhost:3000
+# If docker-compose.dev.yml is already using 27017/6379, this file maps DB/Redis to 27018/6380 on the host.
+
+name: blabber-full
+
+networks:
+  blabber:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: blabber-full-mongodb
+    command: ['mongod', '--quiet', '--bind_ip_all']
+    ports:
+      - '27018:27017'
+    environment:
+      MONGO_INITDB_DATABASE: blabber_full
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - blabber
+
+  redis:
+    image: redis:7-alpine
+    container_name: blabber-full-redis
+    ports:
+      - '6380:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - blabber
+
+  auth:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    container_name: blabber-full-auth
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      PORT: '3001'
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: blabber_full
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+    ports:
+      - '3001:3001'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - blabber
+
+  users:
+    build:
+      context: .
+      dockerfile: services/users/Dockerfile
+    container_name: blabber-full-users
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      PORT: '3002'
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: blabber_full
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+    ports:
+      - '3002:3002'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - blabber
+
+  chats:
+    build:
+      context: .
+      dockerfile: services/chats/Dockerfile
+    container_name: blabber-full-chats
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      PORT: '3003'
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: blabber_full
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+    ports:
+      - '3003:3003'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - blabber
+
+  messages:
+    build:
+      context: .
+      dockerfile: services/messages/Dockerfile
+    container_name: blabber-full-messages
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      PORT: '3004'
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: blabber_full
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+    ports:
+      - '3004:3004'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - blabber
+
+  media:
+    build:
+      context: .
+      dockerfile: services/media/Dockerfile
+    container_name: blabber-full-media
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      PORT: '3005'
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: blabber_full
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+    ports:
+      - '3005:3005'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - blabber
+
+  notifications:
+    build:
+      context: .
+      dockerfile: services/notifications/Dockerfile
+    container_name: blabber-full-notifications
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      PORT: '3006'
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: blabber_full
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+    ports:
+      - '3006:3006'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - blabber
+
+  gateway:
+    build:
+      context: .
+      dockerfile: apps/gateway/Dockerfile
+    container_name: blabber-full-gateway
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      PORT: '3000'
+      GATEWAY_PORT: '3000'
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      AUTH_SERVICE_URL: http://auth:3001
+      USERS_SERVICE_URL: http://users:3002
+      CHATS_SERVICE_URL: http://chats:3003
+      MESSAGES_SERVICE_URL: http://messages:3004
+      MEDIA_SERVICE_URL: http://media:3005
+      NOTIFICATIONS_SERVICE_URL: http://notifications:3006
+      INTELLIGENCE_SERVICE_URL: http://chats:3003
+    ports:
+      - '3000:3000'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth:
+        condition: service_started
+      users:
+        condition: service_started
+      chats:
+        condition: service_started
+      messages:
+        condition: service_started
+      media:
+        condition: service_started
+      notifications:
+        condition: service_started
+    networks:
+      - blabber
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:3000
+        VITE_SOCKET_URL: http://localhost:3000
+    container_name: blabber-full-web
+    ports:
+      - '5173:80'
+    depends_on:
+      - gateway
+    networks:
+      - blabber

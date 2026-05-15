@@ -17,40 +17,25 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
 
-  // For direct chats, get the other user's ID
   const isDirectChat = chat.type === 'direct';
   const otherUserId = isDirectChat
     ? chat.participants.find((p) => p !== currentUser?._id)
     : undefined;
 
-  // Fetch other user's details and presence for direct chats
   const { data: otherUser } = useUser(otherUserId);
   const { data: presence } = useUserPresence(otherUserId);
 
-  const handleClick = () => {
-    navigate(`/chats/${chat._id}`);
-  };
+  const handleClick = () => navigate(`/chats/${chat._id}`);
 
-  // Get chat display info
   const getChatInfo = () => {
     if (chat.type === 'group') {
-      return {
-        title: chat.title || 'Unnamed Group',
-        avatarUrl: chat.avatarUrl,
-        online: undefined,
-      };
+      return { title: chat.title || 'Unnamed Group', avatarUrl: chat.avatarUrl, online: undefined };
     }
-    // For direct chats, use the other user's info
-    return {
-      title: otherUser?.name || 'User',
-      avatarUrl: otherUser?.avatarUrl,
-      online: presence?.online,
-    };
+    return { title: otherUser?.name || 'User', avatarUrl: otherUser?.avatarUrl, online: presence?.online };
   };
 
   const { title, avatarUrl, online } = getChatInfo();
 
-  // Format last message time
   const formatTime = (date: Date) => {
     try {
       return formatDistanceToNow(new Date(date), { addSuffix: true });
@@ -62,8 +47,10 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
   return (
     <div
       onClick={handleClick}
-      className={`flex items-center gap-3 p-3 cursor-pointer hover:bg-gray-100 transition-colors ${
-        isActive ? 'bg-gray-200' : ''
+      className={`flex cursor-pointer items-center gap-3 px-3 py-3 transition-colors ${
+        isActive
+          ? 'bg-teal-50 dark:bg-teal-900/20'
+          : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
       }`}
       role="button"
       tabIndex={0}
@@ -75,34 +62,38 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
       }}
     >
       {chat.type === 'group' ? (
-        <div className="relative">
-          <div className="w-12 h-12 rounded-full bg-[#00a884] flex items-center justify-center">
-            <Users size={24} className="text-white" />
+        <div className="relative flex-shrink-0">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-600">
+            <Users size={18} className="text-white" />
           </div>
         </div>
       ) : (
         <Avatar src={avatarUrl} alt={title} size="md" online={online} />
       )}
 
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <h3 className="font-semibold text-gray-900 truncate">{title}</h3>
-            {isPinned && <Pin size={14} className="text-gray-500 flex-shrink-0" />}
+      <div className="min-w-0 flex-1">
+        <div className="mb-0.5 flex items-center justify-between">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h3 className={`truncate text-[14px] font-semibold ${
+              isActive ? 'text-teal-700 dark:text-teal-300' : 'text-slate-900 dark:text-white'
+            }`}>
+              {title}
+            </h3>
+            {isPinned && <Pin size={12} className="flex-shrink-0 text-slate-400" />}
           </div>
           {chat.lastMessageRef && (
-            <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
+            <span className="ml-2 flex-shrink-0 text-[11px] text-slate-400 dark:text-slate-500">
               {formatTime(chat.lastMessageRef.createdAt)}
             </span>
           )}
         </div>
 
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-600 truncate">
+          <p className="truncate text-[13px] text-slate-500 dark:text-slate-400">
             {chat.lastMessageRef?.body || 'No messages yet'}
           </p>
           {unreadCount > 0 && (
-            <span className="flex-shrink-0 ml-2 bg-green-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="ml-2 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-teal-500 text-[10px] font-bold text-white">
               {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           )}

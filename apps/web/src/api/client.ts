@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios';
+import type { ChatIntelligenceSummary, SummarizeChatDTO } from '@repo/types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -17,6 +18,26 @@ export const setAccessToken = (token: string | null) => {
 };
 
 export const getAccessToken = () => accessToken;
+
+export interface ChatSummaryResponse {
+  summary: ChatIntelligenceSummary | null;
+}
+
+export async function fetchLatestChatSummary(chatId: string): Promise<ChatSummaryResponse> {
+  const { data } = await apiClient.get<ChatSummaryResponse>(`/api/intelligence/chats/${chatId}/summary`);
+  return data;
+}
+
+export async function generateChatSummary(
+  chatId: string,
+  payload?: SummarizeChatDTO
+): Promise<{ summary: ChatIntelligenceSummary }> {
+  const { data } = await apiClient.post<{ summary: ChatIntelligenceSummary }>(
+    `/api/intelligence/chats/${chatId}/summarize`,
+    payload ?? {}
+  );
+  return data;
+}
 
 // Request interceptor to add Bearer token
 apiClient.interceptors.request.use(

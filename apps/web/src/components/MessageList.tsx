@@ -120,8 +120,11 @@ export default function MessageList({
 
   if (messages.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
-        <p>No messages yet. Start the conversation!</p>
+      <div className="flex flex-1 items-center justify-center bg-[#f8faf9] text-slate-500">
+        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-center">
+          <p className="font-medium text-slate-700">No messages yet</p>
+          <p className="mt-1 text-sm text-slate-500">Start the conversation to see insights appear.</p>
+        </div>
       </div>
     );
   }
@@ -129,7 +132,7 @@ export default function MessageList({
   return (
     <div
       ref={scrollRef}
-      className="flex-1 overflow-y-auto px-4 py-4 bg-gray-50"
+      className="flex-1 overflow-y-auto bg-[#f8faf9] px-6 py-5"
       style={{ display: 'flex', flexDirection: 'column-reverse' }}
     >
       <div>
@@ -137,7 +140,7 @@ export default function MessageList({
         <div ref={observerTarget} className="h-4">
           {isFetchingNextPage && (
             <div className="flex justify-center py-2">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500" />
+              <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-[#0f766e]" />
             </div>
           )}
         </div>

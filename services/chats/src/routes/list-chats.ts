@@ -17,7 +17,6 @@ export const listChats = asyncHandler(async (req: Request, res: Response) => {
 
   // Get query parameters
   const limit = parseInt(req.query.limit as string) || 50;
-  const archived = req.query.archived === 'true';
 
   // Build query - filter by participants array
   const query: any = {

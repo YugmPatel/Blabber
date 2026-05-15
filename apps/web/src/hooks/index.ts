@@ -3,3 +3,4 @@ export * from './useUsers';
 export * from './useChats';
 export * from './useMessages';
 export * from './useSocketEvents';
+export * from './useChatSummary';

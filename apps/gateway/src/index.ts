@@ -12,7 +12,7 @@ const httpServer = createServer(app);
 
 // Set up Socket.io
 setupSocketIO(httpServer)
-  .then((io) => {
+  .then(() => {
     logger.info('Socket.io server initialized');
 
     // Start listening

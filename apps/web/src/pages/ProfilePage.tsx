@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, Check, X, Loader2, Trash2, Image } from 'lucide-react';
+import { Camera, Check, Loader2, Trash2, Image, User, Bell, Sparkles, Palette } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
 import { useFileUpload } from '@/hooks/useFileUpload';
@@ -10,11 +10,11 @@ export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
   const updateProfile = useUpdateProfile();
   const { uploadFile, isUploading } = useFileUpload();
+  const profileUser = user as (typeof user & { about?: string; avatarUrl?: string }) | null;
 
-  const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
-  const [about, setAbout] = useState(user?.about || '');
-  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
+  const [about, setAbout] = useState(profileUser?.about || '');
+  const [avatarUrl, setAvatarUrl] = useState(profileUser?.avatarUrl || profileUser?.avatar || '');
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -22,7 +22,6 @@ export default function ProfilePage() {
   const handleSave = async () => {
     try {
       await updateProfile.mutateAsync({ name, about, avatarUrl });
-      setIsEditing(false);
       if (refreshUser) refreshUser();
     } catch (error) {
       console.error('Failed to update profile:', error);
@@ -31,9 +30,8 @@ export default function ProfilePage() {
 
   const handleCancel = () => {
     setName(user?.name || '');
-    setAbout(user?.about || '');
-    setAvatarUrl(user?.avatarUrl || '');
-    setIsEditing(false);
+    setAbout(profileUser?.about || '');
+    setAvatarUrl(profileUser?.avatarUrl || profileUser?.avatar || '');
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -63,9 +61,7 @@ export default function ProfilePage() {
       // Upload to server
       const mediaId = await uploadFile(file);
       if (mediaId) {
-        // In production, this would be the actual URL from the media service
-        // For now, we'll use the local preview
-        setIsEditing(true);
+        // In production, this would be the actual URL from the media service.
       }
     } catch (error) {
       console.error('Failed to upload image:', error);
@@ -80,222 +76,210 @@ export default function ProfilePage() {
 
   const handleRemovePhoto = () => {
     setAvatarUrl('');
-    setIsEditing(true);
     setShowAvatarMenu(false);
   };
 
   return (
-    <div className="min-h-screen bg-[#f0f2f5]">
-      {/* Header */}
-      <div className="bg-[#00a884] text-white px-4 py-4">
-        <div className="max-w-2xl mx-auto flex items-center gap-4">
-          <button
-            onClick={() => navigate('/chats')}
-            className="p-2 rounded-full hover:bg-white/10 transition-colors"
-          >
-            <ArrowLeft size={24} />
+    <div className="min-h-screen bg-[#f4f5f7] p-4 md:p-6">
+      <div className="mx-auto flex h-[calc(100vh-2rem)] max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_40px_-25px_rgba(15,23,42,0.25)] md:h-[calc(100vh-3rem)]">
+        <aside className="hidden w-[260px] flex-col border-r border-slate-200 bg-[#f8faf9] p-4 md:flex">
+          <p className="mb-4 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Settings</p>
+          <button className="flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white">
+            <User size={16} />
+            Profile
           </button>
-          <h1 className="text-xl font-semibold">Profile</h1>
-        </div>
-      </div>
+          <button className="mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">
+            <Bell size={16} />
+            Notifications
+          </button>
+          <button className="mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">
+            <Sparkles size={16} />
+            AI Engine
+          </button>
+          <button className="mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">
+            <Palette size={16} />
+            Appearance
+          </button>
+          <div className="mt-auto rounded-xl border border-slate-200 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-700">Pro Plan</p>
+            <p className="mt-1 text-xs text-slate-500">Unlock advanced memory and AI workflows.</p>
+            <button className="mt-3 w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white">
+              Upgrade Now
+            </button>
+          </div>
+        </aside>
 
-      <div className="max-w-2xl mx-auto p-4">
-        {/* Profile Picture */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-4">
-          <div className="flex flex-col items-center">
-            <div className="relative">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt="Profile"
-                  className="w-32 h-32 rounded-full object-cover border-4 border-[#00a884]"
-                />
-              ) : (
-                <div className="w-32 h-32 rounded-full bg-[#00a884] flex items-center justify-center text-white text-5xl font-semibold">
-                  {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || '?'}
-                </div>
-              )}
-
-              {/* Upload button */}
-              <button
-                onClick={() => setShowAvatarMenu(!showAvatarMenu)}
-                disabled={isUploading}
-                className="absolute bottom-0 right-0 p-2 bg-[#00a884] rounded-full text-white hover:bg-[#008f72] transition-colors disabled:bg-gray-400"
-              >
-                {isUploading ? (
-                  <Loader2 size={20} className="animate-spin" />
-                ) : (
-                  <Camera size={20} />
-                )}
-              </button>
-
-              {/* Avatar menu dropdown */}
-              {showAvatarMenu && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowAvatarMenu(false)} />
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-3"
-                    >
-                      <Image size={18} className="text-gray-500" />
-                      Choose from gallery
-                    </button>
-                    <button
-                      onClick={() => cameraInputRef.current?.click()}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-3"
-                    >
-                      <Camera size={18} className="text-gray-500" />
-                      Take photo
-                    </button>
-                    {avatarUrl && (
-                      <button
-                        onClick={handleRemovePhoto}
-                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3"
-                      >
-                        <Trash2 size={18} />
-                        Remove photo
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
+        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto p-5 md:p-8">
+          <div className="mb-6 flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Account Profile</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                Manage your public identity and account security settings.
+              </p>
             </div>
-
-            {/* Hidden file inputs */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <input
-              ref={cameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="user"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-
-            <p className="text-sm text-gray-500 mt-4">
-              Tap the camera icon to change your profile photo
-            </p>
+            <button
+              onClick={() => navigate('/chats')}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Back to chats
+            </button>
           </div>
-        </div>
 
-        {/* Name */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-[#00a884] font-medium">Your name</span>
-            {!isEditing ? (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="text-[#00a884] hover:underline text-sm"
-              >
-                Edit
-              </button>
-            ) : (
-              <div className="flex gap-2">
-                <button onClick={handleCancel} className="p-1 text-gray-500 hover:text-gray-700">
-                  <X size={18} />
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={updateProfile.isPending}
-                  className="p-1 text-[#00a884] hover:text-[#008f72]"
-                >
-                  <Check size={18} />
-                </button>
+          <section className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className="grid gap-6 md:grid-cols-[200px_1fr]">
+              <div className="flex flex-col items-center">
+                <div className="relative">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt="Profile"
+                      className="h-28 w-28 rounded-full object-cover border-4 border-[#0f766e]"
+                    />
+                  ) : (
+                    <div className="flex h-28 w-28 items-center justify-center rounded-full bg-[#0f766e] text-4xl font-semibold text-white">
+                      {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || '?'}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => setShowAvatarMenu(!showAvatarMenu)}
+                    disabled={isUploading}
+                    className="absolute bottom-0 right-0 rounded-full bg-slate-900 p-2 text-white transition hover:bg-slate-800 disabled:bg-slate-400"
+                  >
+                    {isUploading ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                  </button>
+                </div>
+                <span className="mt-2 h-2.5 w-2.5 rounded-full bg-green-500" />
+                <p className="mt-2 text-xs text-slate-500">Online</p>
               </div>
-            )}
-          </div>
-          {isEditing ? (
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full border-b-2 border-[#00a884] py-1 focus:outline-none"
-              autoFocus
-            />
-          ) : (
-            <p className="text-gray-900">{user?.name || 'Not set'}</p>
-          )}
-          <p className="text-xs text-gray-500 mt-2">
-            This is not your username or pin. This name will be visible to your contacts.
-          </p>
-        </div>
 
-        {/* About */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-[#00a884] font-medium">About</span>
-            {!isEditing && (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="text-[#00a884] hover:underline text-sm"
-              >
-                Edit
-              </button>
-            )}
-          </div>
-          {isEditing ? (
-            <textarea
-              value={about}
-              onChange={(e) => setAbout(e.target.value)}
-              placeholder="Write something about yourself..."
-              className="w-full border-b-2 border-[#00a884] py-1 focus:outline-none resize-none"
-              rows={2}
-              maxLength={140}
-            />
-          ) : (
-            <p className="text-gray-900">{about || 'Hey there! I am using this chat app.'}</p>
-          )}
-          {isEditing && <p className="text-xs text-gray-500 mt-1 text-right">{about.length}/140</p>}
-        </div>
+              <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Display Name</label>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none focus:border-[#0ea5a1] focus:bg-white focus:ring-2 focus:ring-[#99f6e4]"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Handle</label>
+                    <input
+                      type="text"
+                      value={`@${user?.username || ''}`}
+                      disabled
+                      className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-sm text-slate-500"
+                    />
+                  </div>
+                </div>
 
-        {/* Email */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
-          <span className="text-sm text-[#00a884] font-medium block mb-2">Email</span>
-          <p className="text-gray-900">{user?.email}</p>
-        </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Email Address</label>
+                  <input
+                    type="email"
+                    value={user?.email || ''}
+                    disabled
+                    className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-sm text-slate-500"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
 
-        {/* Username */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
-          <span className="text-sm text-[#00a884] font-medium block mb-2">Username</span>
-          <p className="text-gray-900">@{user?.username}</p>
-        </div>
+          <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+            <h2 className="text-lg font-semibold text-slate-900">About You</h2>
+            <p className="text-sm text-slate-500">Tell your team a bit about your role.</p>
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Role / Department</label>
+                <input
+                  type="text"
+                  placeholder="Senior Product Designer"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none focus:border-[#0ea5a1] focus:bg-white focus:ring-2 focus:ring-[#99f6e4]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Status Message</label>
+                <textarea
+                  value={about}
+                  onChange={(e) => setAbout(e.target.value)}
+                  placeholder="Focusing on Blabber V2 launch 🚀"
+                  className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none focus:border-[#0ea5a1] focus:bg-white focus:ring-2 focus:ring-[#99f6e4]"
+                  rows={3}
+                  maxLength={140}
+                />
+                <p className="mt-1 text-right text-xs text-slate-400">{about.length}/140</p>
+              </div>
+            </div>
+          </section>
 
-        {/* Save/Cancel buttons when editing */}
-        {isEditing && (
-          <div className="flex gap-3">
+          <div className="mt-6 flex justify-end gap-3">
             <button
               onClick={handleCancel}
-              className="flex-1 py-3 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={updateProfile.isPending}
-              className="flex-1 py-3 rounded-lg bg-[#00a884] text-white font-medium hover:bg-[#008f72] transition-colors disabled:bg-gray-400 flex items-center justify-center gap-2"
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
             >
-              {updateProfile.isPending ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Check size={18} />
-                  Save Changes
-                </>
-              )}
+              {updateProfile.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+              Save Changes
             </button>
           </div>
-        )}
+        </main>
       </div>
+
+      {showAvatarMenu && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setShowAvatarMenu(false)} />
+          <div className="absolute left-1/2 top-28 z-20 w-52 -translate-x-1/2 rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            >
+              <Image size={16} className="text-slate-500" />
+              Choose from gallery
+            </button>
+            <button
+              onClick={() => cameraInputRef.current?.click()}
+              className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            >
+              <Camera size={16} className="text-slate-500" />
+              Take photo
+            </button>
+            {avatarUrl ? (
+              <button
+                onClick={handleRemovePhoto}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-rose-500 hover:bg-rose-50"
+              >
+                <Trash2 size={16} />
+                Remove photo
+              </button>
+            ) : null}
+          </div>
+        </>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="user"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
     </div>
   );
 }

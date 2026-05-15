@@ -21,3 +21,6 @@ export * from './socket';
 
 // Event exports
 export * from './events';
+
+// Intelligence exports
+export * from './intelligence';

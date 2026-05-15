@@ -3,6 +3,7 @@ import { RedisPubSub } from '@repo/utils';
 import { loadRedisConfig } from '@repo/config';
 import { logger } from '@repo/utils';
 import {
+  AppEvent,
   EventType,
   MessageSentEvent,
   MessageEditedEvent,
@@ -44,163 +45,176 @@ export function initPubSub(io: SocketIOServer): RedisPubSub {
 
 function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
   // Message events
-  pubsub.on(EventType.MESSAGE_SENT, (event: MessageSentEvent) => {
-    logger.debug({ event: event.type, chatId: event.data.chatId }, 'Broadcasting MESSAGE_SENT');
+  pubsub.on(EventType.MESSAGE_SENT, (event: AppEvent) => {
+    const eventTyped = event as MessageSentEvent;
+    logger.debug({ event: eventTyped.type, chatId: eventTyped.data.chatId }, 'Broadcasting MESSAGE_SENT');
     // Emit to all users in the chat room with proper message format
     // Note: The sender already received the message via message:ack from the socket handler.
     // This broadcast ensures other users in the chat room also receive the message.
     // The frontend deduplicates based on message ID to prevent duplicates for the sender.
-    io.to(`chat:${event.data.chatId}`).emit('message:new', {
+    io.to(`chat:${eventTyped.data.chatId}`).emit('message:new', {
       message: {
-        _id: event.data.messageId,
-        chatId: event.data.chatId,
-        senderId: event.data.senderId,
-        body: event.data.content,
-        media: event.data.mediaUrl ? { type: 'image', url: event.data.mediaUrl } : undefined,
-        replyTo: event.data.replyTo,
+        _id: eventTyped.data.messageId,
+        chatId: eventTyped.data.chatId,
+        senderId: eventTyped.data.senderId,
+        body: eventTyped.data.content,
+        media: eventTyped.data.mediaUrl ? { type: 'image', url: eventTyped.data.mediaUrl } : undefined,
+        replyTo: eventTyped.data.replyTo,
         reactions: [],
         status: 'sent',
         deletedFor: [],
-        createdAt: event.data.createdAt,
+        createdAt: eventTyped.data.createdAt,
       },
     });
   });
 
-  pubsub.on(EventType.MESSAGE_EDITED, (event: MessageEditedEvent) => {
+  pubsub.on(EventType.MESSAGE_EDITED, (event: AppEvent) => {
+    const e = event as MessageEditedEvent;
     logger.debug(
-      { event: event.type, messageId: event.data.messageId },
+      { event: e.type, messageId: e.data.messageId },
       'Broadcasting MESSAGE_EDITED'
     );
-    io.to(`chat:${event.data.chatId}`).emit('message:edited', {
-      messageId: event.data.messageId,
-      chatId: event.data.chatId,
-      content: event.data.content,
-      editedAt: event.data.editedAt,
+    io.to(`chat:${e.data.chatId}`).emit('message:edited', {
+      messageId: e.data.messageId,
+      chatId: e.data.chatId,
+      content: e.data.content,
+      editedAt: e.data.editedAt,
     });
   });
 
-  pubsub.on(EventType.MESSAGE_DELETED, (event: MessageDeletedEvent) => {
+  pubsub.on(EventType.MESSAGE_DELETED, (event: AppEvent) => {
+    const e = event as MessageDeletedEvent;
     logger.debug(
-      { event: event.type, messageId: event.data.messageId },
+      { event: e.type, messageId: e.data.messageId },
       'Broadcasting MESSAGE_DELETED'
     );
-    io.to(`chat:${event.data.chatId}`).emit('message:deleted', {
-      messageId: event.data.messageId,
-      chatId: event.data.chatId,
-      deletedBy: event.data.deletedBy,
+    io.to(`chat:${e.data.chatId}`).emit('message:deleted', {
+      messageId: e.data.messageId,
+      chatId: e.data.chatId,
+      deletedBy: e.data.deletedBy,
     });
   });
 
-  pubsub.on(EventType.MESSAGE_REACTION, (event: MessageReactionEvent) => {
+  pubsub.on(EventType.MESSAGE_REACTION, (event: AppEvent) => {
+    const e = event as MessageReactionEvent;
     logger.debug(
-      { event: event.type, messageId: event.data.messageId },
+      { event: e.type, messageId: e.data.messageId },
       'Broadcasting MESSAGE_REACTION'
     );
-    io.to(`chat:${event.data.chatId}`).emit('message:reaction', {
-      messageId: event.data.messageId,
-      chatId: event.data.chatId,
-      userId: event.data.userId,
-      emoji: event.data.emoji,
+    io.to(`chat:${e.data.chatId}`).emit('message:reaction', {
+      messageId: e.data.messageId,
+      chatId: e.data.chatId,
+      userId: e.data.userId,
+      emoji: e.data.emoji,
     });
   });
 
-  pubsub.on(EventType.MESSAGE_READ, (event: MessageReadEvent) => {
-    logger.debug({ event: event.type, chatId: event.data.chatId }, 'Broadcasting MESSAGE_READ');
-    io.to(`chat:${event.data.chatId}`).emit('message:read', {
-      chatId: event.data.chatId,
-      userId: event.data.userId,
-      messageIds: event.data.messageIds,
+  pubsub.on(EventType.MESSAGE_READ, (event: AppEvent) => {
+    const e = event as MessageReadEvent;
+    logger.debug({ event: e.type, chatId: e.data.chatId }, 'Broadcasting MESSAGE_READ');
+    io.to(`chat:${e.data.chatId}`).emit('message:read', {
+      chatId: e.data.chatId,
+      userId: e.data.userId,
+      messageIds: e.data.messageIds,
     });
   });
 
   // Chat events
-  pubsub.on(EventType.CHAT_CREATED, (event: ChatCreatedEvent) => {
-    logger.debug({ event: event.type, chatId: event.data.chatId }, 'Broadcasting CHAT_CREATED');
+  pubsub.on(EventType.CHAT_CREATED, (event: AppEvent) => {
+    const e = event as ChatCreatedEvent;
+    logger.debug({ event: e.type, chatId: e.data.chatId }, 'Broadcasting CHAT_CREATED');
     // Emit to all participants
-    event.data.participants.forEach((userId) => {
+    e.data.participants.forEach((userId) => {
       io.to(`user:${userId}`).emit('chat:created', {
-        chatId: event.data.chatId,
-        name: event.data.name,
-        isGroup: event.data.isGroup,
-        participants: event.data.participants,
-        createdBy: event.data.createdBy,
+        chatId: e.data.chatId,
+        name: e.data.name,
+        isGroup: e.data.isGroup,
+        participants: e.data.participants,
+        createdBy: e.data.createdBy,
       });
     });
   });
 
-  pubsub.on(EventType.CHAT_UPDATED, (event: ChatUpdatedEvent) => {
-    logger.debug({ event: event.type, chatId: event.data.chatId }, 'Broadcasting CHAT_UPDATED');
-    io.to(`chat:${event.data.chatId}`).emit('chat:updated', {
-      chatId: event.data.chatId,
-      name: event.data.name,
-      avatar: event.data.avatar,
-      updatedBy: event.data.updatedBy,
+  pubsub.on(EventType.CHAT_UPDATED, (event: AppEvent) => {
+    const e = event as ChatUpdatedEvent;
+    logger.debug({ event: e.type, chatId: e.data.chatId }, 'Broadcasting CHAT_UPDATED');
+    io.to(`chat:${e.data.chatId}`).emit('chat:updated', {
+      chatId: e.data.chatId,
+      name: e.data.name,
+      avatar: e.data.avatar,
+      updatedBy: e.data.updatedBy,
     });
   });
 
-  pubsub.on(EventType.CHAT_MEMBER_ADDED, (event: ChatMemberAddedEvent) => {
+  pubsub.on(EventType.CHAT_MEMBER_ADDED, (event: AppEvent) => {
+    const e = event as ChatMemberAddedEvent;
     logger.debug(
-      { event: event.type, chatId: event.data.chatId },
+      { event: e.type, chatId: e.data.chatId },
       'Broadcasting CHAT_MEMBER_ADDED'
     );
-    io.to(`chat:${event.data.chatId}`).emit('chat:member:added', {
-      chatId: event.data.chatId,
-      userId: event.data.userId,
-      addedBy: event.data.addedBy,
+    io.to(`chat:${e.data.chatId}`).emit('chat:member:added', {
+      chatId: e.data.chatId,
+      userId: e.data.userId,
+      addedBy: e.data.addedBy,
     });
     // Also notify the added user
-    io.to(`user:${event.data.userId}`).emit('chat:joined', {
-      chatId: event.data.chatId,
+    io.to(`user:${e.data.userId}`).emit('chat:joined', {
+      chatId: e.data.chatId,
     });
   });
 
-  pubsub.on(EventType.CHAT_MEMBER_REMOVED, (event: ChatMemberRemovedEvent) => {
+  pubsub.on(EventType.CHAT_MEMBER_REMOVED, (event: AppEvent) => {
+    const e = event as ChatMemberRemovedEvent;
     logger.debug(
-      { event: event.type, chatId: event.data.chatId },
+      { event: e.type, chatId: e.data.chatId },
       'Broadcasting CHAT_MEMBER_REMOVED'
     );
-    io.to(`chat:${event.data.chatId}`).emit('chat:member:removed', {
-      chatId: event.data.chatId,
-      userId: event.data.userId,
-      removedBy: event.data.removedBy,
+    io.to(`chat:${e.data.chatId}`).emit('chat:member:removed', {
+      chatId: e.data.chatId,
+      userId: e.data.userId,
+      removedBy: e.data.removedBy,
     });
     // Also notify the removed user
-    io.to(`user:${event.data.userId}`).emit('chat:left', {
-      chatId: event.data.chatId,
+    io.to(`user:${e.data.userId}`).emit('chat:left', {
+      chatId: e.data.chatId,
     });
   });
 
   // User events
-  pubsub.on(EventType.USER_ONLINE, (event: UserOnlineEvent) => {
-    logger.debug({ event: event.type, userId: event.data.userId }, 'Broadcasting USER_ONLINE');
+  pubsub.on(EventType.USER_ONLINE, (event: AppEvent) => {
+    const e = event as UserOnlineEvent;
+    logger.debug({ event: e.type, userId: e.data.userId }, 'Broadcasting USER_ONLINE');
     // Broadcast to all connected clients (they can filter on frontend)
     io.emit('user:online', {
-      userId: event.data.userId,
+      userId: e.data.userId,
     });
   });
 
-  pubsub.on(EventType.USER_OFFLINE, (event: UserOfflineEvent) => {
-    logger.debug({ event: event.type, userId: event.data.userId }, 'Broadcasting USER_OFFLINE');
+  pubsub.on(EventType.USER_OFFLINE, (event: AppEvent) => {
+    const e = event as UserOfflineEvent;
+    logger.debug({ event: e.type, userId: e.data.userId }, 'Broadcasting USER_OFFLINE');
     io.emit('user:offline', {
-      userId: event.data.userId,
-      lastSeen: event.data.lastSeen,
+      userId: e.data.userId,
+      lastSeen: e.data.lastSeen,
     });
   });
 
-  pubsub.on(EventType.USER_TYPING, (event: UserTypingEvent) => {
-    logger.debug({ event: event.type, userId: event.data.userId }, 'Broadcasting USER_TYPING');
+  pubsub.on(EventType.USER_TYPING, (event: AppEvent) => {
+    const e = event as UserTypingEvent;
+    logger.debug({ event: e.type, userId: e.data.userId }, 'Broadcasting USER_TYPING');
     // Emit to chat room except the typing user
-    io.to(`chat:${event.data.chatId}`).emit('user:typing', {
-      userId: event.data.userId,
-      chatId: event.data.chatId,
+    io.to(`chat:${e.data.chatId}`).emit('user:typing', {
+      userId: e.data.userId,
+      chatId: e.data.chatId,
     });
   });
 
-  pubsub.on(EventType.USER_STOP_TYPING, (event: UserStopTypingEvent) => {
-    logger.debug({ event: event.type, userId: event.data.userId }, 'Broadcasting USER_STOP_TYPING');
-    io.to(`chat:${event.data.chatId}`).emit('user:stop_typing', {
-      userId: event.data.userId,
-      chatId: event.data.chatId,
+  pubsub.on(EventType.USER_STOP_TYPING, (event: AppEvent) => {
+    const e = event as UserStopTypingEvent;
+    logger.debug({ event: e.type, userId: e.data.userId }, 'Broadcasting USER_STOP_TYPING');
+    io.to(`chat:${e.data.chatId}`).emit('user:stop_typing', {
+      userId: e.data.userId,
+      chatId: e.data.chatId,
     });
   });
 }

@@ -62,7 +62,7 @@ export const requireChatAdmin = async (req: Request, res: Response, next: NextFu
     // Attach chat to request for use in route handler
     (req as any).chat = chat;
 
-    next();
+    return next();
   } catch (error) {
     next(error);
   }

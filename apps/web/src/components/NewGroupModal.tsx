@@ -150,10 +150,11 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-md flex-col rounded-lg bg-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
+      <div className="grid max-h-[88vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl md:grid-cols-[1fr_320px]">
+        <div className="flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 p-4">
+        <div className="flex items-center justify-between border-b border-slate-200 p-4">
           <div className="flex items-center gap-3">
             {step === 'details' && (
               <button
@@ -175,8 +176,8 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                 </svg>
               </button>
             )}
-            <h2 className="text-lg font-semibold text-gray-900">
-              {step === 'select' ? 'Add Group Members' : 'New Group'}
+            <h2 className="text-lg font-semibold text-slate-900">
+              {step === 'select' ? 'Create Group' : 'Create Group'}
             </h2>
           </div>
           <button
@@ -192,11 +193,11 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
           <>
             {/* Selected users chips */}
             {selectedUsers.length > 0 && (
-              <div className="flex flex-wrap gap-2 border-b border-gray-200 p-3">
+              <div className="flex flex-wrap gap-2 border-b border-slate-200 p-3">
                 {selectedUsers.map((user) => (
                   <div
                     key={user._id}
-                    className="flex items-center gap-1 rounded-full bg-[#00a884] px-3 py-1 text-sm text-white"
+                    className="flex items-center gap-1 rounded-full bg-[#0f766e] px-3 py-1 text-sm text-white"
                   >
                     <span>{user.username || user.email}</span>
                     <button
@@ -211,7 +212,12 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             )}
 
             {/* Search Input */}
-            <div className="border-b border-gray-200 p-4">
+            <div className="border-b border-slate-200 p-4">
+              <div className="mb-3 flex items-center gap-6 text-xs font-semibold uppercase tracking-[0.1em] text-slate-400">
+                <span className="text-[#0f766e]">Basics</span>
+                <span>Members</span>
+                <span>AI Rules</span>
+              </div>
               <div className="relative">
                 <Search
                   size={18}
@@ -222,7 +228,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                   placeholder="Search users..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#00a884]"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#99f6e4]"
                   autoFocus
                 />
               </div>
@@ -259,7 +265,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                         <button
                           key={user._id}
                           onClick={() => handleUserToggle(user)}
-                          className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors hover:bg-gray-50"
+                          className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-slate-200 hover:bg-slate-50"
                         >
                           <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[#00a884] font-semibold text-white">
                             {user.username?.[0]?.toUpperCase() || user.email[0].toUpperCase()}
@@ -287,11 +293,11 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             </div>
 
             {/* Next button */}
-            <div className="border-t border-gray-200 p-4">
+            <div className="border-t border-slate-200 p-4">
               <button
                 onClick={handleNext}
                 disabled={selectedUsers.length < 1}
-                className="w-full rounded-lg bg-[#00a884] py-2 font-medium text-white transition-colors hover:bg-[#008f72] disabled:cursor-not-allowed disabled:bg-gray-300"
+                className="w-full rounded-xl bg-slate-900 py-2.5 font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-gray-300"
               >
                 Next ({selectedUsers.length} selected)
               </button>
@@ -300,7 +306,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
         ) : (
           <>
             {/* Group details */}
-            <div className="flex-1 p-6 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto p-6">
               {/* Group icon with upload */}
               <div className="mb-6 flex flex-col items-center">
                 <div className="relative">
@@ -339,13 +345,13 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
 
               {/* Group name input */}
               <div className="mb-4">
-                <label className="mb-2 block text-sm font-medium text-gray-700">Group Name</label>
+                <label className="mb-2 block text-sm font-medium text-slate-700">Group Name</label>
                 <input
                   type="text"
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
                   placeholder="Enter group name..."
-                  className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#00a884]"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#99f6e4]"
                   autoFocus
                 />
               </div>
@@ -488,11 +494,11 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             </div>
 
             {/* Create button */}
-            <div className="border-t border-gray-200 p-4">
+            <div className="border-t border-slate-200 p-4">
               <button
                 onClick={handleCreate}
                 disabled={createGroupMutation.isPending}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#00a884] py-2 font-medium text-white transition-colors hover:bg-[#008f72] disabled:cursor-not-allowed disabled:bg-gray-300"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-gray-300"
               >
                 {createGroupMutation.isPending ? (
                   <>
@@ -515,6 +521,26 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             )}
           </>
         )}
+      </div>
+        <aside className="hidden border-l border-slate-200 bg-[#f8faf9] p-5 md:block">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 text-center">
+            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 text-3xl">
+              #
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900">Group Preview</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Define a topic to set context for AI summaries.
+            </p>
+            <div className="mt-3 flex justify-center gap-2">
+              <span className="rounded-full bg-[#e7f8f4] px-2 py-1 text-[10px] font-semibold text-[#0f766e]">
+                AI Enhanced
+              </span>
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">
+                Encrypted
+              </span>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   );

@@ -145,7 +145,7 @@ export default function MessageBubble({
       {showAvatar && isSentByMe && <div className="w-8" />}
 
       {/* Message content */}
-      <div className={`flex flex-col ${isSentByMe ? 'items-end' : 'items-start'} max-w-[70%]`}>
+      <div className={`flex max-w-[72%] flex-col ${isSentByMe ? 'items-end' : 'items-start'}`}>
         {/* Sender name for group chats */}
         {!isSentByMe && senderName && (
           <span className="text-xs text-gray-600 mb-1 px-1">{senderName}</span>
@@ -268,9 +268,11 @@ export default function MessageBubble({
           )}
 
           <div
-            className={`rounded-lg px-3 py-2 ${
-              isSentByMe ? 'bg-[#dcf8c6]' : 'bg-white border border-gray-200'
-            } text-gray-900`}
+            className={`rounded-2xl px-3.5 py-2.5 shadow-sm ${
+              isSentByMe
+                ? 'bg-slate-900 text-slate-100'
+                : 'border border-slate-200 bg-white text-slate-900'
+            }`}
           >
             {renderReplyPreview()}
             {renderMedia()}
@@ -279,7 +281,11 @@ export default function MessageBubble({
             )}
 
             {/* Time and status */}
-            <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
+            <div
+              className={`mt-1 flex items-center gap-1 text-xs ${
+                isSentByMe ? 'text-slate-300' : 'text-slate-500'
+              }`}
+            >
               <span>{formatTime(message.createdAt)}</span>
               {message.editedAt && <span>(edited)</span>}
               <ReadReceipts status={message.status} isSentByMe={isSentByMe} />

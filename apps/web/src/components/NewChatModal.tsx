@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react';
-import { X, Search, Loader2 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Search, Loader2, Users, ArrowLeft, ChevronRight } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/api/client';
 import { chatKeys } from '@/hooks/useChats';
 import { useAuth } from '@/contexts/AuthContext';
@@ -9,163 +10,242 @@ import type { User } from '@repo/types';
 interface NewChatModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenNewGroup?: () => void;
 }
 
-export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
+function UserAvatar({ user }: { user: User }) {
+  const initial = (user.name?.[0] || user.username?.[0] || user.email[0]).toUpperCase();
+  const colors = [
+    'bg-teal-600',
+    'bg-violet-500',
+    'bg-rose-500',
+    'bg-amber-500',
+    'bg-sky-500',
+    'bg-emerald-600',
+  ];
+  const color = colors[(initial.charCodeAt(0) - 65) % colors.length];
+  return (
+    <div
+      className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${color}`}
+    >
+      {initial}
+    </div>
+  );
+}
+
+export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewChatModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { user: currentUser } = useAuth();
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Search users
+  // Focus search on open
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 60);
+    } else {
+      setSearchQuery('');
+    }
+  }, [isOpen]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [isOpen, onClose]);
+
+  // Initial user list (empty-query search to get all users)
+  const { data: allUsersData, isLoading: isLoadingAll } = useQuery({
+    queryKey: ['users', 'list'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/users/search?q=a');
+      return response.data;
+    },
+    enabled: isOpen,
+    staleTime: 30_000,
+  });
+
+  // Search results
   const { data: searchResults, isLoading: isSearching } = useQuery({
     queryKey: ['users', 'search', searchQuery],
     queryFn: async () => {
-      if (!searchQuery.trim()) return { users: [] };
-      const response = await apiClient.get(`/api/users/search?q=${searchQuery}`);
+      const response = await apiClient.get(`/api/users/search?q=${encodeURIComponent(searchQuery)}`);
       return response.data;
     },
-    enabled: searchQuery.trim().length > 0,
+    enabled: isOpen && searchQuery.trim().length > 0,
   });
 
-  // Create chat mutation
+  const displayedUsers: User[] = searchQuery.trim()
+    ? (searchResults?.users ?? [])
+    : (allUsersData?.users ?? []);
+
+  const isLoading = searchQuery.trim() ? isSearching : isLoadingAll;
+
+  // Filter out current user from list
+  const filteredUsers = displayedUsers.filter((u) => u._id !== currentUser?._id);
+
+  // Create / open direct chat
   const createChatMutation = useMutation({
     mutationFn: async (userId: string) => {
-      if (!currentUser?._id) {
-        throw new Error('User not authenticated');
-      }
-      const currentUserId = currentUser._id;
+      if (!currentUser?._id) throw new Error('Not authenticated');
 
-      // Check if chat already exists
-      const chatsResponse = await apiClient.get('/api/chats');
-      const chats = chatsResponse.data.chats || [];
-      const existingChat = chats.find(
-        (chat: any) =>
-          chat.type === 'direct' &&
-          chat.participants.length === 2 &&
-          chat.participants.includes(currentUserId) &&
-          chat.participants.includes(userId)
+      // Check if a direct chat with this user already exists
+      const chatsRes = await apiClient.get('/api/chats');
+      const chats = chatsRes.data.chats ?? [];
+      const existing = chats.find(
+        (c: any) =>
+          c.type === 'direct' &&
+          c.participants.length === 2 &&
+          c.participants.includes(currentUser._id) &&
+          c.participants.includes(userId)
       );
 
-      if (existingChat) {
-        // Chat already exists, just return it
-        return { chat: existingChat };
-      }
+      if (existing) return { chat: existing };
 
-      // Create new chat
-      const response = await apiClient.post('/api/chats', {
+      const res = await apiClient.post('/api/chats', {
         type: 'direct',
-        participantIds: [currentUserId, userId],
+        participantIds: [currentUser._id, userId],
       });
-      return response.data;
+      return res.data;
     },
-    onSuccess: () => {
-      // Invalidate chats to refetch the list
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
       onClose();
-      setSearchQuery('');
+      if (data?.chat?._id) {
+        navigate(`/chats/${data.chat._id}`);
+      }
     },
   });
-
-  const handleUserSelect = (userId: string) => {
-    createChatMutation.mutate(userId);
-  };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[80vh] flex flex-col">
+    /* Backdrop */
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {/* Panel — slides in from the right on mobile, centered modal on desktop */}
+      <div className="flex h-full w-full max-w-sm flex-col bg-white shadow-2xl dark:bg-slate-900 md:relative md:my-8 md:h-auto md:max-h-[80vh] md:rounded-2xl md:border md:border-slate-200 md:dark:border-slate-700">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">New Chat</h2>
+        <div className="flex h-14 items-center gap-3 border-b border-slate-200 px-4 dark:border-slate-700">
           <button
             onClick={onClose}
-            className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
             aria-label="Close"
           >
-            <X size={20} className="text-gray-600" />
+            <ArrowLeft size={18} />
+          </button>
+          <h2 className="flex-1 text-[15px] font-semibold text-slate-900 dark:text-white">
+            New chat
+          </h2>
+          {/* X only on desktop */}
+          <button
+            onClick={onClose}
+            className="hidden h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 dark:hover:bg-slate-800 md:flex"
+            aria-label="Close modal"
+          >
+            <X size={16} />
           </button>
         </div>
 
-        {/* Search Input */}
-        <div className="p-4 border-b border-gray-200">
+        {/* Search */}
+        <div className="border-b border-slate-100 px-4 py-3 dark:border-slate-800">
           <div className="relative">
             <Search
-              size={18}
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input
+              ref={inputRef}
               type="text"
-              placeholder="Search users by name or email..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              autoFocus
+              placeholder="Search name or email"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
             />
           </div>
         </div>
 
-        {/* Results */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {isSearching && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 size={24} className="text-gray-400 animate-spin" />
+        {/* Scrollable list */}
+        <div className="flex-1 overflow-y-auto">
+          {/* New Group row */}
+          <button
+            onClick={() => {
+              onClose();
+              onOpenNewGroup?.();
+            }}
+            className="flex w-full items-center gap-3 px-4 py-3.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/60"
+          >
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/40">
+              <Users size={18} className="text-teal-700 dark:text-teal-400" />
             </div>
-          )}
+            <span className="flex-1 text-left text-[14px] font-medium text-slate-900 dark:text-white">
+              New Group
+            </span>
+            <ChevronRight size={16} className="text-slate-400" />
+          </button>
 
-          {!isSearching && searchQuery && searchResults?.users?.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <p>No users found</p>
-              <p className="text-sm text-gray-400 mt-1">Try a different search term</p>
+          <div className="mx-4 h-px bg-slate-100 dark:bg-slate-800" />
+
+          {/* User list */}
+          {isLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 size={22} className="animate-spin text-slate-400" />
             </div>
-          )}
-
-          {!isSearching && !searchQuery && (
-            <div className="text-center py-8 text-gray-500">
-              <Search size={48} className="mx-auto mb-2 text-gray-300" />
-              <p>Search for users to start a chat</p>
+          ) : filteredUsers.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Search size={32} className="mb-3 text-slate-300 dark:text-slate-600" />
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                {searchQuery.trim() ? 'No users found' : 'No other users yet'}
+              </p>
+              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                {searchQuery.trim()
+                  ? 'Try a different name or email'
+                  : 'Invite teammates to get started'}
+              </p>
             </div>
-          )}
-
-          {!isSearching && searchResults?.users && searchResults.users.length > 0 && (
-            <div className="space-y-2">
-              {searchResults.users.map((user: User) => (
-                <button
-                  key={user._id}
-                  onClick={() => handleUserSelect(user._id)}
-                  disabled={createChatMutation.isPending}
-                  className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {/* Avatar */}
-                  <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center text-white font-semibold flex-shrink-0">
-                    {user.username?.[0]?.toUpperCase() || user.email[0].toUpperCase()}
-                  </div>
-
-                  {/* User Info */}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate">
-                      {user.username || user.email}
-                    </p>
-                    {user.username && (
-                      <p className="text-sm text-gray-500 truncate">{user.email}</p>
+          ) : (
+            <ul>
+              {filteredUsers.map((user) => (
+                <li key={user._id}>
+                  <button
+                    onClick={() => createChatMutation.mutate(user._id)}
+                    disabled={createChatMutation.isPending}
+                    className="flex w-full items-center gap-3 px-4 py-3 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-slate-800/60"
+                  >
+                    <UserAvatar user={user} />
+                    <div className="min-w-0 flex-1 text-left">
+                      <p className="truncate text-[14px] font-medium text-slate-900 dark:text-white">
+                        {user.name || user.username}
+                      </p>
+                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                        {user.username ? `@${user.username}` : user.email}
+                      </p>
+                    </div>
+                    {createChatMutation.isPending && (
+                      <Loader2 size={16} className="animate-spin text-slate-400" />
                     )}
-                  </div>
-
-                  {createChatMutation.isPending && (
-                    <Loader2 size={20} className="text-gray-400 animate-spin" />
-                  )}
-                </button>
+                  </button>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
 
-        {/* Error Message */}
+        {/* Error banner */}
         {createChatMutation.isError && (
-          <div className="p-4 border-t border-gray-200">
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-              Failed to create chat. Please try again.
-            </div>
+          <div className="border-t border-slate-200 p-4 dark:border-slate-700">
+            <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
+              Failed to start chat. Please try again.
+            </p>
           </div>
         )}
       </div>

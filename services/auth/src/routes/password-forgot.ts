@@ -61,7 +61,7 @@ export const passwordForgot = asyncHandler(async (req: Request, res: Response) =
   // TODO: Integrate email service to send reset link
   // Example: await sendPasswordResetEmail(user.email, resetToken);
 
-  res.status(200).json({
+  return res.status(200).json({
     success: true,
     message: 'If an account with that email exists, a password reset link has been sent.',
     // In development, include the token for testing purposes

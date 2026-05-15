@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { serviceUrls } from '../config.js';
 
-const router = Router();
+const router: Router = Router();
 
 // Proxy to Auth Service
 router.use(
@@ -27,7 +27,7 @@ router.use(
         proxyReq.write(bodyData);
       }
     },
-    onProxyRes: (proxyRes, req, res) => {
+    onProxyRes: (proxyRes, _req, res) => {
       // Forward Set-Cookie headers - ensure they work across the proxy
       const setCookieHeaders = proxyRes.headers['set-cookie'];
       if (setCookieHeaders) {
@@ -39,7 +39,7 @@ router.use(
         res.setHeader('Set-Cookie', modifiedCookies);
       }
     },
-    onError: (err, req, res) => {
+    onError: (err, _req, res) => {
       console.error('Auth service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Auth service unavailable' });
@@ -74,7 +74,7 @@ router.use(
         proxyReq.write(bodyData);
       }
     },
-    onError: (err, req, res) => {
+    onError: (err, _req, res) => {
       console.error('Users service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Users service unavailable' });
@@ -109,10 +109,42 @@ router.use(
         proxyReq.write(bodyData);
       }
     },
-    onError: (err, req, res) => {
+    onError: (err, _req, res) => {
       console.error('Chats service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Chats service unavailable' });
+      }
+    },
+  })
+);
+
+// Proxy to Intelligence endpoints (served by Chats Service)
+router.use(
+  '/api/intelligence',
+  createProxyMiddleware({
+    target: serviceUrls.intelligence,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/intelligence': '/intelligence',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      if (req.headers.authorization) {
+        proxyReq.setHeader('Authorization', req.headers.authorization);
+      }
+      if (req.headers.cookie) {
+        proxyReq.setHeader('Cookie', req.headers.cookie);
+      }
+      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
+        const bodyData = JSON.stringify(req.body);
+        proxyReq.setHeader('Content-Type', 'application/json');
+        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+        proxyReq.write(bodyData);
+      }
+    },
+    onError: (err, _req, res) => {
+      console.error('Intelligence service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Intelligence service unavailable' });
       }
     },
   })
@@ -144,7 +176,7 @@ router.use(
         proxyReq.write(bodyData);
       }
     },
-    onError: (err, req, res) => {
+    onError: (err, _req, res) => {
       console.error('Messages service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Messages service unavailable' });
@@ -170,7 +202,7 @@ router.use(
         proxyReq.write(bodyData);
       }
     },
-    onError: (err, req, res) => {
+    onError: (err, _req, res) => {
       console.error('Media service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Media service unavailable' });
@@ -196,7 +228,7 @@ router.use(
         proxyReq.write(bodyData);
       }
     },
-    onError: (err, req, res) => {
+    onError: (err, _req, res) => {
       console.error('Notifications service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Notifications service unavailable' });

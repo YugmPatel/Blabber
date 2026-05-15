@@ -5,6 +5,7 @@ services:
   mongodb:
     image: mongo:7
     container_name: whatsapp-chat-mongodb
+    command: ['mongod', '--quiet', '--bind_ip_all']
     ports:
       - '27017:27017'
     environment:
@@ -12,7 +13,7 @@ services:
     volumes:
       - mongodb_data:/data/db
     healthcheck:
-      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5

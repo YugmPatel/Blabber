@@ -1,9 +1,9 @@
-import express, { type Request, type Response } from 'express';
+import express, { type Express, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 
-const app = express();
+const app: Express = express();
 
 // Security middleware
 app.use(helmet());
@@ -30,7 +30,7 @@ app.use(limiter);
 app.use(express.json());
 
 // Health check endpoint
-app.get('/healthz', (req: Request, res: Response) => {
+app.get('/healthz', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 

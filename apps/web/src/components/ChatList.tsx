@@ -17,7 +17,7 @@ export default function ChatList({
   unreadCounts = {},
   showArchived = false,
 }: ChatListProps) {
-  const { chatId } = useParams<{ chatId: string }>();
+  const { id } = useParams<{ id: string }>();
 
   // Filter chats based on archived status
   const filteredChats = chats.filter((chat) => {
@@ -48,14 +48,17 @@ export default function ChatList({
   }
 
   return (
-    <div className="divide-y divide-gray-200">
+    <div className="divide-y divide-slate-100">
+      <div className="px-4 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+        Recent Chats
+      </div>
       {sortedPinnedChats.length > 0 && (
         <div>
           {sortedPinnedChats.map((chat) => (
             <ChatItem
               key={chat._id}
               chat={chat}
-              isActive={chat._id === chatId}
+              isActive={chat._id === id}
               isPinned={true}
               unreadCount={unreadCounts[chat._id]}
             />
@@ -68,7 +71,7 @@ export default function ChatList({
             <ChatItem
               key={chat._id}
               chat={chat}
-              isActive={chat._id === chatId}
+              isActive={chat._id === id}
               isPinned={false}
               unreadCount={unreadCounts[chat._id]}
             />

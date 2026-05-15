@@ -11,7 +11,10 @@
     "deploy": "turbo run deploy",
     "docker:build": "docker-compose -f docker-compose.dev.yml build",
     "docker:up": "docker-compose -f docker-compose.dev.yml up",
-    "docker:down": "docker-compose -f docker-compose.dev.yml down"
+    "docker:down": "docker-compose -f docker-compose.dev.yml down",
+    "docker:full:up": "docker compose -f docker-compose.full.yml up -d --build",
+    "docker:full:down": "docker compose -f docker-compose.full.yml down",
+    "docker:full:logs": "docker compose -f docker-compose.full.yml logs -f --tail=100"
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0",

@@ -46,7 +46,7 @@ export async function editMessage(req: Request, res: Response, next: NextFunctio
     }
 
     // Verify the user is the sender
-    if (message.senderId.toString() !== userId) {
+    if (!message.senderId.equals(userObjectId)) {
       res.status(403).json({
         error: 'Forbidden',
         message: 'You can only edit your own messages',

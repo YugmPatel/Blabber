@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Users, Phone, Video } from 'lucide-react';
+import { Users, Phone, Video, Search, MoreVertical } from 'lucide-react';
 import type { Chat } from '@repo/types';
 import Avatar from './Avatar';
 import VideoCallModal from './VideoCallModal';
@@ -53,12 +53,13 @@ export default function ChatHeader({
   const isOnline = !isGroupChat && onlineStatus?.online;
 
   return (
-    <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
-      <div className="flex items-center gap-3 flex-1 min-w-0">
+    <div className="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-center justify-between">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
         {/* Avatar */}
         {isGroupChat ? (
-          <div className="w-12 h-12 rounded-full bg-[#00a884] flex items-center justify-center flex-shrink-0">
-            <Users size={24} className="text-white" />
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-600">
+            <Users size={18} className="text-white" />
           </div>
         ) : (
           <Avatar
@@ -70,62 +71,51 @@ export default function ChatHeader({
         )}
 
         {/* Chat info */}
-        <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-semibold text-gray-900 truncate">{getChatTitle(chat)}</h2>
-          <p className={`text-sm truncate ${isOnline ? 'text-[#00a884]' : 'text-gray-500'}`}>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-[15px] font-semibold text-slate-900 dark:text-white">{getChatTitle(chat)}</h2>
+          <p className={`truncate text-xs ${isOnline ? 'text-teal-600 dark:text-teal-400' : 'text-slate-500 dark:text-slate-400'}`}>
             {getStatusText()}
           </p>
         </div>
       </div>
 
-      {/* Call buttons and Actions menu */}
-      <div className="flex items-center gap-1">
-        {/* Video call button */}
+      {/* Action buttons */}
+      <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
+        <button
+          className="rounded-full p-2 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white"
+          aria-label="Search in chat"
+        >
+          <Search size={18} />
+        </button>
         <button
           onClick={() => setShowVideoCall(true)}
-          className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600 hover:text-[#00a884]"
+          className="rounded-full p-2 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white"
           aria-label="Video call"
         >
-          <Video size={22} />
+          <Video size={18} />
         </button>
-
-        {/* Voice call button */}
         <button
           onClick={() => setShowVoiceCall(true)}
-          className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600 hover:text-[#00a884]"
+          className="rounded-full p-2 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white"
           aria-label="Voice call"
         >
-          <Phone size={22} />
+          <Phone size={18} />
         </button>
-
-        {/* Menu button */}
         <button
           onClick={() => setShowMenu(!showMenu)}
-          className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          className="rounded-full p-2 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white"
           aria-label="Chat options"
         >
-          <svg
-            className="w-6 h-6 text-gray-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
-            />
-          </svg>
+          <MoreVertical size={18} />
         </button>
 
         {/* Dropdown menu */}
         {showMenu && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-            <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+            <div className="absolute right-0 z-20 mt-2 w-48 rounded-xl border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-800">
               <button
-                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
                 onClick={() => {
                   setShowMenu(false);
                   // TODO: Implement view profile
@@ -134,40 +124,28 @@ export default function ChatHeader({
                 View Profile
               </button>
               <button
-                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                onClick={() => {
-                  setShowMenu(false);
-                  // TODO: Implement search in chat
-                }}
+                className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
+                onClick={() => setShowMenu(false)}
               >
                 Search in Chat
               </button>
               <button
-                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                onClick={() => {
-                  setShowMenu(false);
-                  // TODO: Implement mute
-                }}
+                className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
+                onClick={() => setShowMenu(false)}
               >
                 Mute Notifications
               </button>
               {isGroupChat && (
                 <>
                   <button
-                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    onClick={() => {
-                      setShowMenu(false);
-                      // TODO: Implement group info
-                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
+                    onClick={() => setShowMenu(false)}
                   >
                     Group Info
                   </button>
                   <button
-                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
-                    onClick={() => {
-                      setShowMenu(false);
-                      // TODO: Implement leave group
-                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                    onClick={() => setShowMenu(false)}
                   >
                     Leave Group
                   </button>
@@ -176,6 +154,7 @@ export default function ChatHeader({
             </div>
           </>
         )}
+      </div>
       </div>
 
       {/* Video Call Modal */}

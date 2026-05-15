@@ -61,9 +61,13 @@ import { addMember, removeMember } from './routes/manage-members';
 import { updateChat } from './routes/update-chat';
 import { pinChat, unpinChat, archiveChat, unarchiveChat } from './routes/pin-archive';
 import { requireChatAdmin } from './middleware/rbac';
+import { summarizeChat } from './routes/summarize-chat';
+import { getChatSummary } from './routes/get-chat-summary';
 
 app.post('/', authMiddleware, createChat);
 app.get('/', authMiddleware, listChats);
+app.post('/intelligence/chats/:chatId/summarize', authMiddleware, summarizeChat);
+app.get('/intelligence/chats/:chatId/summary', authMiddleware, getChatSummary);
 app.get('/:id', authMiddleware, getChat);
 app.patch('/:id', authMiddleware, requireChatAdmin, updateChat);
 app.post('/:id/members', authMiddleware, requireChatAdmin, addMember);

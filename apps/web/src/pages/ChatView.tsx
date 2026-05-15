@@ -1,12 +1,13 @@
 import { useParams } from 'react-router-dom';
 import { useEffect, useState, useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { useChat } from '@/hooks/useChats';
-import { useMessages, useDeleteMessage, useAddReaction, messageKeys } from '@/hooks/useMessages';
+import { useMessages, useDeleteMessage, useAddReaction } from '@/hooks/useMessages';
+import { useChatSummary } from '@/hooks/useChatSummary';
 import { useUser, useUserPresence } from '@/hooks/useUsers';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppStore } from '@/store/app-store';
 import ChatHeader from '@/components/ChatHeader';
+import CatchMeUpCard from '@/components/CatchMeUpCard';
 import MessageList from '@/components/MessageList';
 import TypingDots from '@/components/TypingDots';
 import { Composer } from '@/components/Composer';
@@ -17,7 +18,6 @@ export default function ChatView() {
   const { user: currentUser } = useAuth();
   const { getTypingUsers, socket } = useAppStore();
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
-  const queryClient = useQueryClient();
 
   // Fetch chat details
   const { data: chat, isLoading: chatLoading } = useChat(id);
@@ -30,6 +30,15 @@ export default function ChatView() {
     isFetchingNextPage,
     fetchNextPage,
   } = useMessages(id);
+
+  const {
+    summary,
+    isLoadingSummary,
+    isGeneratingSummary,
+    summaryError,
+    generateError,
+    generateSummary,
+  } = useChatSummary(id);
 
   // Get all messages from pages
   const messages = messagesData?.pages.flatMap((page) => page.messages) || [];
@@ -79,6 +88,10 @@ export default function ChatView() {
     },
     [deleteMessageMutation]
   );
+
+  const handleCatchMeUp = useCallback(() => {
+    generateSummary({ messageLimit: 200 });
+  }, [generateSummary]);
 
   // Join chat room when component mounts
   useEffect(() => {
@@ -151,8 +164,7 @@ export default function ChatView() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      {/* Chat Header */}
+    <div className="flex h-full flex-col bg-white dark:bg-slate-900">
       <ChatHeader
         chat={chat}
         getChatTitle={getChatTitle}
@@ -161,7 +173,17 @@ export default function ChatView() {
         isGroupChat={isGroupChat}
       />
 
-      {/* Message List */}
+      {/* Catch Me Up card — collapsible, inside the chat flow */}
+      <div className="border-b border-slate-100 px-4 py-2 dark:border-slate-800">
+        <CatchMeUpCard
+          summary={summary}
+          isLoading={isLoadingSummary}
+          isGenerating={isGeneratingSummary}
+          errorMessage={summaryError?.message || generateError?.message}
+          onCatchMeUp={handleCatchMeUp}
+        />
+      </div>
+
       <MessageList
         messages={messages}
         currentUserId={currentUser?._id || ''}
@@ -176,10 +198,12 @@ export default function ChatView() {
         onDelete={handleDelete}
       />
 
-      {/* Typing Indicator */}
-      {typingUserNames.length > 0 && <TypingDots userNames={typingUserNames} />}
+      {typingUserNames.length > 0 && (
+        <div className="border-t border-slate-100 bg-white px-4 py-1 dark:border-slate-800 dark:bg-slate-900">
+          <TypingDots userNames={typingUserNames} />
+        </div>
+      )}
 
-      {/* Message Composer */}
       <Composer chatId={id!} replyToMessage={replyToMessage} onCancelReply={handleCancelReply} />
     </div>
   );

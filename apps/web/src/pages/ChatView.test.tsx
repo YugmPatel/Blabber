@@ -7,13 +7,27 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { createTestQueryClient } from '@/test/query-test-utils';
 import * as useChatsModule from '@/hooks/useChats';
 import * as useMessagesModule from '@/hooks/useMessages';
+import * as useChatSummaryModule from '@/hooks/useChatSummary';
 import * as useUsersModule from '@/hooks/useUsers';
 import type { Chat, Message } from '@repo/types';
 
 // Mock the hooks
 vi.mock('@/hooks/useChats');
 vi.mock('@/hooks/useMessages');
+vi.mock('@/hooks/useChatSummary');
 vi.mock('@/hooks/useUsers');
+
+const mockUseChatSummary = () => {
+  vi.spyOn(useChatSummaryModule, 'useChatSummary').mockReturnValue({
+    summary: null,
+    isLoadingSummary: false,
+    isFetchingSummary: false,
+    summaryError: null,
+    generateSummary: vi.fn(),
+    isGeneratingSummary: false,
+    generateError: null,
+  } as any);
+};
 
 const mockChat: Chat = {
   _id: 'chat1',
@@ -78,6 +92,7 @@ const renderChatView = (chatId: string = 'chat1') => {
 describe('ChatView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseChatSummary();
   });
 
   it('shows loading state initially', () => {
@@ -263,6 +278,35 @@ describe('ChatView', () => {
 
     await waitFor(() => {
       expect(screen.getByPlaceholderText('Type a message...')).toBeInTheDocument();
+    });
+  });
+
+  it('renders catch me up action', async () => {
+    vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
+      data: mockChat,
+      isLoading: false,
+    } as any);
+
+    vi.spyOn(useMessagesModule, 'useMessages').mockReturnValue({
+      data: { pages: [{ messages: [], nextCursor: null }] },
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUser').mockReturnValue({
+      data: mockUser,
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUserPresence').mockReturnValue({
+      data: undefined,
+    } as any);
+
+    renderChatView();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Catch Me Up' })).toBeInTheDocument();
     });
   });
 });
