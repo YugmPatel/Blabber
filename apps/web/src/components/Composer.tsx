@@ -15,6 +15,7 @@ import {
   BarChart2,
   Calendar,
   Smile as SmileIcon,
+  X,
 } from 'lucide-react';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useFileUpload } from '@/hooks/useFileUpload';
@@ -23,7 +24,6 @@ import CameraModal from './CameraModal';
 import VoiceRecorder from './VoiceRecorder';
 import PollModal from './PollModal';
 import ContactShareModal from './ContactShareModal';
-import ScheduleMessageModal from './ScheduleMessageModal';
 
 interface ReplyMessage {
   _id: string;
@@ -53,7 +53,10 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [showPollModal, setShowPollModal] = useState(false);
   const [showContactShare, setShowContactShare] = useState(false);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [attachmentNotice, setAttachmentNotice] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -181,9 +184,24 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
     if (!file) return;
     setShowActionMenu(false);
 
+    if (fileType === 'image' && file.type.startsWith('video/')) {
+      setAttachmentNotice({
+        title: 'Photos & videos',
+        message: 'Video upload is coming soon. Photos can be sent now.',
+      });
+      e.target.value = '';
+      return;
+    }
+
     const mediaId = await uploadFile(file);
-    if (mediaId) {
-      const body = message.trim() || (fileType === 'image' ? '📷 Photo' : `📄 ${file.name}`);
+    if (!mediaId) {
+      setAttachmentNotice({
+        title: fileType === 'image' ? 'Photo upload failed' : 'Document upload failed',
+        message:
+          'Media upload is not available for this file right now. Your text message was not sent.',
+      });
+    } else {
+      const body = message.trim() || (fileType === 'image' ? 'Photo' : file.name);
       sendMessage({ chatId, body, mediaId, replyToId: replyToMessage?._id });
       setMessage('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -196,8 +214,13 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
 
   const handleCameraCapture = async (file: File) => {
     const mediaId = await uploadFile(file);
-    if (mediaId) {
-      sendMessage({ chatId, body: '📷 Photo', mediaId, replyToId: replyToMessage?._id });
+    if (!mediaId) {
+      setAttachmentNotice({
+        title: 'Camera upload failed',
+        message: 'The photo was captured, but media upload is not available right now.',
+      });
+    } else {
+      sendMessage({ chatId, body: 'Photo', mediaId, replyToId: replyToMessage?._id });
       if (onCancelReply) onCancelReply();
     }
   };
@@ -205,10 +228,15 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   const handleVoiceSend = async (audioBlob: Blob, duration: number) => {
     const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
     const mediaId = await uploadFile(file);
-    if (mediaId) {
+    if (!mediaId) {
+      setAttachmentNotice({
+        title: 'Audio upload failed',
+        message: 'The recording was created, but media upload is not available right now.',
+      });
+    } else {
       sendMessage({
         chatId,
-        body: `🎤 Voice message (${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')})`,
+        body: `Voice message (${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')})`,
         mediaId,
         replyToId: replyToMessage?._id,
       });
@@ -236,19 +264,6 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       .join('\n\n');
     sendMessage({ chatId, body: contactsText, replyToId: replyToMessage?._id });
     if (onCancelReply) onCancelReply();
-  };
-
-  const handleScheduleMessage = (scheduledMessage: string, scheduledTime: Date) => {
-    const scheduled = JSON.parse(localStorage.getItem('scheduledMessages') || '[]');
-    scheduled.push({
-      id: Date.now().toString(),
-      chatId,
-      message: scheduledMessage,
-      scheduledTime: scheduledTime.toISOString(),
-      createdAt: new Date().toISOString(),
-    });
-    localStorage.setItem('scheduledMessages', JSON.stringify(scheduled));
-    alert(`Message scheduled for ${scheduledTime.toLocaleString()}`);
   };
 
   // ── Action menu items ─────────────────────────────────────────────────
@@ -302,14 +317,21 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       label: 'Event',
       icon: Calendar,
       iconBg: 'bg-pink-500',
-      action: () => setShowScheduleModal(true),
+      action: () =>
+        setAttachmentNotice({
+          title: 'Event',
+          message: 'Event attachments are coming soon.',
+        }),
     },
     {
       label: 'New sticker',
       icon: SmileIcon,
       iconBg: 'bg-teal-500',
-      action: () => {},
-      disabled: true,
+      action: () =>
+        setAttachmentNotice({
+          title: 'New sticker',
+          message: 'Sticker creation is coming soon.',
+        }),
     },
   ];
 
@@ -440,7 +462,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
           type="file"
           className="hidden"
           onChange={(e) => handleFileSelect(e, 'document')}
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv,application/rtf"
         />
 
         {/* ── Text input ── */}
@@ -541,12 +563,45 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         onClose={() => setShowContactShare(false)}
         onShareContacts={handleShareContacts}
       />
-      <ScheduleMessageModal
-        isOpen={showScheduleModal}
-        onClose={() => setShowScheduleModal(false)}
-        onSchedule={handleScheduleMessage}
-        initialMessage={message}
-      />
+      {attachmentNotice && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="attachment-notice-title"
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2
+                  id="attachment-notice-title"
+                  className="text-lg font-semibold text-slate-950 dark:text-white"
+                >
+                  {attachmentNotice.title}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  {attachmentNotice.message}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAttachmentNotice(null)}
+                aria-label="Close"
+                className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAttachmentNotice(null)}
+              className="mt-5 w-full rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

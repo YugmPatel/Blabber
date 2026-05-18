@@ -58,7 +58,12 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
         chatId: eventTyped.data.chatId,
         senderId: eventTyped.data.senderId,
         body: eventTyped.data.content,
-        media: eventTyped.data.mediaUrl ? { type: 'image', url: eventTyped.data.mediaUrl } : undefined,
+        media: eventTyped.data.mediaUrl
+          ? {
+              type: eventTyped.data.mediaType ?? 'image',
+              url: eventTyped.data.mediaUrl,
+            }
+          : undefined,
         replyTo: eventTyped.data.replyTo,
         reactions: [],
         status: 'sent',

@@ -191,11 +191,22 @@ router.use(
   createProxyMiddleware({
     target: serviceUrls.media,
     changeOrigin: true,
+    xfwd: true,
     pathRewrite: {
       '^/api/media': '',
     },
     onProxyReq: (proxyReq, req: any) => {
-      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
+      if (req.headers.authorization) {
+        proxyReq.setHeader('Authorization', req.headers.authorization);
+      }
+      if (req.headers.cookie) {
+        proxyReq.setHeader('Cookie', req.headers.cookie);
+      }
+      if (
+        req.is('application/json') &&
+        req.body &&
+        (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')
+      ) {
         const bodyData = JSON.stringify(req.body);
         proxyReq.setHeader('Content-Type', 'application/json');
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));

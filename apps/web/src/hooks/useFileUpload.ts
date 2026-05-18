@@ -1,11 +1,16 @@
 import { useState, useCallback } from 'react';
 import axios from 'axios';
-import { apiClient } from '@/api/client';
+import type { AxiosError } from 'axios';
+import { apiClient, getAccessToken } from '@/api/client';
 
 interface PresignResponse {
   uploadUrl: string;
   mediaId: string;
-  expiresIn: number;
+  mediaUrl?: string;
+  expiresIn?: number;
+  uploadMethod?: 'PUT';
+  uploadAuthRequired?: boolean;
+  storage?: 's3' | 'local';
 }
 
 interface UploadProgress {
@@ -18,6 +23,20 @@ export const useFileUpload = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const getUploadErrorMessage = (err: unknown) => {
+    if (axios.isAxiosError(err)) {
+      const axiosError = err as AxiosError<{ message?: string; error?: string }>;
+      return (
+        axiosError.response?.data?.message ||
+        axiosError.response?.data?.error ||
+        axiosError.message ||
+        'Failed to upload file'
+      );
+    }
+
+    return err instanceof Error ? err.message : 'Failed to upload file';
+  };
 
   const uploadFile = useCallback(async (file: File): Promise<string | null> => {
     setIsUploading(true);
@@ -32,11 +51,21 @@ export const useFileUpload = () => {
         fileSize: file.size,
       });
 
-      // 2. Upload file directly to S3 using presigned URL
+      // 2. Upload file directly to the returned media target.
+      const headers: Record<string, string> = {
+        'Content-Type': file.type,
+      };
+
+      if (presignData.uploadAuthRequired) {
+        const token = getAccessToken();
+        if (!token) {
+          throw new Error('Authentication is required to upload this file');
+        }
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       await axios.put(presignData.uploadUrl, file, {
-        headers: {
-          'Content-Type': file.type,
-        },
+        headers,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentage = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -54,7 +83,7 @@ export const useFileUpload = () => {
       setUploadProgress(null);
       return presignData.mediaId;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to upload file';
+      const errorMessage = getUploadErrorMessage(err);
       setError(errorMessage);
       setIsUploading(false);
       setUploadProgress(null);

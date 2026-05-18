@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   MessagesSquare,
   Users,
@@ -29,6 +29,8 @@ export interface SidebarProps {
   onToggle?: () => void;
   onNewConversation?: () => void;
   onNewGroup?: () => void;
+  activeChatFilter?: 'all' | 'groups';
+  onChatFilterChange?: (filter: 'all' | 'groups') => void;
   onNavigateMobile?: () => void;
   taskCount?: number;
   /** @deprecated kept for test compatibility */
@@ -43,6 +45,8 @@ export default function Sidebar({
   onToggle = noop,
   onNewConversation = noop,
   onNewGroup: _onNewGroup,
+  activeChatFilter = 'all',
+  onChatFilterChange = noop,
   onNavigateMobile,
   taskCount = 0,
 }: SidebarProps) {
@@ -51,6 +55,7 @@ export default function Sidebar({
   const { theme, toggleTheme } = useTheme();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileAreaRef = useRef<HTMLDivElement>(null);
+  const avatarUrl = (user as any)?.avatarUrl || user?.avatar;
 
   // Close profile menu on outside click
   useEffect(() => {
@@ -69,10 +74,6 @@ export default function Sidebar({
     await logout();
     navigate('/login', { replace: true });
   };
-
-  const mainNavItems = [
-    { to: '/chats', label: 'All Chats', icon: MessagesSquare, end: true },
-  ];
 
   // Intelligence items: no real routes yet, navigate to /chats
   const intelligenceItems = [
@@ -98,9 +99,13 @@ export default function Sidebar({
       }}
     >
       {/* ── Header ─────────────────────────────────── */}
-      <div className="flex h-14 items-center justify-between border-b border-slate-200 px-3 dark:border-slate-700">
+      <div
+        className={`flex h-14 items-center border-b border-slate-200 dark:border-slate-700 ${
+          collapsed ? 'justify-center gap-1 px-1' : 'justify-between px-3'
+        }`}
+      >
         <div className="flex min-w-0 items-center gap-2.5">
-          <BlabberLogo size={30} className="flex-shrink-0" />
+          <BlabberLogo size={collapsed ? 28 : 30} className="flex-shrink-0" />
           {!collapsed && (
             <span className="whitespace-nowrap text-[15px] font-semibold tracking-tight text-slate-900 dark:text-white">
               Blabber
@@ -111,9 +116,7 @@ export default function Sidebar({
         {/* Collapse toggle */}
         <button
           onClick={onToggle}
-          className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200 ${
-            collapsed ? 'mx-auto' : ''
-          }`}
+          className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
@@ -142,38 +145,44 @@ export default function Sidebar({
       {/* ── Navigation ────────────────────────────────── */}
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
         {/* Main nav: All Chats */}
-        {mainNavItems.map((item) => (
-          <NavLink
-            key={item.label}
-            to={item.to}
-            end={item.end}
-            onClick={onNavigateMobile}
-            aria-label={item.label}
-            title={collapsed ? item.label : undefined}
-            className={({ isActive }) =>
-              `${navItemBase} ${navItemPadding} ${
-                isActive
-                  ? 'bg-[#e7f8f4] text-[#0f766e] dark:bg-teal-900/40 dark:text-teal-300'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100'
-              }`
-            }
-          >
-            <item.icon size={17} className="flex-shrink-0" />
-            {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
-          </NavLink>
-        ))}
+        <button
+          onClick={() => {
+            onChatFilterChange('all');
+            onNavigateMobile?.();
+          }}
+          aria-label="All Chats"
+          aria-pressed={activeChatFilter === 'all'}
+          title={collapsed ? 'All Chats' : undefined}
+          className={`${navItemBase} ${navItemPadding} w-full ${
+            activeChatFilter === 'all'
+              ? 'bg-[#e7f8f4] text-[#0f766e] dark:bg-teal-900/40 dark:text-teal-300'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100'
+          }`}
+        >
+          <MessagesSquare size={17} className="flex-shrink-0" />
+          {!collapsed && <span className="flex-1 truncate text-left">All Chats</span>}
+        </button>
 
         {/* Intelligence items */}
         {intelligenceItems.map((item) => (
           <button
             key={item.label}
             onClick={() => {
-              navigate('/chats');
+              if (item.label === 'Groups') {
+                onChatFilterChange('groups');
+              } else {
+                navigate('/chats');
+              }
               onNavigateMobile?.();
             }}
             aria-label={item.label}
+            aria-pressed={item.label === 'Groups' ? activeChatFilter === 'groups' : undefined}
             title={collapsed ? item.label : undefined}
-            className={`${navItemBase} ${navItemPadding} w-full text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100`}
+            className={`${navItemBase} ${navItemPadding} w-full ${
+              item.label === 'Groups' && activeChatFilter === 'groups'
+                ? 'bg-[#e7f8f4] text-[#0f766e] dark:bg-teal-900/40 dark:text-teal-300'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100'
+            }`}
           >
             <item.icon size={17} className="flex-shrink-0" />
             {!collapsed && (
@@ -256,13 +265,13 @@ export default function Sidebar({
                 role="switch"
                 aria-checked={theme === 'dark'}
                 aria-label="Toggle dark mode"
-                className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${
+                className={`relative h-5 w-9 flex-shrink-0 overflow-hidden rounded-full transition-colors ${
                   theme === 'dark' ? 'bg-teal-500' : 'bg-slate-300'
                 }`}
               >
                 <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                    theme === 'dark' ? 'translate-x-4' : 'translate-x-0.5'
+                  className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                    theme === 'dark' ? 'translate-x-[18px]' : 'translate-x-0.5'
                   }`}
                 />
               </button>
@@ -292,6 +301,7 @@ export default function Sidebar({
           }`}
         >
           <Avatar
+            src={avatarUrl}
             alt={user?.name || user?.username || 'Account'}
             size="sm"
             online={true}

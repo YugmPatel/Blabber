@@ -6,6 +6,18 @@ import { getDatabase } from '../db';
 import { logger, createEvent } from '@repo/utils';
 import { getPubSub } from '../pubsub';
 
+function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' {
+  if (fileType.startsWith('image/')) {
+    return 'image';
+  }
+
+  if (fileType.startsWith('audio/')) {
+    return 'audio';
+  }
+
+  return 'document';
+}
+
 export async function sendMessage(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { chatId } = req.params;
@@ -36,6 +48,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
     const { body, mediaId, replyToId, tempId } = bodyResult.data;
 
     const collection = getMessagesCollection();
+    const db = getDatabase();
     const chatObjectId = new ObjectId(chatId);
     const senderObjectId = new ObjectId(userId);
 
@@ -53,12 +66,32 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
 
     // Add media if provided
     if (mediaId) {
-      // In a real implementation, we would fetch media details from media service
-      // For now, we'll just store the mediaId reference
-      // This would be enhanced to fetch actual media URL from media service
+      if (!ObjectId.isValid(mediaId)) {
+        res.status(400).json({ error: 'Bad Request', message: 'Invalid media ID' });
+        return;
+      }
+
+      const mediaDoc = await db.collection('media').findOne({
+        _id: new ObjectId(mediaId),
+        userId: senderObjectId,
+      });
+
+      if (!mediaDoc?.url || !mediaDoc?.fileType) {
+        res.status(404).json({ error: 'Not Found', message: 'Media not found' });
+        return;
+      }
+
+      if (mediaDoc.storage === 'local' && !mediaDoc.uploadedAt) {
+        res.status(400).json({
+          error: 'Bad Request',
+          message: 'Media upload has not completed',
+        });
+        return;
+      }
+
       messageDoc.media = {
-        type: 'image', // This should come from media service
-        url: `https://media.example.com/${mediaId}`, // This should come from media service
+        type: getMessageMediaType(mediaDoc.fileType),
+        url: mediaDoc.url,
       };
     }
 
@@ -88,7 +121,6 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
     await collection.insertOne(messageDoc);
 
     // Update chat's lastMessageRef
-    const db = getDatabase();
     const chatsCollection = db.collection('chats');
     await chatsCollection.updateOne(
       { _id: chatObjectId },
@@ -143,6 +175,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
         senderId: userId,
         content: messageDoc.body,
         mediaUrl: messageDoc.media?.url,
+        mediaType: messageDoc.media?.type,
         replyTo: messageDoc.replyTo?.messageId.toString(),
         createdAt: messageDoc.createdAt.toISOString(),
       });

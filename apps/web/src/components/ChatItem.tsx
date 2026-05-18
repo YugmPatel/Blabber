@@ -61,11 +61,11 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
         }
       }}
     >
-      {chat.type === 'group' ? (
-        <div className="relative flex-shrink-0">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-600">
-            <Users size={18} className="text-white" />
-          </div>
+      {chat.type === 'group' && avatarUrl ? (
+        <Avatar src={avatarUrl} alt={title} size="md" />
+      ) : chat.type === 'group' ? (
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-600">
+          <Users size={18} className="text-white" />
         </div>
       ) : (
         <Avatar src={avatarUrl} alt={title} size="md" online={online} />

@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import axios from 'axios';
 import {
   User,
   Bell,
@@ -19,9 +20,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
-import { useFileUpload } from '@/hooks/useFileUpload';
 import { useTheme } from '@/hooks/useTheme';
 import Avatar from '@/components/Avatar';
+import { apiClient, getAccessToken } from '@/api/client';
 
 // ── Section registry ────────────────────────────────────────────────────────
 
@@ -47,6 +48,16 @@ const INPUT = `w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2
 const DISABLED_INPUT = `w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2.5
   text-sm text-slate-400 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-500`;
 
+interface AvatarPresignResponse {
+  uploadUrl: string;
+  mediaId: string;
+  mediaUrl?: string;
+  publicUrl?: string;
+  url?: string;
+  uploadAuthRequired?: boolean;
+  storage?: 's3' | 'local';
+}
+
 // ── Toggle component ─────────────────────────────────────────────────────────
 
 function Toggle({
@@ -64,13 +75,13 @@ function Toggle({
       aria-checked={checked}
       aria-label={label}
       onClick={onChange}
-      className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 ${
+      className={`relative h-6 w-11 flex-shrink-0 overflow-hidden rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 ${
         checked ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-600'
       }`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-5' : 'translate-x-0.5'
+        className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-[22px]' : 'translate-x-0.5'
         }`}
       />
     </button>
@@ -82,20 +93,70 @@ function Toggle({
 function ProfileSection() {
   const { user, refreshUser } = useAuth();
   const updateProfile = useUpdateProfile();
-  const { uploadFile, isUploading } = useFileUpload();
   const profileUser = user as (typeof user & { about?: string; avatarUrl?: string }) | null;
 
+  const persistedAvatarUrl = profileUser?.avatarUrl || profileUser?.avatar || '';
   const [name, setName] = useState(user?.name || '');
   const [about, setAbout] = useState(profileUser?.about || '');
-  const [avatarUrl, setAvatarUrl] = useState(profileUser?.avatarUrl || profileUser?.avatar || '');
+  // savedAvatarUrl is the real server URL — never a base64 blob
+  const [savedAvatarUrl, setSavedAvatarUrl] = useState(persistedAvatarUrl);
+  // localPreview is base64 only for display while upload is in-progress or failed
+  const [localPreview, setLocalPreview] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
+  const displayedAvatar = localPreview || savedAvatarUrl;
+
+  const uploadAvatar = async (
+    file: File
+  ): Promise<{ mediaUrl: string | null; errorMessage?: string }> => {
+    setIsUploadingAvatar(true);
+    try {
+      const { data: presignData } = await apiClient.post<AvatarPresignResponse>('/api/media/presign', {
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+      });
+
+      const uploadHeaders: Record<string, string> = { 'Content-Type': file.type };
+      if (presignData.uploadAuthRequired) {
+        const token = getAccessToken();
+        if (token) {
+          uploadHeaders.Authorization = `Bearer ${token}`;
+        }
+      }
+
+      await axios.put(presignData.uploadUrl, file, {
+        headers: uploadHeaders,
+        withCredentials: Boolean(presignData.uploadAuthRequired),
+      });
+
+      return {
+        mediaUrl:
+          presignData.mediaUrl ||
+          presignData.publicUrl ||
+          presignData.url ||
+          presignData.uploadUrl.split('?')[0] ||
+          null,
+      };
+    } catch (err) {
+      const errorMessage = axios.isAxiosError(err)
+        ? err.response?.data?.message || err.message
+        : 'Avatar upload failed';
+      return { mediaUrl: null, errorMessage };
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
   const handleSave = async () => {
     try {
-      await updateProfile.mutateAsync({ name, about, avatarUrl });
+      // Only send the real server URL (string), never a base64 blob
+      await updateProfile.mutateAsync({ name, about, avatarUrl: savedAvatarUrl });
       if (refreshUser) refreshUser();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -107,7 +168,9 @@ function ProfileSection() {
   const handleCancel = () => {
     setName(user?.name || '');
     setAbout(profileUser?.about || '');
-    setAvatarUrl(profileUser?.avatarUrl || profileUser?.avatar || '');
+    setSavedAvatarUrl(persistedAvatarUrl);
+    setLocalPreview('');
+    setUploadError('');
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -115,10 +178,25 @@ function ProfileSection() {
     if (!file) return;
     if (!file.type.startsWith('image/')) { alert('Please select an image file'); return; }
     if (file.size > 5 * 1024 * 1024) { alert('Image must be less than 5MB'); return; }
+
+    // Show local preview immediately (base64) — this never goes to the server
     const reader = new FileReader();
-    reader.onload = (ev) => setAvatarUrl(ev.target?.result as string);
+    reader.onload = (ev) => setLocalPreview(ev.target?.result as string);
     reader.readAsDataURL(file);
-    await uploadFile(file);
+
+    setUploadError('');
+    const uploadResult = await uploadAvatar(file);
+    if (uploadResult.mediaUrl) {
+      setSavedAvatarUrl(uploadResult.mediaUrl);
+      setLocalPreview(''); // clear preview once real URL is set
+    } else {
+      // Upload failed — keep the local preview for display but warn the user
+      setUploadError(
+        uploadResult.errorMessage ||
+          'Avatar upload failed. Changes to your photo will not be saved. Other profile fields can still be saved.'
+      );
+    }
+
     setShowAvatarMenu(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
@@ -139,9 +217,9 @@ function ProfileSection() {
           {/* Avatar column */}
           <div className="flex flex-col items-center gap-2">
             <div className="relative">
-              {avatarUrl ? (
+              {displayedAvatar ? (
                 <img
-                  src={avatarUrl}
+                  src={displayedAvatar}
                   alt="Profile"
                   className="h-24 w-24 rounded-full border-4 border-teal-500 object-cover"
                 />
@@ -150,11 +228,11 @@ function ProfileSection() {
               )}
               <button
                 onClick={() => setShowAvatarMenu(!showAvatarMenu)}
-                disabled={isUploading}
+                disabled={isUploadingAvatar}
                 className="absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-white shadow transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900"
                 aria-label="Change profile photo"
               >
-                {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                {isUploadingAvatar ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
               </button>
 
               {/* Avatar menu */}
@@ -174,9 +252,9 @@ function ProfileSection() {
                     >
                       <Camera size={15} /> Take photo
                     </button>
-                    {avatarUrl && (
+                    {(savedAvatarUrl || localPreview) && (
                       <button
-                        onClick={() => { setAvatarUrl(''); setShowAvatarMenu(false); }}
+                        onClick={() => { setSavedAvatarUrl(''); setLocalPreview(''); setUploadError(''); setShowAvatarMenu(false); }}
                         className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20"
                       >
                         <Trash2 size={15} /> Remove photo
@@ -190,6 +268,11 @@ function ProfileSection() {
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
               Online
             </span>
+            {uploadError && (
+              <p className="mt-1 max-w-[160px] text-center text-[10px] leading-tight text-rose-500">
+                {uploadError}
+              </p>
+            )}
           </div>
 
           {/* Fields */}
@@ -572,7 +655,7 @@ export default function SettingsPage() {
           {/* User card at bottom */}
           <div className="border-t border-slate-200 p-3 dark:border-slate-800">
             <div className="flex items-center gap-2.5 rounded-xl p-2">
-              <Avatar alt={user?.name || 'User'} size="sm" online={true} />
+              <Avatar src={(user as any)?.avatarUrl || user?.avatar} alt={user?.name || 'User'} size="sm" online={true} />
               <div className="min-w-0">
                 <p className="truncate text-[13px] font-medium text-slate-800 dark:text-slate-200">
                   {user?.name || user?.username}

@@ -2,13 +2,22 @@ import express, { Request, Response, NextFunction, Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { loadCommonConfig, loadCORSConfig } from '@repo/config';
-import { logger } from '@repo/utils';
+import { logger, createAuthMiddleware } from '@repo/utils';
 
 const app: Express = express();
 
 // Load configuration
 const commonConfig = loadCommonConfig();
 const corsConfig = loadCORSConfig();
+const jwtAccessSecret = process.env.JWT_ACCESS_SECRET;
+
+if (!jwtAccessSecret || jwtAccessSecret.length < 32) {
+  throw new Error('Invalid JWT_ACCESS_SECRET configuration');
+}
+
+const authMiddleware = createAuthMiddleware({
+  secret: jwtAccessSecret,
+});
 
 // Security middleware
 app.use(helmet());
@@ -48,9 +57,11 @@ app.get('/healthz', (_req: Request, res: Response) => {
 });
 
 // Media routes
-import { presign } from './routes/presign';
+import { getLocalMedia, presign, uploadLocalMedia } from './routes/presign';
 import { linkPreview } from './routes/link-preview';
-app.post('/presign', presign);
+app.post('/presign', authMiddleware, presign);
+app.put('/local/:id', authMiddleware, express.raw({ type: '*/*', limit: '50mb' }), uploadLocalMedia);
+app.get('/local/:id', getLocalMedia);
 app.get('/link-preview', linkPreview);
 
 // 404 handler

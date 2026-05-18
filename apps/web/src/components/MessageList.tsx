@@ -120,10 +120,10 @@ export default function MessageList({
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#f8faf9] text-slate-500">
-        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-center">
-          <p className="font-medium text-slate-700">No messages yet</p>
-          <p className="mt-1 text-sm text-slate-500">Start the conversation to see insights appear.</p>
+      <div className="flex flex-1 items-center justify-center bg-[#f8faf9] text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-center dark:border-slate-800 dark:bg-slate-900">
+          <p className="font-medium text-slate-700 dark:text-slate-200">No messages yet</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Start the conversation to see insights appear.</p>
         </div>
       </div>
     );
@@ -132,7 +132,7 @@ export default function MessageList({
   return (
     <div
       ref={scrollRef}
-      className="flex-1 overflow-y-auto bg-[#f8faf9] px-6 py-5"
+      className="flex-1 overflow-y-auto bg-[#f8faf9] px-6 py-5 dark:bg-slate-950 dark:[&_.bg-gray-200]:bg-slate-800 dark:[&_.text-gray-600]:text-slate-300"
       style={{ display: 'flex', flexDirection: 'column-reverse' }}
     >
       <div>

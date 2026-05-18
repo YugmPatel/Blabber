@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { X, Search, Loader2, Users, Check, Clock, Timer, Trash2, Camera } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/api/client';
+import axios from 'axios';
+import { apiClient, getAccessToken } from '@/api/client';
 import { chatKeys } from '@/hooks/useChats';
 import { useAuth } from '@/contexts/AuthContext';
-import { useFileUpload } from '@/hooks/useFileUpload';
-import type { User } from '@repo/types';
+import type { Chat, User } from '@repo/types';
 
 interface NewGroupModalProps {
   isOpen: boolean;
@@ -13,6 +14,15 @@ interface NewGroupModalProps {
 }
 
 type ExpirationOption = 'never' | '1day' | '3days' | '1week' | '2weeks' | '1month' | 'custom';
+
+interface AvatarPresignResponse {
+  uploadUrl: string;
+  mediaId: string;
+  mediaUrl?: string;
+  publicUrl?: string;
+  url?: string;
+  uploadAuthRequired?: boolean;
+}
 
 const expirationOptions: { value: ExpirationOption; label: string; days?: number }[] = [
   { value: 'never', label: 'Never (Permanent)' },
@@ -25,6 +35,7 @@ const expirationOptions: { value: ExpirationOption; label: string; days?: number
 ];
 
 export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
+  const navigate = useNavigate();
   const [step, setStep] = useState<'select' | 'details'>('select');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
@@ -35,10 +46,12 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   const [disappearingMessages, setDisappearingMessages] = useState(false);
   const [disappearingDuration, setDisappearingDuration] = useState<'24h' | '7d' | '90d'>('24h');
   const [groupAvatar, setGroupAvatar] = useState<string>('');
+  const [groupAvatarUrl, setGroupAvatarUrl] = useState<string>('');
+  const [avatarUploadError, setAvatarUploadError] = useState<string>('');
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
-  const { uploadFile, isUploading } = useFileUpload();
 
   const getExpirationDate = (): Date | null => {
     if (!isTemporary) return null;
@@ -68,25 +81,73 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
 
   // Create group mutation
   const createGroupMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<Chat> => {
       if (!currentUser?._id) {
         throw new Error('User not authenticated');
       }
 
-      const participantIds = [currentUser._id, ...selectedUsers.map((u) => u._id)];
+      const participantIds = Array.from(
+        new Set([currentUser._id, ...selectedUsers.map((u) => u._id)].filter(Boolean))
+      );
 
-      const response = await apiClient.post('/api/chats', {
+      const payload = {
         type: 'group',
         participantIds,
         title: groupName.trim() || 'New Group',
-      });
-      return response.data;
+        ...(groupAvatarUrl ? { avatarUrl: groupAvatarUrl } : {}),
+      };
+
+      const response = await apiClient.post<{ chat: Chat }>('/api/chats', payload);
+      return response.data.chat;
     },
-    onSuccess: () => {
+    onSuccess: (chat) => {
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
       handleClose();
+      navigate(`/chats/${chat._id}`);
     },
   });
+
+  const uploadGroupAvatar = async (file: File): Promise<string | null> => {
+    setIsUploadingAvatar(true);
+    setAvatarUploadError('');
+    try {
+      const { data: presignData } = await apiClient.post<AvatarPresignResponse>('/api/media/presign', {
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+      });
+
+      const headers: Record<string, string> = { 'Content-Type': file.type };
+      if (presignData.uploadAuthRequired) {
+        const token = getAccessToken();
+        if (!token) throw new Error('Authentication required to upload group photo');
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      await axios.put(presignData.uploadUrl, file, {
+        headers,
+        withCredentials: Boolean(presignData.uploadAuthRequired),
+      });
+
+      return (
+        presignData.mediaUrl ||
+        presignData.publicUrl ||
+        presignData.url ||
+        presignData.uploadUrl.split('?')[0] ||
+        null
+      );
+    } catch (err) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message || err.message
+        : err instanceof Error
+          ? err.message
+          : 'Group photo upload failed';
+      setAvatarUploadError(`${message}. The preview will not be saved unless upload succeeds.`);
+      return null;
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
 
   const handleUserToggle = (user: User) => {
     setSelectedUsers((prev) => {
@@ -108,6 +169,9 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     setCustomExpirationDate('');
     setDisappearingMessages(false);
     setGroupAvatar('');
+    setGroupAvatarUrl('');
+    setAvatarUploadError('');
+    setIsUploadingAvatar(false);
     onClose();
   };
 
@@ -119,6 +183,10 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
       alert('Please select an image file');
       return;
     }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image must be less than 5MB');
+      return;
+    }
 
     // Create preview
     const reader = new FileReader();
@@ -127,8 +195,8 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     };
     reader.readAsDataURL(file);
 
-    // Upload to server (in production)
-    await uploadFile(file);
+    const uploadedUrl = await uploadGroupAvatar(file);
+    setGroupAvatarUrl(uploadedUrl || '');
 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -144,25 +212,34 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   };
 
   const handleCreate = () => {
+    if (!groupName.trim() || isUploadingAvatar) return;
     createGroupMutation.mutate();
   };
+
+  const createGroupErrorMessage = createGroupMutation.error
+    ? axios.isAxiosError(createGroupMutation.error)
+      ? createGroupMutation.error.response?.data?.message || createGroupMutation.error.message
+      : createGroupMutation.error instanceof Error
+        ? createGroupMutation.error.message
+        : 'Failed to create group. Please try again.'
+    : '';
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
-      <div className="grid max-h-[88vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl md:grid-cols-[1fr_320px]">
+      <div className="grid max-h-[88vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 md:grid-cols-[1fr_320px]">
         <div className="flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 p-4">
+        <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-700">
           <div className="flex items-center gap-3">
             {step === 'details' && (
               <button
                 onClick={handleBack}
-                className="rounded-lg p-1 transition-colors hover:bg-gray-100"
+                className="rounded-lg p-1 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 <svg
-                  className="h-5 w-5 text-gray-600"
+                  className="h-5 w-5 text-slate-600 dark:text-slate-400"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -176,16 +253,16 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                 </svg>
               </button>
             )}
-            <h2 className="text-lg font-semibold text-slate-900">
-              {step === 'select' ? 'Create Group' : 'Create Group'}
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+              Create Group
             </h2>
           </div>
           <button
             onClick={handleClose}
-            className="rounded-lg p-1 transition-colors hover:bg-gray-100"
+            className="rounded-lg p-1 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
             aria-label="Close"
           >
-            <X size={20} className="text-gray-600" />
+            <X size={20} className="text-slate-600 dark:text-slate-400" />
           </button>
         </div>
 
@@ -193,7 +270,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
           <>
             {/* Selected users chips */}
             {selectedUsers.length > 0 && (
-              <div className="flex flex-wrap gap-2 border-b border-slate-200 p-3">
+              <div className="flex flex-wrap gap-2 border-b border-slate-200 p-3 dark:border-slate-700">
                 {selectedUsers.map((user) => (
                   <div
                     key={user._id}
@@ -212,7 +289,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             )}
 
             {/* Search Input */}
-            <div className="border-b border-slate-200 p-4">
+            <div className="border-b border-slate-200 p-4 dark:border-slate-700">
               <div className="mb-3 flex items-center gap-6 text-xs font-semibold uppercase tracking-[0.1em] text-slate-400">
                 <span className="text-[#0f766e]">Basics</span>
                 <span>Members</span>
@@ -221,14 +298,14 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
               <div className="relative">
                 <Search
                   size={18}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                 />
                 <input
                   type="text"
                   placeholder="Search users..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#99f6e4]"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-teal-500"
                   autoFocus
                 />
               </div>
@@ -243,14 +320,14 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
               )}
 
               {!isSearching && searchQuery && searchResults?.users?.length === 0 && (
-                <div className="py-8 text-center text-gray-500">
+                <div className="py-8 text-center text-slate-500 dark:text-slate-400">
                   <p>No users found</p>
                 </div>
               )}
 
               {!isSearching && !searchQuery && (
-                <div className="py-8 text-center text-gray-500">
-                  <Users size={48} className="mx-auto mb-2 text-gray-300" />
+                <div className="py-8 text-center text-slate-500 dark:text-slate-400">
+                  <Users size={48} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
                   <p>Search for users to add to group</p>
                 </div>
               )}
@@ -265,17 +342,17 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                         <button
                           key={user._id}
                           onClick={() => handleUserToggle(user)}
-                          className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-slate-200 hover:bg-slate-50"
+                          className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-800/70"
                         >
                           <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[#00a884] font-semibold text-white">
                             {user.username?.[0]?.toUpperCase() || user.email[0].toUpperCase()}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate font-medium text-gray-900">
+                            <p className="truncate font-medium text-slate-900 dark:text-white">
                               {user.username || user.email}
                             </p>
                             {user.username && (
-                              <p className="truncate text-sm text-gray-500">{user.email}</p>
+                              <p className="truncate text-sm text-slate-500 dark:text-slate-400">{user.email}</p>
                             )}
                           </div>
                           <div
@@ -293,11 +370,11 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             </div>
 
             {/* Next button */}
-            <div className="border-t border-slate-200 p-4">
+            <div className="border-t border-slate-200 p-4 dark:border-slate-700">
               <button
                 onClick={handleNext}
                 disabled={selectedUsers.length < 1}
-                className="w-full rounded-xl bg-slate-900 py-2.5 font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+                className="w-full rounded-xl bg-slate-900 py-2.5 font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 dark:disabled:bg-slate-700 dark:disabled:text-slate-400"
               >
                 Next ({selectedUsers.length} selected)
               </button>
@@ -317,16 +394,17 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                       className="h-24 w-24 rounded-full object-cover border-4 border-[#00a884]"
                     />
                   ) : (
-                    <div className="flex h-24 w-24 items-center justify-center rounded-full bg-gray-200">
-                      <Users size={40} className="text-gray-500" />
+                    <div className="flex h-24 w-24 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-800">
+                      <Users size={40} className="text-slate-500 dark:text-slate-400" />
                     </div>
                   )}
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading}
+                    disabled={isUploadingAvatar}
                     className="absolute bottom-0 right-0 p-2 bg-[#00a884] rounded-full text-white hover:bg-[#008f72] transition-colors disabled:bg-gray-400"
+                    aria-label="Upload group photo"
                   >
-                    {isUploading ? (
+                    {isUploadingAvatar ? (
                       <Loader2 size={16} className="animate-spin" />
                     ) : (
                       <Camera size={16} />
@@ -340,35 +418,40 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                   onChange={handleAvatarSelect}
                   className="hidden"
                 />
-                <p className="text-xs text-gray-500 mt-2">Add group icon</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Add group icon</p>
+                {avatarUploadError && (
+                  <p className="mt-2 max-w-xs text-center text-xs text-rose-600 dark:text-rose-400">
+                    {avatarUploadError}
+                  </p>
+                )}
               </div>
 
               {/* Group name input */}
               <div className="mb-4">
-                <label className="mb-2 block text-sm font-medium text-slate-700">Group Name</label>
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Group Name</label>
                 <input
                   type="text"
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
                   placeholder="Enter group name..."
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#99f6e4]"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-400 focus:ring-2 focus:ring-[#99f6e4] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-teal-500"
                   autoFocus
                 />
               </div>
 
               {/* Members preview */}
               <div className="mb-4">
-                <p className="mb-2 text-sm font-medium text-gray-700">
+                <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                   Members ({selectedUsers.length + 1})
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <span className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-700">
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                     You
                   </span>
                   {selectedUsers.map((user) => (
                     <span
                       key={user._id}
-                      className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-700"
+                      className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200"
                     >
                       {user.username || user.email}
                     </span>
@@ -377,26 +460,28 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
               </div>
 
               {/* Temporary Group Toggle */}
-              <div className="mb-4 rounded-lg border border-gray-200 p-4">
+              <div className="mb-4 rounded-lg border border-slate-200 p-4 dark:border-slate-700">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100">
                       <Timer size={20} className="text-orange-600" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">Temporary Group</p>
-                      <p className="text-sm text-gray-500">Auto-delete after set time</p>
+                      <p className="font-medium text-slate-900 dark:text-white">Temporary Group</p>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Auto-delete after set time</p>
                     </div>
                   </div>
                   <button
+                    role="switch"
+                    aria-checked={isTemporary}
                     onClick={() => setIsTemporary(!isTemporary)}
-                    className={`relative h-6 w-11 rounded-full transition-colors ${
-                      isTemporary ? 'bg-[#00a884]' : 'bg-gray-300'
+                    className={`relative h-6 w-11 flex-shrink-0 overflow-hidden rounded-full transition-colors ${
+                      isTemporary ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-600'
                     }`}
                   >
                     <span
-                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                        isTemporary ? 'translate-x-5' : 'translate-x-0.5'
+                      className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                        isTemporary ? 'translate-x-[22px]' : 'translate-x-0.5'
                       }`}
                     />
                   </button>
@@ -404,7 +489,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
 
                 {isTemporary && (
                   <div className="mt-4 space-y-3">
-                    <p className="text-sm font-medium text-gray-700">Group expires in:</p>
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Group expires in:</p>
                     <div className="flex flex-wrap gap-2">
                       {expirationOptions.map((option) => (
                         <button
@@ -413,7 +498,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                           className={`rounded-full px-3 py-1 text-sm transition-colors ${
                             expiration === option.value
                               ? 'bg-orange-500 text-white'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                           }`}
                         >
                           {option.label}
@@ -426,7 +511,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                         value={customExpirationDate}
                         min={new Date().toISOString().split('T')[0]}
                         onChange={(e) => setCustomExpirationDate(e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-orange-500 focus:outline-none"
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-orange-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
                     )}
                     {getExpirationDate() && (
@@ -448,26 +533,28 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
               </div>
 
               {/* Disappearing Messages Toggle */}
-              <div className="rounded-lg border border-gray-200 p-4">
+              <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-100">
                       <Clock size={20} className="text-purple-600" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">Disappearing Messages</p>
-                      <p className="text-sm text-gray-500">Messages auto-delete</p>
+                      <p className="font-medium text-slate-900 dark:text-white">Disappearing Messages</p>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Messages auto-delete</p>
                     </div>
                   </div>
                   <button
+                    role="switch"
+                    aria-checked={disappearingMessages}
                     onClick={() => setDisappearingMessages(!disappearingMessages)}
-                    className={`relative h-6 w-11 rounded-full transition-colors ${
-                      disappearingMessages ? 'bg-[#00a884]' : 'bg-gray-300'
+                    className={`relative h-6 w-11 flex-shrink-0 overflow-hidden rounded-full transition-colors ${
+                      disappearingMessages ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-600'
                     }`}
                   >
                     <span
-                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                        disappearingMessages ? 'translate-x-5' : 'translate-x-0.5'
+                      className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                        disappearingMessages ? 'translate-x-[22px]' : 'translate-x-0.5'
                       }`}
                     />
                   </button>
@@ -482,7 +569,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                         className={`flex-1 rounded-lg py-2 text-sm transition-colors ${
                           disappearingDuration === duration
                             ? 'bg-purple-500 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
                         }`}
                       >
                         {duration === '24h' ? '24 Hours' : duration === '7d' ? '7 Days' : '90 Days'}
@@ -494,16 +581,21 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             </div>
 
             {/* Create button */}
-            <div className="border-t border-slate-200 p-4">
+            <div className="border-t border-slate-200 p-4 dark:border-slate-700">
               <button
                 onClick={handleCreate}
-                disabled={createGroupMutation.isPending}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+                disabled={createGroupMutation.isPending || isUploadingAvatar || !groupName.trim()}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 dark:disabled:bg-slate-700 dark:disabled:text-slate-400"
               >
                 {createGroupMutation.isPending ? (
                   <>
                     <Loader2 size={20} className="animate-spin" />
                     Creating...
+                  </>
+                ) : isUploadingAvatar ? (
+                  <>
+                    <Loader2 size={20} className="animate-spin" />
+                    Uploading photo...
                   </>
                 ) : (
                   'Create Group'
@@ -513,29 +605,37 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
 
             {/* Error */}
             {createGroupMutation.isError && (
-              <div className="border-t border-gray-200 p-4">
-                <div className="rounded bg-red-50 px-4 py-3 text-red-700">
-                  Failed to create group. Please try again.
+              <div className="border-t border-slate-200 p-4 dark:border-slate-700">
+                <div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                  {createGroupErrorMessage}
                 </div>
               </div>
             )}
           </>
         )}
       </div>
-        <aside className="hidden border-l border-slate-200 bg-[#f8faf9] p-5 md:block">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 text-center">
-            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 text-3xl">
-              #
-            </div>
-            <h3 className="text-lg font-semibold text-slate-900">Group Preview</h3>
-            <p className="mt-1 text-sm text-slate-500">
+        <aside className="hidden border-l border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-800/50 md:block">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 text-center dark:border-slate-700 dark:bg-slate-800">
+            {groupAvatar ? (
+              <img
+                src={groupAvatar}
+                alt="Group preview"
+                className="mx-auto mb-3 h-16 w-16 rounded-2xl object-cover"
+              />
+            ) : (
+              <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 text-3xl text-slate-900 dark:border-slate-700 dark:text-white">
+                #
+              </div>
+            )}
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Group Preview</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               Define a topic to set context for AI summaries.
             </p>
             <div className="mt-3 flex justify-center gap-2">
               <span className="rounded-full bg-[#e7f8f4] px-2 py-1 text-[10px] font-semibold text-[#0f766e]">
                 AI Enhanced
               </span>
-              <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200">
                 Encrypted
               </span>
             </div>

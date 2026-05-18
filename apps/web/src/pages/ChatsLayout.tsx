@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Outlet, useParams } from 'react-router-dom';
+import { useQueries } from '@tanstack/react-query';
 import { Menu, Plus, Search, Sparkles, CheckSquare2, Brain } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import ChatList from '../components/ChatList';
@@ -8,14 +9,19 @@ import NewGroupModal from '../components/NewGroupModal';
 import { useChats } from '../hooks/useChats';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useTheme } from '../hooks/useTheme';
+import { useAuth } from '../contexts/AuthContext';
+import { apiClient } from '../api/client';
+import type { User } from '@repo/types';
 
 export default function ChatsLayout() {
   const [showSidebar, setShowSidebar] = useState(false); // mobile overlay
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // desktop collapse
   const [isNewChatModalOpen, setIsNewChatModalOpen] = useState(false);
   const [isNewGroupModalOpen, setIsNewGroupModalOpen] = useState(false);
+  const [chatFilter, setChatFilter] = useState<'all' | 'groups'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const { id } = useParams();
+  const { user: currentUser } = useAuth();
   const { data: chats = [], isLoading, error } = useChats();
 
   // Bootstrap theme class on mount so the stored preference applies immediately
@@ -31,16 +37,63 @@ export default function ChatsLayout() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
+  const participantIds = useMemo(() => {
+    const ids = new Set<string>();
+    chats.forEach((chat) => {
+      chat.participants.forEach((participantId) => {
+        if (participantId !== currentUser?._id) ids.add(participantId);
+      });
+    });
+    return Array.from(ids);
+  }, [chats, currentUser?._id]);
+
+  const participantQueries = useQueries({
+    queries: participantIds.map((participantId) => ({
+      queryKey: ['users', participantId] as const,
+      queryFn: async () => {
+        const { data } = await apiClient.get<{ user: User }>(`/api/users/${participantId}`);
+        return data.user;
+      },
+      staleTime: 60_000,
+    })),
+  });
+
+  const participantSearchText = useMemo(() => {
+    const byId = new Map<string, string>();
+    participantQueries.forEach((query, index) => {
+      const participant = query.data;
+      if (!participant) return;
+      byId.set(
+        participantIds[index],
+        [participant.name, participant.username, participant.email].filter(Boolean).join(' ')
+      );
+    });
+    return byId;
+  }, [participantIds, participantQueries]);
+
+  const trimmedSearchQuery = searchQuery.trim();
+
   const filteredChats = useMemo(() => {
-    if (!searchQuery.trim()) return chats;
-    const q = searchQuery.toLowerCase();
-    return chats.filter(
-      (chat) =>
-        chat.title?.toLowerCase().includes(q) ||
-        chat.lastMessageRef?.body?.toLowerCase().includes(q) ||
-        chat.type.toLowerCase().includes(q)
-    );
-  }, [chats, searchQuery]);
+    if (!trimmedSearchQuery) return chats;
+    const q = trimmedSearchQuery.toLowerCase();
+    return chats.filter((chat) => {
+      const participantText = chat.participants
+        .map((participantId) => participantSearchText.get(participantId) || '')
+        .join(' ');
+      return [chat.title, chat.lastMessageRef?.body, participantText]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(q));
+    });
+  }, [chats, participantSearchText, trimmedSearchQuery]);
+
+  const visibleChats = useMemo(() => {
+    if (chatFilter === 'groups') {
+      return filteredChats.filter((chat) => chat.type === 'group');
+    }
+    return filteredChats;
+  }, [chatFilter, filteredChats]);
+
+  const hasGroups = useMemo(() => chats.some((chat) => chat.type === 'group'), [chats]);
 
   return (
     <ErrorBoundary>
@@ -66,6 +119,8 @@ export default function ChatsLayout() {
             onToggle={() => setSidebarCollapsed((c) => !c)}
             onNewConversation={() => setIsNewChatModalOpen(true)}
             onNewGroup={() => setIsNewGroupModalOpen(true)}
+            activeChatFilter={chatFilter}
+            onChatFilterChange={setChatFilter}
             onNavigateMobile={() => setShowSidebar(false)}
             taskCount={0}
           />
@@ -116,8 +171,25 @@ export default function ChatsLayout() {
                 <p className="p-4 text-sm text-slate-500 dark:text-slate-400">Loading chats...</p>
               ) : error ? (
                 <p className="p-4 text-sm text-rose-500">Failed to load chats</p>
+              ) : trimmedSearchQuery && visibleChats.length === 0 ? (
+                <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-slate-500 dark:text-slate-400">
+                  No conversations found
+                </div>
+              ) : chatFilter === 'groups' && !hasGroups ? (
+                <div className="flex h-56 flex-col items-center justify-center px-6 text-center">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">No groups yet</p>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Create a group to chat with multiple people.
+                  </p>
+                  <button
+                    onClick={() => setIsNewGroupModalOpen(true)}
+                    className="mt-4 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+                  >
+                    Create group
+                  </button>
+                </div>
               ) : (
-                <ChatList chats={filteredChats} />
+                <ChatList chats={visibleChats} />
               )}
             </div>
           </section>

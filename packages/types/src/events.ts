@@ -38,6 +38,7 @@ export interface MessageSentEvent extends BaseEvent {
     senderId: string;
     content: string;
     mediaUrl?: string;
+    mediaType?: 'image' | 'audio' | 'document';
     replyTo?: string;
     createdAt: string;
   };

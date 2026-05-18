@@ -9,7 +9,10 @@ export interface Media {
   fileSize: number;
   s3Key: string;
   url: string;
+  storage?: 's3' | 'local';
+  localPath?: string;
   createdAt: Date;
+  uploadedAt?: Date;
 }
 
 export function getMediaCollection(): Collection<Media> {

@@ -70,7 +70,7 @@ function BrandPanel() {
           <br />
           Do.
         </h1>
-        <p className="max-w-[22ch] text-sm leading-relaxed text-white/72">
+        <p className="max-w-[22ch] text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.78)' }}>
           Turn conversations into summaries, tasks, decisions, and shared memory seamlessly.
         </p>
       </div>

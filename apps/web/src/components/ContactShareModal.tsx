@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { X, Search, Check, User, Phone, Mail } from 'lucide-react';
-import { useAppStore } from '@/store/app-store';
+import { useQuery } from '@tanstack/react-query';
+import type { User as AppUser } from '@repo/types';
+import { apiClient } from '@/api/client';
+import { useAuth } from '@/contexts/AuthContext';
 import Avatar from './Avatar';
 
 interface Contact {
@@ -24,33 +27,45 @@ export default function ContactShareModal({
 }: ContactShareModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedContacts, setSelectedContacts] = useState<Contact[]>([]);
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [deviceContacts, setDeviceContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualContact, setManualContact] = useState({ name: '', phone: '', email: '' });
+  const { user: currentUser } = useAuth();
 
-  const users = useAppStore((state) => state.users);
+  const normalizedSearch = searchQuery.trim();
+  const { data: appUsersData, isLoading: isLoadingAppContacts } = useQuery({
+    queryKey: ['contacts', 'users', normalizedSearch || 'initial'],
+    queryFn: async () => {
+      const query = normalizedSearch || 'a';
+      const { data } = await apiClient.get<{ users: AppUser[] }>('/api/users/search', {
+        params: { q: query },
+      });
+      return data;
+    },
+    enabled: isOpen,
+    staleTime: 30_000,
+  });
 
-  // Convert users to contacts format
-  useEffect(() => {
-    if (!users) return;
-    const userContacts: Contact[] = Object.values(users).map((user) => ({
-      _id: user._id,
-      displayName: user.displayName,
-      phone: user.phone,
-      email: user.email,
-      avatarUrl: user.avatarUrl,
-    }));
-    setContacts(userContacts);
-  }, [users]);
+  const appContacts = useMemo<Contact[]>(() => {
+    return (appUsersData?.users ?? [])
+      .filter((user) => user._id !== currentUser?._id)
+      .map((user) => ({
+        _id: user._id,
+        displayName: user.name || user.username || user.email,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+      }));
+  }, [appUsersData?.users, currentUser?._id]);
 
   // Filter contacts based on search
-  const filteredContacts = contacts.filter(
+  const filteredDeviceContacts = deviceContacts.filter(
     (contact) =>
       contact.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       contact.phone?.includes(searchQuery) ||
       contact.email?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const filteredContacts = [...filteredDeviceContacts, ...appContacts];
 
   const toggleContact = (contact: Contact) => {
     setSelectedContacts((prev) => {
@@ -86,18 +101,26 @@ export default function ContactShareModal({
 
   // Request device contacts (if supported)
   const requestDeviceContacts = async () => {
-    if ('contacts' in navigator && 'ContactsManager' in window) {
+    type BrowserContact = { name?: string[]; tel?: string[]; email?: string[] };
+    type NavigatorWithContacts = Navigator & {
+      contacts?: {
+        select: (
+          props: Array<'name' | 'tel' | 'email'>,
+          opts: { multiple: boolean }
+        ) => Promise<BrowserContact[]>;
+      };
+    };
+    const contactsManager = (navigator as NavigatorWithContacts).contacts;
+
+    if (contactsManager?.select) {
       try {
         setIsLoading(true);
-        // @ts-expect-error - Contacts API not fully typed
-        const props = ['name', 'tel', 'email'];
-        // @ts-expect-error - Contacts API not fully typed
+        const props: Array<'name' | 'tel' | 'email'> = ['name', 'tel', 'email'];
         const opts = { multiple: true };
-        // @ts-expect-error - Contacts API not fully typed
-        const deviceContacts = await navigator.contacts.select(props, opts);
+        const selectedDeviceContacts = await contactsManager.select(props, opts);
 
-        const formattedContacts: Contact[] = deviceContacts.map(
-          (c: { name?: string[]; tel?: string[]; email?: string[] }, index: number) => ({
+        const formattedContacts: Contact[] = selectedDeviceContacts.map(
+          (c: BrowserContact, index: number) => ({
             _id: `device-${index}`,
             displayName: c.name?.[0] || 'Unknown',
             phone: c.tel?.[0],
@@ -105,7 +128,7 @@ export default function ContactShareModal({
           })
         );
 
-        setContacts((prev) => [...prev, ...formattedContacts]);
+        setDeviceContacts((prev) => [...prev, ...formattedContacts]);
       } catch (err) {
         console.log('Contact picker cancelled or not supported');
       } finally {
@@ -289,7 +312,11 @@ export default function ContactShareModal({
             </div>
           )}
 
-          {filteredContacts.length === 0 && searchQuery && (
+          {isLoadingAppContacts && (
+            <div className="p-4 text-center text-sm text-gray-500">Loading contacts...</div>
+          )}
+
+          {!isLoadingAppContacts && filteredContacts.length === 0 && searchQuery && (
             <div className="p-8 text-center text-gray-500">
               No contacts found for "{searchQuery}"
             </div>
