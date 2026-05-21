@@ -19,6 +19,33 @@ export const setAccessToken = (token: string | null) => {
 
 export const getAccessToken = () => accessToken;
 
+export const normalizeMediaUrl = (url?: string | null): string | undefined => {
+  if (!url) return undefined;
+  if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+
+  const apiOrigin = new URL(API_URL, window.location.origin).origin;
+
+  try {
+    const parsed = new URL(url, apiOrigin);
+
+    if (parsed.pathname.startsWith('/api/media/')) {
+      return `${apiOrigin}${parsed.pathname}${parsed.search}`;
+    }
+
+    if (parsed.pathname.startsWith('/local/')) {
+      return `${apiOrigin}/api/media${parsed.pathname}${parsed.search}`;
+    }
+
+    if (parsed.hostname === 'localhost' && parsed.port === '3005') {
+      return `${apiOrigin}/api/media${parsed.pathname}${parsed.search}`;
+    }
+
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+};
+
 export interface ChatSummaryResponse {
   summary: ChatIntelligenceSummary | null;
 }

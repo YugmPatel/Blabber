@@ -5,6 +5,7 @@ import { useAppStore } from '@/store/app-store';
 import { useAuth } from '@/contexts/AuthContext';
 import { messageKeys } from './useMessages';
 import type { Message } from '@repo/types';
+import { normalizeMediaUrl } from '@/api/client';
 
 interface MessagesResponse {
   messages: Message[];
@@ -15,6 +16,28 @@ interface SendMessageParams {
   chatId: string;
   body: string;
   mediaId?: string;
+  mediaKind?: 'image' | 'audio' | 'document';
+  mediaUrl?: string;
+  mediaFileName?: string;
+  mediaMimeType?: string;
+  mediaSize?: number;
+  mediaDuration?: number;
+  type?: 'text' | 'poll' | 'sticker' | 'event';
+  poll?: {
+    question: string;
+    options: string[];
+    allowMultiple?: boolean;
+  };
+  sticker?: {
+    emoji: string;
+    label?: string;
+  };
+  event?: {
+    title: string;
+    startsAt: string;
+    location?: string;
+    description?: string;
+  };
   replyToId?: string;
 }
 
@@ -25,7 +48,22 @@ export const useSendMessage = () => {
   const { user } = useAuth();
 
   const sendMessage = useCallback(
-    ({ chatId, body, mediaId, replyToId }: SendMessageParams) => {
+    ({
+      chatId,
+      body,
+      mediaId,
+      mediaKind,
+      mediaUrl,
+      mediaFileName,
+      mediaMimeType,
+      mediaSize,
+      mediaDuration,
+      type,
+      poll,
+      sticker,
+      event,
+      replyToId,
+    }: SendMessageParams) => {
       if (!socket || !user) {
         console.error('Socket not connected or user not authenticated');
         return;
@@ -39,13 +77,32 @@ export const useSendMessage = () => {
         _id: tempId,
         chatId,
         senderId: user._id,
+        type: mediaKind ?? type ?? 'text',
         body,
         media: mediaId
           ? {
-              type: 'image', // Will be updated when server responds
-              url: '',
+              type: mediaKind ?? 'image',
+              url: normalizeMediaUrl(mediaUrl) ?? '',
+              fileName: mediaFileName,
+              mimeType: mediaMimeType,
+              size: mediaSize,
+              duration: mediaDuration,
             }
           : undefined,
+        poll: poll
+          ? {
+              question: poll.question,
+              options: poll.options.map((option, index) => ({
+                id: `option-${index + 1}`,
+                text: option,
+                votes: [],
+              })),
+              allowMultiple: poll.allowMultiple ?? false,
+              closed: false,
+            }
+          : undefined,
+        sticker,
+        event,
         replyTo: replyToId
           ? {
               messageId: replyToId,
@@ -83,7 +140,12 @@ export const useSendMessage = () => {
       socket.emit('message:send', {
         chatId,
         body,
+        type,
         mediaId,
+        mediaDuration,
+        poll,
+        sticker,
+        event,
         replyToId,
         tempId,
       });

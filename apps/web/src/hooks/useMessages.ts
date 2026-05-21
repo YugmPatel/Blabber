@@ -1,7 +1,13 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '../types/react-query';
 import { apiClient } from '../api/client';
-import type { Message, CreateMessageDTO, UpdateMessageDTO, AddReactionDTO } from '@repo/types';
+import type {
+  Message,
+  CreateMessageDTO,
+  UpdateMessageDTO,
+  AddReactionDTO,
+  PollVoteDTO,
+} from '@repo/types';
 
 // Query keys
 export const messageKeys = {
@@ -41,8 +47,8 @@ export const useSendMessage = (chatId: string) => {
 
   return useMutation({
     mutationFn: async (data: CreateMessageDTO) => {
-      const response = await apiClient.post<{ message: Message }>(`/api/messages/${chatId}`, data);
-      return response.data.message;
+      const response = await apiClient.post<Message>(`/api/messages/${chatId}`, data);
+      return response.data;
     },
     onMutate: async (newMessage) => {
       // Cancel any outgoing refetches
@@ -64,6 +70,7 @@ export const useSendMessage = (chatId: string) => {
               _id: newMessage.tempId!,
               chatId,
               senderId: '', // Will be filled by server
+              type: newMessage.type ?? (newMessage.mediaId ? 'image' : 'text'),
               body: newMessage.body,
               media: newMessage.mediaId
                 ? {
@@ -71,6 +78,20 @@ export const useSendMessage = (chatId: string) => {
                     url: '',
                   }
                 : undefined,
+              poll: newMessage.poll
+                ? {
+                    question: newMessage.poll.question,
+                    options: newMessage.poll.options.map((option, index) => ({
+                      id: `option-${index + 1}`,
+                      text: option,
+                      votes: [],
+                    })),
+                    allowMultiple: newMessage.poll.allowMultiple ?? false,
+                    closed: false,
+                  }
+                : undefined,
+              sticker: newMessage.sticker,
+              event: newMessage.event,
               replyTo: undefined,
               reactions: [],
               status: 'sent',
@@ -102,6 +123,8 @@ export const useSendMessage = (chatId: string) => {
       }
     },
     onSuccess: (newMessage) => {
+      const tempId = (newMessage as Message & { tempId?: string }).tempId;
+
       // Update the cache with the real message
       queryClient.setQueryData<InfiniteData<MessagesResponse>>(messageKeys.list(chatId), (old) => {
         if (!old) return old;
@@ -113,7 +136,7 @@ export const useSendMessage = (chatId: string) => {
               ? {
                   ...page,
                   messages: page.messages.map((msg) =>
-                    msg._id === newMessage._id || msg._id === newMessage.tempId ? newMessage : msg
+                    msg._id === newMessage._id || msg._id === tempId ? newMessage : msg
                   ),
                 }
               : page
@@ -130,11 +153,8 @@ export const useEditMessage = (chatId: string) => {
 
   return useMutation({
     mutationFn: async ({ messageId, data }: { messageId: string; data: UpdateMessageDTO }) => {
-      const response = await apiClient.patch<{ message: Message }>(
-        `/api/messages/${messageId}`,
-        data
-      );
-      return response.data.message;
+      const response = await apiClient.patch<Message>(`/api/messages/${messageId}`, data);
+      return response.data;
     },
     onSuccess: (updatedMessage) => {
       // Update the message in the cache
@@ -187,14 +207,41 @@ export const useAddReaction = (chatId: string) => {
 
   return useMutation({
     mutationFn: async ({ messageId, data }: { messageId: string; data: AddReactionDTO }) => {
-      const response = await apiClient.post<{ message: Message }>(
-        `/api/messages/${messageId}/react`,
-        data
-      );
-      return response.data.message;
+      const response = await apiClient.post<Message>(`/api/messages/${messageId}/react`, data);
+      return response.data;
     },
     onSuccess: (updatedMessage) => {
       // Update the message in the cache
+      queryClient.setQueryData<InfiniteData<MessagesResponse>>(messageKeys.list(chatId), (old) => {
+        if (!old) return old;
+
+        return {
+          ...old,
+          pages: old.pages.map((page) => ({
+            ...page,
+            messages: page.messages.map((msg) =>
+              msg._id === updatedMessage._id ? updatedMessage : msg
+            ),
+          })),
+        };
+      });
+    },
+  });
+};
+
+// Vote on a poll message
+export const useVotePoll = (chatId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ messageId, data }: { messageId: string; data: PollVoteDTO }) => {
+      const response = await apiClient.post<Message>(
+        `/api/messages/${messageId}/poll/vote`,
+        data
+      );
+      return response.data;
+    },
+    onSuccess: (updatedMessage) => {
       queryClient.setQueryData<InfiniteData<MessagesResponse>>(messageKeys.list(chatId), (old) => {
         if (!old) return old;
 

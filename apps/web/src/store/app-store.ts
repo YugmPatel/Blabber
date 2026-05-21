@@ -2,6 +2,23 @@ import { create } from 'zustand';
 import type { Socket } from 'socket.io-client';
 import type { Message } from '@repo/types';
 
+export type ActiveCallStatus = 'outgoing' | 'incoming' | 'connecting' | 'active' | 'ended' | 'error';
+
+export interface ActiveCall {
+  callId: string;
+  chatId: string;
+  callType: 'audio' | 'video';
+  direction: 'outgoing' | 'incoming';
+  status: ActiveCallStatus;
+  fromUserId: string;
+  fromUserName?: string;
+  toUserId: string;
+  peerUserId: string;
+  peerName: string;
+  peerAvatarUrl?: string;
+  error?: string;
+}
+
 interface AppStore {
   // Auth
   accessToken: string | null;
@@ -16,6 +33,12 @@ interface AppStore {
   // UI
   activeChat: string | null;
   setActiveChat: (chatId: string | null) => void;
+
+  // Calls
+  activeCall: ActiveCall | null;
+  setActiveCall: (call: ActiveCall | null) => void;
+  updateActiveCall: (updates: Partial<ActiveCall>) => void;
+  clearActiveCall: () => void;
 
   // Optimistic messages
   pendingMessages: Map<string, Message>;
@@ -44,6 +67,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // UI state
   activeChat: null,
   setActiveChat: (chatId) => set({ activeChat: chatId }),
+
+  // Call state
+  activeCall: null,
+  setActiveCall: (call) => set({ activeCall: call }),
+  updateActiveCall: (updates) =>
+    set((state) => ({
+      activeCall: state.activeCall ? { ...state.activeCall, ...updates } : state.activeCall,
+    })),
+  clearActiveCall: () => set({ activeCall: null }),
 
   // Optimistic messages state
   pendingMessages: new Map(),

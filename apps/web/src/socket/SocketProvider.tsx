@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useAppStore } from '@/store/app-store';
 import { useSocketEvents } from '@/hooks/useSocketEvents';
 import type { ClientToServerEvents, ServerToClientEvents } from '@repo/types';
+import CallModal from '@/components/CallModal';
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -102,5 +103,10 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
     isConnected,
   };
 
-  return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
+  return (
+    <SocketContext.Provider value={value}>
+      {children}
+      <CallModal socket={socket as TypedSocket | null} isConnected={isConnected} />
+    </SocketContext.Provider>
+  );
 };

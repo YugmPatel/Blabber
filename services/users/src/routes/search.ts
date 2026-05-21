@@ -46,6 +46,8 @@ export async function searchUsers(req: Request, res: Response, next: NextFunctio
       name: user.name,
       avatarUrl: user.avatarUrl,
       about: user.about,
+      role: user.role,
+      department: user.department,
     }));
 
     res.status(200).json({ users: sanitizedUsers });

@@ -53,6 +53,12 @@ RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
+# Local media uploads are mounted here in docker-compose.full.yml. Keep a
+# placeholder so a fresh named volume is initialized with nodejs ownership.
+RUN mkdir -p /data/blabber-media && \
+    touch /data/blabber-media/.keep && \
+    chown -R nodejs:nodejs /data/blabber-media
+
 # Set working directory
 WORKDIR /app
 

@@ -19,8 +19,13 @@ const authMiddleware = createAuthMiddleware({
   secret: jwtAccessSecret,
 });
 
-// Security middleware
-app.use(helmet());
+// Security middleware. Local media is intentionally served to the web app from a
+// different localhost origin during development.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 // CORS middleware
 app.use(

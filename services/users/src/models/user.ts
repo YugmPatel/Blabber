@@ -10,6 +10,8 @@ export interface User {
   name: string;
   avatarUrl?: string;
   about?: string;
+  role?: string;
+  department?: string;
   contacts: ObjectId[];
   blocked: ObjectId[];
   lastSeen: Date;
@@ -70,7 +72,7 @@ export async function searchUsersByText(
 
 export async function updateUserProfile(
   userId: string | ObjectId,
-  updates: Partial<Pick<User, 'name' | 'avatarUrl' | 'about'>>
+  updates: Partial<Pick<User, 'name' | 'avatarUrl' | 'about' | 'role' | 'department'>>
 ): Promise<User | null> {
   const collection = getUsersCollection();
   const _id = typeof userId === 'string' ? new ObjectId(userId) : userId;

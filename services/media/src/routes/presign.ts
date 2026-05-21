@@ -96,8 +96,8 @@ function getPublicMediaBaseUrl(req: Request): string {
   return 'http://localhost:3000/api/media';
 }
 
-function getLocalUploadBaseUrl(): string {
-  return process.env.LOCAL_MEDIA_UPLOAD_BASE_URL?.replace(/\/+$/, '') || 'http://localhost:3005';
+function getLocalUploadBaseUrl(req: Request): string {
+  return process.env.LOCAL_MEDIA_UPLOAD_BASE_URL?.replace(/\/+$/, '') || getPublicMediaBaseUrl(req);
 }
 
 async function createLocalUpload(
@@ -113,7 +113,7 @@ async function createLocalUpload(
   const localPath = join(LOCAL_MEDIA_DIR, `${mediaId.toString()}${fileExtension}`);
   const publicBaseUrl = getPublicMediaBaseUrl(req);
   const mediaUrl = `${publicBaseUrl}/local/${mediaId.toString()}`;
-  const uploadUrl = `${getLocalUploadBaseUrl()}/local/${mediaId.toString()}`;
+  const uploadUrl = `${getLocalUploadBaseUrl(req)}/local/${mediaId.toString()}`;
 
   const mediaCollection = getMediaCollection();
   const mediaDoc = {
@@ -135,6 +135,11 @@ async function createLocalUpload(
     uploadUrl,
     mediaId: mediaId.toString(),
     mediaUrl,
+    publicUrl: mediaUrl,
+    storageKey: mediaDoc.s3Key,
+    fileName,
+    mimeType: fileType,
+    size: fileSize,
     uploadMethod: 'PUT',
     uploadAuthRequired: true,
     storage: 'local',
@@ -175,12 +180,16 @@ export const presign = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  let s3Config: ReturnType<typeof loadS3Config>;
-  try {
-    s3Config = loadS3Config();
-  } catch {
+  const hasS3Config =
+    Boolean(process.env.S3_MEDIA_BUCKET) &&
+    Boolean(process.env.S3_REGION) &&
+    Boolean(process.env.MEDIA_BASE_URL);
+
+  if (!hasS3Config) {
     return createLocalUpload(req, res, userId, fileName, fileType, fileSize);
   }
+
+  const s3Config = loadS3Config();
 
   // Generate unique S3 key
   const timestamp = Date.now();
@@ -230,6 +239,11 @@ export const presign = asyncHandler(async (req: Request, res: Response) => {
     uploadUrl,
     mediaId: result.insertedId.toString(),
     mediaUrl: mediaDoc.url,
+    publicUrl: mediaDoc.url,
+    storageKey: s3Key,
+    fileName,
+    mimeType: fileType,
+    size: fileSize,
     expiresIn,
     uploadMethod: 'PUT',
     uploadAuthRequired: false,
@@ -306,6 +320,11 @@ export const uploadLocalMedia = asyncHandler(async (req: Request, res: Response)
   return res.status(200).json({
     mediaId: mediaId.toString(),
     mediaUrl: mediaDoc.url,
+    publicUrl: mediaDoc.url,
+    storageKey: mediaDoc.s3Key,
+    fileName: mediaDoc.fileName,
+    mimeType: mediaDoc.fileType,
+    size: mediaDoc.fileSize,
   });
 });
 

@@ -6,6 +6,7 @@ import Avatar from './Avatar';
 import { useMessages } from '@/hooks/useMessages';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiClient } from '@/api/client';
+import { useAppStore } from '@/store/app-store';
 
 interface ChatHeaderProps {
   chat: Chat;
@@ -163,10 +164,12 @@ function ComingSoonModal({
   isOpen,
   onClose,
   title,
+  message,
 }: {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  message: string;
 }) {
   useEffect(() => {
     if (!isOpen) return;
@@ -193,7 +196,7 @@ function ComingSoonModal({
           )}
         </div>
         <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h3>
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Calling is coming soon.</p>
+        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{message}</p>
         <button
           onClick={onClose}
           className="mt-6 w-full rounded-xl bg-slate-900 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
@@ -262,13 +265,13 @@ export default function ChatHeader({
   isGroupChat,
 }: ChatHeaderProps) {
   const { user: currentUser } = useAuth();
+  const setActiveCall = useAppStore((state) => state.setActiveCall);
   const [showMenu, setShowMenu] = useState(false);
-  const [showVideoCall, setShowVideoCall] = useState(false);
-  const [showVoiceCallModal, setShowVoiceCallModal] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [profileUser, setProfileUser] = useState<DisplayUser | null>(null);
+  const [callNotice, setCallNotice] = useState<{ title: string; message: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -394,9 +397,38 @@ export default function ChatHeader({
   const btnBase =
     'rounded-full p-2 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white';
 
-  // TODO: Replace this placeholder with real call signaling once call:invite,
-  // call:incoming, call:accept, call:reject, call:end, and WebRTC ICE/SDP
-  // exchange exist on the gateway and frontend socket layer.
+  const createCallId = () =>
+    globalThis.crypto?.randomUUID?.() || `call-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const startCall = (callType: 'audio' | 'video') => {
+    const title = callType === 'video' ? 'Video call' : 'Audio call';
+
+    if (isGroupChat || chat.participants.length !== 2) {
+      setCallNotice({ title, message: 'Group calls are coming soon.' });
+      return;
+    }
+
+    if (!currentUser?._id || !directProfileUser?._id) {
+      setCallNotice({ title, message: 'Could not find a direct chat participant to call.' });
+      return;
+    }
+
+    setShowAI(false);
+    setShowSearch(false);
+    setActiveCall({
+      callId: createCallId(),
+      chatId: chat._id,
+      callType,
+      direction: 'outgoing',
+      status: 'outgoing',
+      fromUserId: currentUser._id,
+      fromUserName: getUserTitle(currentUser as DisplayUser, 'You'),
+      toUserId: directProfileUser._id,
+      peerUserId: directProfileUser._id,
+      peerName: getUserTitle(directProfileUser),
+      peerAvatarUrl: directProfileUser.avatarUrl,
+    });
+  };
 
   return (
     <>
@@ -457,7 +489,7 @@ export default function ChatHeader({
 
             {/* Video call */}
             <button
-              onClick={() => setShowVideoCall(true)}
+              onClick={() => startCall('video')}
               aria-label="Video call"
               className={btnBase}
             >
@@ -466,7 +498,7 @@ export default function ChatHeader({
 
             {/* Voice call */}
             <button
-              onClick={() => setShowVoiceCallModal(true)}
+              onClick={() => startCall('audio')}
               aria-label="Audio call"
               className={btnBase}
             >
@@ -557,15 +589,10 @@ export default function ChatHeader({
 
       {/* ── Modals ── */}
       <ComingSoonModal
-        isOpen={showVideoCall}
-        onClose={() => setShowVideoCall(false)}
-        title="Video call"
-      />
-
-      <ComingSoonModal
-        isOpen={showVoiceCallModal}
-        onClose={() => setShowVoiceCallModal(false)}
-        title="Audio call"
+        isOpen={Boolean(callNotice)}
+        onClose={() => setCallNotice(null)}
+        title={callNotice?.title || 'Call'}
+        message={callNotice?.message || ''}
       />
 
       <GroupInfoModal

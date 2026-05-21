@@ -2,9 +2,60 @@ import type { Socket, Server as SocketIOServer } from 'socket.io';
 import axios from 'axios';
 import { logger } from '@repo/utils';
 import { serviceUrls } from '../config.js';
+import type {
+  CallAnswerPayload,
+  CallControlPayload,
+  CallIceCandidatePayload,
+  CallInvitePayload,
+  CallOfferPayload,
+} from '@repo/types';
 
 // Debounce map for typing indicators
 const typingDebounceMap = new Map<string, NodeJS.Timeout>();
+
+function emitCallError(socket: Socket, callId: string | undefined, message: string) {
+  socket.emit('call:error', { callId, message });
+}
+
+function hasUserRoom(io: SocketIOServer, userId: string) {
+  return Boolean(io.sockets.adapter.rooms.get(`user:${userId}`)?.size);
+}
+
+function forwardCallControl(
+  socket: Socket,
+  io: SocketIOServer,
+  event: 'call:accept' | 'call:decline' | 'call:cancel' | 'call:end',
+  data: CallControlPayload
+) {
+  const fromUserId = socket.data.userId;
+  if (!data?.callId || !data?.chatId || !data?.toUserId || !fromUserId) {
+    emitCallError(socket, data?.callId, 'Invalid call payload');
+    return;
+  }
+
+  io.to(`user:${data.toUserId}`).emit(event, {
+    ...data,
+    fromUserId,
+  });
+}
+
+function forwardCallSignal<T extends CallOfferPayload | CallAnswerPayload | CallIceCandidatePayload>(
+  socket: Socket,
+  io: SocketIOServer,
+  event: 'call:offer' | 'call:answer' | 'call:ice-candidate',
+  data: T
+) {
+  const fromUserId = socket.data.userId;
+  if (!data?.callId || !data?.toUserId || !fromUserId) {
+    emitCallError(socket, data?.callId, 'Invalid call signal payload');
+    return;
+  }
+
+  io.to(`user:${data.toUserId}`).emit(event, {
+    ...data,
+    fromUserId,
+  });
+}
 
 export function setupClientEvents(socket: Socket, io: SocketIOServer) {
   // auth:hello - Initial authentication handshake
@@ -25,12 +76,29 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
     async (data: {
       chatId: string;
       body: string;
+      type?: 'text' | 'poll' | 'sticker' | 'event';
       mediaId?: string;
+      mediaDuration?: number;
+      poll?: {
+        question: string;
+        options: string[];
+        allowMultiple?: boolean;
+      };
+      sticker?: {
+        emoji: string;
+        label?: string;
+      };
+      event?: {
+        title: string;
+        startsAt: string;
+        location?: string;
+        description?: string;
+      };
       replyToId?: string;
       tempId?: string;
     }) => {
       try {
-        const { chatId, body, mediaId, replyToId, tempId } = data;
+        const { chatId, body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, tempId } = data;
         const userId = socket.data.userId;
         const token = socket.data.token;
 
@@ -44,7 +112,12 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
           `${serviceUrls.messages}/${chatId}`,
           {
             body,
+            type,
             mediaId,
+            mediaDuration,
+            poll,
+            sticker,
+            event,
             replyToId,
             tempId,
           },
@@ -80,6 +153,61 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
       }
     }
   );
+
+  // call:* - Minimal one-to-one WebRTC signaling.
+  // TODO: Validate chat membership against the chats service before routing calls.
+  socket.on('call:invite', (data: CallInvitePayload) => {
+    const fromUserId = socket.data.userId;
+    if (
+      !data?.callId ||
+      !data?.chatId ||
+      !data?.toUserId ||
+      !data?.callType ||
+      !fromUserId ||
+      data.toUserId === fromUserId
+    ) {
+      emitCallError(socket, data?.callId, 'Invalid call invite');
+      return;
+    }
+
+    if (!hasUserRoom(io, data.toUserId)) {
+      emitCallError(socket, data.callId, 'User unavailable');
+      return;
+    }
+
+    io.to(`user:${data.toUserId}`).emit('call:incoming', {
+      ...data,
+      fromUserId,
+    });
+  });
+
+  socket.on('call:accept', (data: CallControlPayload) => {
+    forwardCallControl(socket, io, 'call:accept', data);
+  });
+
+  socket.on('call:decline', (data: CallControlPayload) => {
+    forwardCallControl(socket, io, 'call:decline', data);
+  });
+
+  socket.on('call:cancel', (data: CallControlPayload) => {
+    forwardCallControl(socket, io, 'call:cancel', data);
+  });
+
+  socket.on('call:end', (data: CallControlPayload) => {
+    forwardCallControl(socket, io, 'call:end', data);
+  });
+
+  socket.on('call:offer', (data: CallOfferPayload) => {
+    forwardCallSignal(socket, io, 'call:offer', data);
+  });
+
+  socket.on('call:answer', (data: CallAnswerPayload) => {
+    forwardCallSignal(socket, io, 'call:answer', data);
+  });
+
+  socket.on('call:ice-candidate', (data: CallIceCandidatePayload) => {
+    forwardCallSignal(socket, io, 'call:ice-candidate', data);
+  });
 
   // message:read - Mark messages as read
   socket.on('message:read', async (data: { messageIds: string[] }) => {

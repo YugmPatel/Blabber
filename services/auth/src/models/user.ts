@@ -9,6 +9,8 @@ export interface UserDocument {
   name: string;
   avatarUrl?: string;
   about?: string;
+  role?: string;
+  department?: string;
   contacts: ObjectId[];
   blocked: ObjectId[];
   lastSeen: Date;

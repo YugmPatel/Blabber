@@ -17,6 +17,7 @@ networks:
 volumes:
   mongodb_data:
   redis_data:
+  local_media_files:
 
 services:
   mongodb:
@@ -161,10 +162,15 @@ services:
       MONGO_DB_NAME: blabber_full
       REDIS_HOST: redis
       REDIS_PORT: '6379'
+      LOCAL_MEDIA_DIR: /data/blabber-media
+      LOCAL_MEDIA_UPLOAD_BASE_URL: http://localhost:3000/api/media
+      PUBLIC_MEDIA_BASE_URL: http://localhost:3000/api/media
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
       JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
     ports:
       - '3005:3005'
+    volumes:
+      - local_media_files:/data/blabber-media
     depends_on:
       mongodb:
         condition: service_healthy

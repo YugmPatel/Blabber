@@ -27,6 +27,8 @@ export const getMe = asyncHandler(async (req: Request, res: Response) => {
       name: user.name,
       avatarUrl: user.avatarUrl,
       about: user.about,
+      role: user.role,
+      department: user.department,
       lastSeen: user.lastSeen,
       createdAt: user.createdAt,
     },

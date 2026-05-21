@@ -18,7 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useSendMessage } from '@/hooks/useSendMessage';
-import { useFileUpload } from '@/hooks/useFileUpload';
+import { useFileUpload, type UploadResult } from '@/hooks/useFileUpload';
 import { useAppStore } from '@/store/app-store';
 import CameraModal from './CameraModal';
 import VoiceRecorder from './VoiceRecorder';
@@ -45,6 +45,21 @@ const EMOJI_CATEGORIES = {
   Objects: ['🎉', '🎊', '🎈', '🎁', '🏆', '🥇', '🥈', '🥉', '⚽', '🏀', '🏈', '⚾', '🎾', '🏐', '🏉', '🎱'],
 };
 
+const STICKERS = [
+  { emoji: '😀', label: 'Smile' },
+  { emoji: '😂', label: 'Laugh' },
+  { emoji: '😍', label: 'Love it' },
+  { emoji: '👍', label: 'Thumbs up' },
+  { emoji: '🎉', label: 'Celebrate' },
+  { emoji: '🔥', label: 'Fire' },
+  { emoji: '💯', label: 'Hundred' },
+  { emoji: '🙏', label: 'Thanks' },
+  { emoji: '😮', label: 'Wow' },
+  { emoji: '🤝', label: 'Deal' },
+  { emoji: '✅', label: 'Done' },
+  { emoji: '🚀', label: 'Launch' },
+];
+
 export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProps) => {
   const [message, setMessage] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -53,6 +68,12 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [showPollModal, setShowPollModal] = useState(false);
   const [showContactShare, setShowContactShare] = useState(false);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [showEventComposer, setShowEventComposer] = useState(false);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventDateTime, setEventDateTime] = useState('');
+  const [eventLocation, setEventLocation] = useState('');
+  const [eventDescription, setEventDescription] = useState('');
   const [attachmentNotice, setAttachmentNotice] = useState<{
     title: string;
     message: string;
@@ -66,9 +87,25 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
 
   const socket = useAppStore((state) => state.socket);
   const { sendMessage } = useSendMessage();
-  const { uploadFile, isUploading, uploadProgress } = useFileUpload();
+  const { uploadMedia, uploadFile, isUploading, uploadProgress } = useFileUpload();
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isTypingRef = useRef(false);
+
+  const uploadAttachment = async (file: File): Promise<UploadResult | null> => {
+    if (uploadMedia) {
+      return uploadMedia(file);
+    }
+
+    const mediaId = await uploadFile(file);
+    return mediaId
+      ? {
+          mediaId,
+          fileName: file.name,
+          mimeType: file.type,
+          size: file.size,
+        }
+      : null;
+  };
 
   // Close action menu on outside click or Escape
   useEffect(() => {
@@ -193,8 +230,8 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       return;
     }
 
-    const mediaId = await uploadFile(file);
-    if (!mediaId) {
+    const media = await uploadAttachment(file);
+    if (!media) {
       setAttachmentNotice({
         title: fileType === 'image' ? 'Photo upload failed' : 'Document upload failed',
         message:
@@ -202,7 +239,17 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       });
     } else {
       const body = message.trim() || (fileType === 'image' ? 'Photo' : file.name);
-      sendMessage({ chatId, body, mediaId, replyToId: replyToMessage?._id });
+      sendMessage({
+        chatId,
+        body,
+        mediaId: media.mediaId,
+        mediaKind: fileType,
+        mediaUrl: media.mediaUrl || media.publicUrl,
+        mediaFileName: media.fileName || file.name,
+        mediaMimeType: media.mimeType || file.type,
+        mediaSize: media.size || file.size,
+        replyToId: replyToMessage?._id,
+      });
       setMessage('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       if (onCancelReply) onCancelReply();
@@ -213,22 +260,33 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   };
 
   const handleCameraCapture = async (file: File) => {
-    const mediaId = await uploadFile(file);
-    if (!mediaId) {
+    const media = await uploadAttachment(file);
+    if (!media) {
       setAttachmentNotice({
         title: 'Camera upload failed',
         message: 'The photo was captured, but media upload is not available right now.',
       });
     } else {
-      sendMessage({ chatId, body: 'Photo', mediaId, replyToId: replyToMessage?._id });
+      sendMessage({
+        chatId,
+        body: 'Photo',
+        mediaId: media.mediaId,
+        mediaKind: 'image',
+        mediaUrl: media.mediaUrl || media.publicUrl,
+        mediaFileName: media.fileName || file.name,
+        mediaMimeType: media.mimeType || file.type,
+        mediaSize: media.size || file.size,
+        replyToId: replyToMessage?._id,
+      });
       if (onCancelReply) onCancelReply();
     }
   };
 
   const handleVoiceSend = async (audioBlob: Blob, duration: number) => {
-    const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
-    const mediaId = await uploadFile(file);
-    if (!mediaId) {
+    const audioType = audioBlob.type && audioBlob.type.startsWith('audio/') ? audioBlob.type : 'audio/webm';
+    const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: audioType });
+    const media = await uploadAttachment(file);
+    if (!media) {
       setAttachmentNotice({
         title: 'Audio upload failed',
         message: 'The recording was created, but media upload is not available right now.',
@@ -237,7 +295,13 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       sendMessage({
         chatId,
         body: `Voice message (${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')})`,
-        mediaId,
+        mediaId: media.mediaId,
+        mediaKind: 'audio',
+        mediaUrl: media.mediaUrl || media.publicUrl,
+        mediaFileName: media.fileName || file.name,
+        mediaMimeType: media.mimeType || file.type,
+        mediaSize: media.size || file.size,
+        mediaDuration: duration,
         replyToId: replyToMessage?._id,
       });
       if (onCancelReply) onCancelReply();
@@ -246,8 +310,53 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   };
 
   const handleCreatePoll = (question: string, options: string[]) => {
-    const pollText = `📊 Poll: ${question}\n\n${options.map((opt, i) => `${i + 1}. ${opt}`).join('\n')}`;
-    sendMessage({ chatId, body: pollText, replyToId: replyToMessage?._id });
+    sendMessage({
+      chatId,
+      body: question,
+      type: 'poll',
+      poll: { question, options },
+      replyToId: replyToMessage?._id,
+    });
+    if (onCancelReply) onCancelReply();
+  };
+
+  const handleStickerSelect = (sticker: { emoji: string; label: string }) => {
+    sendMessage({
+      chatId,
+      body: sticker.emoji,
+      type: 'sticker',
+      sticker,
+      replyToId: replyToMessage?._id,
+    });
+    setShowStickerPicker(false);
+    if (onCancelReply) onCancelReply();
+  };
+
+  const resetEventComposer = () => {
+    setEventTitle('');
+    setEventDateTime('');
+    setEventLocation('');
+    setEventDescription('');
+  };
+
+  const handleCreateEvent = () => {
+    const title = eventTitle.trim();
+    if (!title || !eventDateTime) return;
+
+    sendMessage({
+      chatId,
+      body: title,
+      type: 'event',
+      event: {
+        title,
+        startsAt: new Date(eventDateTime).toISOString(),
+        location: eventLocation.trim() || undefined,
+        description: eventDescription.trim() || undefined,
+      },
+      replyToId: replyToMessage?._id,
+    });
+    setShowEventComposer(false);
+    resetEventComposer();
     if (onCancelReply) onCancelReply();
   };
 
@@ -317,21 +426,13 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       label: 'Event',
       icon: Calendar,
       iconBg: 'bg-pink-500',
-      action: () =>
-        setAttachmentNotice({
-          title: 'Event',
-          message: 'Event attachments are coming soon.',
-        }),
+      action: () => setShowEventComposer(true),
     },
     {
       label: 'New sticker',
       icon: SmileIcon,
       iconBg: 'bg-teal-500',
-      action: () =>
-        setAttachmentNotice({
-          title: 'New sticker',
-          message: 'Sticker creation is coming soon.',
-        }),
+      action: () => setShowStickerPicker(true),
     },
   ];
 
@@ -563,6 +664,149 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         onClose={() => setShowContactShare(false)}
         onShareContacts={handleShareContacts}
       />
+      {showStickerPicker && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sticker-picker-title"
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-3">
+              <h2
+                id="sticker-picker-title"
+                className="text-lg font-semibold text-slate-950 dark:text-white"
+              >
+                New sticker
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowStickerPicker(false)}
+                aria-label="Close"
+                className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-4 grid grid-cols-4 gap-2">
+              {STICKERS.map((sticker) => (
+                <button
+                  key={sticker.label}
+                  type="button"
+                  onClick={() => handleStickerSelect(sticker)}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-center transition hover:border-teal-300 hover:bg-teal-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-teal-500/60 dark:hover:bg-teal-500/10"
+                  aria-label={sticker.label}
+                >
+                  <span className="block text-3xl leading-none">{sticker.emoji}</span>
+                  <span className="mt-1 block truncate text-[11px] text-slate-500 dark:text-slate-400">
+                    {sticker.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {showEventComposer && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="event-composer-title"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-3">
+              <h2
+                id="event-composer-title"
+                className="text-lg font-semibold text-slate-950 dark:text-white"
+              >
+                Event
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEventComposer(false);
+                  resetEventComposer();
+                }}
+                aria-label="Close"
+                className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Title
+                </span>
+                <input
+                  type="text"
+                  value={eventTitle}
+                  onChange={(e) => setEventTitle(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500"
+                  placeholder="Coffee chat"
+                  autoFocus
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Date and time
+                </span>
+                <input
+                  type="datetime-local"
+                  value={eventDateTime}
+                  onChange={(e) => setEventDateTime(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Location
+                </span>
+                <input
+                  type="text"
+                  value={eventLocation}
+                  onChange={(e) => setEventLocation(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500"
+                  placeholder="Optional"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Description
+                </span>
+                <textarea
+                  value={eventDescription}
+                  onChange={(e) => setEventDescription(e.target.value)}
+                  rows={3}
+                  className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500"
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEventComposer(false);
+                  resetEventComposer();
+                }}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateEvent}
+                disabled={!eventTitle.trim() || !eventDateTime}
+                className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+              >
+                Send event
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {attachmentNotice && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"

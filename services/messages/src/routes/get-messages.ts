@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { z } from 'zod';
 import { getMessagesCollection } from '../models/message';
 import { logger } from '@repo/utils';
+import { serializeMessage } from '../serialize-message';
 
 // Query parameters schema
 const GetMessagesQuerySchema = z.object({
@@ -96,28 +97,7 @@ export async function getMessages(req: Request, res: Response, next: NextFunctio
     }
 
     // Transform messages to API format
-    const apiMessages = resultMessages.map((msg) => ({
-      _id: msg._id.toString(),
-      chatId: msg.chatId.toString(),
-      senderId: msg.senderId.toString(),
-      body: msg.body,
-      media: msg.media,
-      replyTo: msg.replyTo
-        ? {
-            messageId: msg.replyTo.messageId.toString(),
-            body: msg.replyTo.body,
-            senderId: msg.replyTo.senderId.toString(),
-          }
-        : undefined,
-      reactions: msg.reactions.map((r) => ({
-        userId: r.userId.toString(),
-        emoji: r.emoji,
-        createdAt: r.createdAt,
-      })),
-      status: msg.status,
-      createdAt: msg.createdAt,
-      editedAt: msg.editedAt,
-    }));
+    const apiMessages = resultMessages.map((msg) => serializeMessage(msg));
 
     logger.info(
       {

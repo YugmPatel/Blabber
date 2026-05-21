@@ -8,6 +8,8 @@ export interface User {
   name: string;
   avatarUrl?: string;
   about?: string;
+  role?: string;
+  department?: string;
   contacts: string[];
   blocked: string[];
   lastSeen: Date;
@@ -23,6 +25,8 @@ export const UserSchema = z.object({
   name: z.string().min(1).max(100),
   avatarUrl: z.string().url().optional(),
   about: z.string().max(500).optional(),
+  role: z.string().max(120).optional(),
+  department: z.string().max(120).optional(),
   contacts: z.array(z.string()),
   blocked: z.array(z.string()),
   lastSeen: z.date(),
@@ -53,6 +57,8 @@ export const UpdateUserDTOSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   avatarUrl: z.string().url().optional(),
   about: z.string().max(500).optional(),
+  role: z.string().max(120).optional(),
+  department: z.string().max(120).optional(),
 });
 
 export type UpdateUserDTO = z.infer<typeof UpdateUserDTOSchema>;
@@ -65,6 +71,8 @@ export interface UserResponseDTO {
   name: string;
   avatarUrl?: string;
   about?: string;
+  role?: string;
+  department?: string;
   lastSeen: Date;
   createdAt: Date;
 }

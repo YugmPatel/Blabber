@@ -7,6 +7,8 @@ const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   avatarUrl: z.string().url().optional().or(z.literal('')),
   about: z.string().max(500).optional().or(z.literal('')),
+  role: z.string().max(120).optional().or(z.literal('')),
+  department: z.string().max(120).optional().or(z.literal('')),
 });
 
 export async function updateProfile(
@@ -50,6 +52,12 @@ export async function updateProfile(
     if (updates.about !== undefined) {
       cleanedUpdates.about = updates.about === '' ? undefined : updates.about;
     }
+    if (updates.role !== undefined) {
+      cleanedUpdates.role = updates.role === '' ? undefined : updates.role;
+    }
+    if (updates.department !== undefined) {
+      cleanedUpdates.department = updates.department === '' ? undefined : updates.department;
+    }
 
     // Update user profile
     const updatedUser = await updateUserProfile(userId, cleanedUpdates);
@@ -70,6 +78,8 @@ export async function updateProfile(
         name: updatedUser.name,
         avatarUrl: updatedUser.avatarUrl,
         about: updatedUser.about,
+        role: updatedUser.role,
+        department: updatedUser.department,
         lastSeen: updatedUser.lastSeen,
       },
     });

@@ -6,12 +6,38 @@ export interface MessageDocument {
   _id: ObjectId;
   chatId: ObjectId;
   senderId: ObjectId;
+  type?: 'text' | 'image' | 'audio' | 'document' | 'poll' | 'sticker' | 'event';
   body: string;
   media?: {
     type: 'image' | 'audio' | 'document';
     url: string;
+    mediaId?: ObjectId;
+    storageKey?: string;
+    fileName?: string;
+    mimeType?: string;
+    size?: number;
     duration?: number;
     thumbnailUrl?: string;
+  };
+  poll?: {
+    question: string;
+    options: Array<{
+      id: string;
+      text: string;
+      votes: ObjectId[];
+    }>;
+    allowMultiple?: boolean;
+    closed?: boolean;
+  };
+  sticker?: {
+    emoji: string;
+    label?: string;
+  };
+  event?: {
+    title: string;
+    startsAt: string;
+    location?: string;
+    description?: string;
   };
   replyTo?: {
     messageId: ObjectId;

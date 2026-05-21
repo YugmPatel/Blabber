@@ -60,6 +60,7 @@ import { editMessage } from './routes/edit-message';
 import { deleteMessage } from './routes/delete-message';
 import { reactToMessage } from './routes/react-message';
 import { markMessagesAsRead } from './routes/mark-read';
+import { votePoll } from './routes/vote-poll';
 // Note: Specific routes must come before parameterized routes
 app.post('/read', authMiddleware, markMessagesAsRead);
 app.get('/:chatId', authMiddleware, getMessages);
@@ -67,6 +68,7 @@ app.post('/:chatId', authMiddleware, sendMessage);
 app.patch('/:messageId', authMiddleware, editMessage);
 app.delete('/:messageId', authMiddleware, deleteMessage);
 app.post('/:messageId/react', authMiddleware, reactToMessage);
+app.post('/:messageId/poll/vote', authMiddleware, votePoll);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

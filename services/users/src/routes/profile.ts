@@ -38,6 +38,8 @@ export async function getUserProfile(
         name: user.name,
         avatarUrl: user.avatarUrl,
         about: user.about,
+        role: user.role,
+        department: user.department,
         lastSeen: user.lastSeen,
       },
     });

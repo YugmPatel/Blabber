@@ -12,12 +12,38 @@ export interface Message {
   _id: string;
   chatId: string;
   senderId: string;
+  type?: 'text' | 'image' | 'audio' | 'document' | 'poll' | 'sticker' | 'event';
   body: string;
   media?: {
     type: 'image' | 'audio' | 'document';
     url: string;
+    mediaId?: string;
+    storageKey?: string;
+    fileName?: string;
+    mimeType?: string;
+    size?: number;
     duration?: number;
     thumbnailUrl?: string;
+  };
+  poll?: {
+    question: string;
+    options: Array<{
+      id: string;
+      text: string;
+      votes: string[];
+    }>;
+    allowMultiple?: boolean;
+    closed?: boolean;
+  };
+  sticker?: {
+    emoji: string;
+    label?: string;
+  };
+  event?: {
+    title: string;
+    startsAt: string;
+    location?: string;
+    description?: string;
   };
   replyTo?: {
     messageId: string;
@@ -43,12 +69,38 @@ export const MessageSchema = z.object({
   _id: z.string(),
   chatId: z.string(),
   senderId: z.string(),
+  type: z.enum(['text', 'image', 'audio', 'document', 'poll', 'sticker', 'event']).optional(),
   body: z.string().max(10000),
   media: z.object({
     type: z.enum(['image', 'audio', 'document']),
     url: z.string().url(),
+    mediaId: z.string().optional(),
+    storageKey: z.string().optional(),
+    fileName: z.string().optional(),
+    mimeType: z.string().optional(),
+    size: z.number().positive().optional(),
     duration: z.number().positive().optional(),
     thumbnailUrl: z.string().url().optional(),
+  }).optional(),
+  poll: z.object({
+    question: z.string(),
+    options: z.array(z.object({
+      id: z.string(),
+      text: z.string(),
+      votes: z.array(z.string()),
+    })),
+    allowMultiple: z.boolean().optional(),
+    closed: z.boolean().optional(),
+  }).optional(),
+  sticker: z.object({
+    emoji: z.string(),
+    label: z.string().optional(),
+  }).optional(),
+  event: z.object({
+    title: z.string(),
+    startsAt: z.string(),
+    location: z.string().optional(),
+    description: z.string().optional(),
   }).optional(),
   replyTo: z.object({
     messageId: z.string(),
@@ -65,7 +117,24 @@ export const MessageSchema = z.object({
 // Create Message DTO
 export const CreateMessageDTOSchema = z.object({
   body: z.string().min(1).max(10000),
+  type: z.enum(['text', 'poll', 'sticker', 'event']).optional(),
   mediaId: z.string().optional(),
+  mediaDuration: z.number().positive().optional(),
+  poll: z.object({
+    question: z.string().min(1).max(300),
+    options: z.array(z.string().min(1).max(200)).min(2).max(12),
+    allowMultiple: z.boolean().optional(),
+  }).optional(),
+  sticker: z.object({
+    emoji: z.string().min(1).max(20),
+    label: z.string().max(80).optional(),
+  }).optional(),
+  event: z.object({
+    title: z.string().min(1).max(200),
+    startsAt: z.string().min(1),
+    location: z.string().max(200).optional(),
+    description: z.string().max(1000).optional(),
+  }).optional(),
   replyToId: z.string().optional(),
   tempId: z.string().optional(),
 });
@@ -92,3 +161,10 @@ export const MarkReadDTOSchema = z.object({
 });
 
 export type MarkReadDTO = z.infer<typeof MarkReadDTOSchema>;
+
+// Poll Vote DTO
+export const PollVoteDTOSchema = z.object({
+  optionId: z.string().min(1),
+});
+
+export type PollVoteDTO = z.infer<typeof PollVoteDTOSchema>;

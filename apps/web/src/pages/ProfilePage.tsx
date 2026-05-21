@@ -1,27 +1,75 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { Camera, Check, Loader2, Trash2, Image, User, Bell, Sparkles, Palette } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
-import { useFileUpload } from '@/hooks/useFileUpload';
+import { apiClient, getAccessToken, normalizeMediaUrl } from '@/api/client';
+import CameraModal from '@/components/CameraModal';
+
+interface AvatarPresignResponse {
+  uploadUrl: string;
+  mediaId: string;
+  mediaUrl?: string;
+  publicUrl?: string;
+  url?: string;
+  uploadAuthRequired?: boolean;
+}
 
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { user, refreshUser } = useAuth();
   const updateProfile = useUpdateProfile();
-  const { uploadFile, isUploading } = useFileUpload();
-  const profileUser = user as (typeof user & { about?: string; avatarUrl?: string }) | null;
+  const profileUser =
+    user as (typeof user & { about?: string; avatarUrl?: string; role?: string; department?: string }) | null;
 
   const [name, setName] = useState(user?.name || '');
   const [about, setAbout] = useState(profileUser?.about || '');
   const [avatarUrl, setAvatarUrl] = useState(profileUser?.avatarUrl || profileUser?.avatar || '');
+  const [localPreview, setLocalPreview] = useState('');
+  const [role, setRole] = useState(profileUser?.role || '');
+  const [department, setDepartment] = useState(profileUser?.department || '');
+  const [isUploading, setIsUploading] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [showCameraCapture, setShowCameraCapture] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const displayedAvatar = normalizeMediaUrl(localPreview || avatarUrl);
+
+  const uploadAvatar = async (file: File): Promise<string | null> => {
+    setIsUploading(true);
+    try {
+      const { data: presignData } = await apiClient.post<AvatarPresignResponse>('/api/media/presign', {
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+      });
+
+      const uploadHeaders: Record<string, string> = { 'Content-Type': file.type };
+      if (presignData.uploadAuthRequired) {
+        const token = getAccessToken();
+        if (token) uploadHeaders.Authorization = `Bearer ${token}`;
+      }
+
+      await axios.put(presignData.uploadUrl, file, {
+        headers: uploadHeaders,
+        withCredentials: Boolean(presignData.uploadAuthRequired),
+      });
+
+      return (
+        presignData.mediaUrl ||
+        presignData.publicUrl ||
+        presignData.url ||
+        presignData.uploadUrl.split('?')[0] ||
+        null
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleSave = async () => {
     try {
-      await updateProfile.mutateAsync({ name, about, avatarUrl });
+      await updateProfile.mutateAsync({ name, about, role, department, avatarUrl });
       if (refreshUser) refreshUser();
     } catch (error) {
       console.error('Failed to update profile:', error);
@@ -31,13 +79,13 @@ export default function ProfilePage() {
   const handleCancel = () => {
     setName(user?.name || '');
     setAbout(profileUser?.about || '');
+    setRole(profileUser?.role || '');
+    setDepartment(profileUser?.department || '');
     setAvatarUrl(profileUser?.avatarUrl || profileUser?.avatar || '');
+    setLocalPreview('');
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const handleAvatarFile = async (file: File) => {
     // Validate file type
     if (!file.type.startsWith('image/')) {
       alert('Please select an image file');
@@ -54,28 +102,35 @@ export default function ProfilePage() {
       // Create preview immediately
       const reader = new FileReader();
       reader.onload = (event) => {
-        setAvatarUrl(event.target?.result as string);
+        setLocalPreview(event.target?.result as string);
       };
       reader.readAsDataURL(file);
 
-      // Upload to server
-      const mediaId = await uploadFile(file);
-      if (mediaId) {
-        // In production, this would be the actual URL from the media service.
+      const mediaUrl = await uploadAvatar(file);
+      if (mediaUrl) {
+        setAvatarUrl(mediaUrl);
+        setLocalPreview('');
+      } else {
+        alert('Avatar upload failed. Changes to your photo will not be saved.');
       }
     } catch (error) {
-      console.error('Failed to upload image:', error);
-      alert('Failed to upload image. Please try again.');
+    console.error('Failed to upload image:', error);
+      alert('Avatar upload failed. Changes to your photo will not be saved.');
     }
 
     setShowAvatarMenu(false);
-    // Reset input
     if (fileInputRef.current) fileInputRef.current.value = '';
-    if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handleAvatarFile(file);
   };
 
   const handleRemovePhoto = () => {
     setAvatarUrl('');
+    setLocalPreview('');
     setShowAvatarMenu(false);
   };
 
@@ -129,9 +184,9 @@ export default function ProfilePage() {
             <div className="grid gap-6 md:grid-cols-[200px_1fr]">
               <div className="flex flex-col items-center">
                 <div className="relative">
-                  {avatarUrl ? (
+                  {displayedAvatar ? (
                     <img
-                      src={avatarUrl}
+                      src={displayedAvatar}
                       alt="Profile"
                       className="h-28 w-28 rounded-full object-cover border-4 border-[#0f766e]"
                     />
@@ -194,11 +249,24 @@ export default function ProfilePage() {
             <div className="mt-4 grid gap-4">
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Role / Department</label>
-                <input
-                  type="text"
-                  placeholder="Senior Product Designer"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none focus:border-[#0ea5a1] focus:bg-white focus:ring-2 focus:ring-[#99f6e4]"
-                />
+                <div className="grid gap-3 md:grid-cols-2">
+                  <input
+                    type="text"
+                    value={role}
+                    onChange={(e) => setRole(e.target.value)}
+                    placeholder="Senior Product Designer"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none focus:border-[#0ea5a1] focus:bg-white focus:ring-2 focus:ring-[#99f6e4]"
+                    maxLength={120}
+                  />
+                  <input
+                    type="text"
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    placeholder="Design"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm outline-none focus:border-[#0ea5a1] focus:bg-white focus:ring-2 focus:ring-[#99f6e4]"
+                    maxLength={120}
+                  />
+                </div>
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Status Message</label>
@@ -246,13 +314,16 @@ export default function ProfilePage() {
               Choose from gallery
             </button>
             <button
-              onClick={() => cameraInputRef.current?.click()}
+              onClick={() => {
+                setShowAvatarMenu(false);
+                setShowCameraCapture(true);
+              }}
               className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
             >
               <Camera size={16} className="text-slate-500" />
               Take photo
             </button>
-            {avatarUrl ? (
+            {displayedAvatar ? (
               <button
                 onClick={handleRemovePhoto}
                 className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-rose-500 hover:bg-rose-50"
@@ -272,13 +343,11 @@ export default function ProfilePage() {
         onChange={handleFileSelect}
         className="hidden"
       />
-      <input
-        ref={cameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="user"
-        onChange={handleFileSelect}
-        className="hidden"
+      <CameraModal
+        isOpen={showCameraCapture}
+        onClose={() => setShowCameraCapture(false)}
+        onCapture={handleAvatarFile}
+        confirmLabel="Use Photo"
       />
     </div>
   );

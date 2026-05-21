@@ -39,6 +39,7 @@ export interface MessageSentEvent extends BaseEvent {
     content: string;
     mediaUrl?: string;
     mediaType?: 'image' | 'audio' | 'document';
+    message?: any;
     replyTo?: string;
     createdAt: string;
   };
@@ -50,6 +51,7 @@ export interface MessageEditedEvent extends BaseEvent {
     messageId: string;
     chatId: string;
     content: string;
+    message?: any;
     editedAt: string;
   };
 }

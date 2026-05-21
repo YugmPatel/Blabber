@@ -7,10 +7,25 @@ interface PresignResponse {
   uploadUrl: string;
   mediaId: string;
   mediaUrl?: string;
+  publicUrl?: string;
+  storageKey?: string;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
   expiresIn?: number;
   uploadMethod?: 'PUT';
   uploadAuthRequired?: boolean;
   storage?: 's3' | 'local';
+}
+
+export interface UploadResult {
+  mediaId: string;
+  mediaUrl?: string;
+  publicUrl?: string;
+  storageKey?: string;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
 }
 
 interface UploadProgress {
@@ -19,7 +34,16 @@ interface UploadProgress {
   percentage: number;
 }
 
-export const useFileUpload = () => {
+interface UseFileUploadResult {
+  uploadMedia?: (file: File) => Promise<UploadResult | null>;
+  uploadFile: (file: File) => Promise<string | null>;
+  isUploading: boolean;
+  uploadProgress: UploadProgress | null;
+  error: string | null;
+  reset: () => void;
+}
+
+export const useFileUpload = (): UseFileUploadResult => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +62,7 @@ export const useFileUpload = () => {
     return err instanceof Error ? err.message : 'Failed to upload file';
   };
 
-  const uploadFile = useCallback(async (file: File): Promise<string | null> => {
+  const uploadMedia = useCallback(async (file: File): Promise<UploadResult | null> => {
     setIsUploading(true);
     setError(null);
     setUploadProgress(null);
@@ -64,7 +88,7 @@ export const useFileUpload = () => {
         headers.Authorization = `Bearer ${token}`;
       }
 
-      await axios.put(presignData.uploadUrl, file, {
+      const uploadResponse = await axios.put<Partial<UploadResult>>(presignData.uploadUrl, file, {
         headers,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
@@ -78,10 +102,22 @@ export const useFileUpload = () => {
         },
       });
 
-      // 3. Return media ID
       setIsUploading(false);
       setUploadProgress(null);
-      return presignData.mediaId;
+
+      return {
+        mediaId: uploadResponse.data.mediaId || presignData.mediaId,
+        mediaUrl:
+          uploadResponse.data.mediaUrl ||
+          uploadResponse.data.publicUrl ||
+          presignData.mediaUrl ||
+          presignData.publicUrl,
+        publicUrl: uploadResponse.data.publicUrl || presignData.publicUrl,
+        storageKey: uploadResponse.data.storageKey || presignData.storageKey,
+        fileName: uploadResponse.data.fileName || presignData.fileName || file.name,
+        mimeType: uploadResponse.data.mimeType || presignData.mimeType || file.type,
+        size: uploadResponse.data.size || presignData.size || file.size,
+      };
     } catch (err) {
       const errorMessage = getUploadErrorMessage(err);
       setError(errorMessage);
@@ -91,6 +127,14 @@ export const useFileUpload = () => {
     }
   }, []);
 
+  const uploadFile = useCallback(
+    async (file: File): Promise<string | null> => {
+      const result = await uploadMedia(file);
+      return result?.mediaId ?? null;
+    },
+    [uploadMedia]
+  );
+
   const reset = useCallback(() => {
     setIsUploading(false);
     setUploadProgress(null);
@@ -98,6 +142,7 @@ export const useFileUpload = () => {
   }, []);
 
   return {
+    uploadMedia,
     uploadFile,
     isUploading,
     uploadProgress,

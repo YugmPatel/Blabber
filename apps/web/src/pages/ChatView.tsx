@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { useEffect, useState, useCallback } from 'react';
 import { useChat } from '@/hooks/useChats';
-import { useMessages, useDeleteMessage, useAddReaction } from '@/hooks/useMessages';
+import { useMessages, useDeleteMessage, useAddReaction, useVotePoll } from '@/hooks/useMessages';
 import { useChatSummary } from '@/hooks/useChatSummary';
 import { useUser, useUserPresence } from '@/hooks/useUsers';
 import { useAuth } from '@/contexts/AuthContext';
@@ -57,6 +57,7 @@ export default function ChatView() {
   // Mutations for message actions
   const deleteMessageMutation = useDeleteMessage(id || '');
   const addReactionMutation = useAddReaction(id || '');
+  const votePollMutation = useVotePoll(id || '');
 
   // Get typing users
   const typingUserIds = id ? getTypingUsers(id) : [];
@@ -87,6 +88,13 @@ export default function ChatView() {
       }
     },
     [deleteMessageMutation]
+  );
+
+  const handlePollVote = useCallback(
+    (messageId: string, optionId: string) => {
+      votePollMutation.mutate({ messageId, data: { optionId } });
+    },
+    [votePollMutation]
   );
 
   const handleCatchMeUp = useCallback(() => {
@@ -196,6 +204,7 @@ export default function ChatView() {
         onReply={handleReply}
         onReact={handleReact}
         onDelete={handleDelete}
+        onPollVote={handlePollVote}
       />
 
       {typingUserNames.length > 0 && (

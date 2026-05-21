@@ -1,17 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Message } from '@repo/types';
+import { normalizeMediaUrl } from '@/api/client';
 import Avatar from './Avatar';
 import ReadReceipts from './ReadReceipts';
 
 interface MessageBubbleProps {
   message: Message;
   isSentByMe: boolean;
+  currentUserId?: string;
   showAvatar?: boolean;
   senderName?: string;
   senderAvatarUrl?: string;
   onReply?: (message: Message) => void;
   onReact?: (messageId: string, emoji: string) => void;
   onDelete?: (messageId: string) => void;
+  onPollVote?: (messageId: string, optionId: string) => void;
 }
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
@@ -19,15 +22,41 @@ const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 export default function MessageBubble({
   message,
   isSentByMe,
+  currentUserId = '',
   showAvatar = true,
   senderName,
   senderAvatarUrl,
   onReply,
   onReact,
   onDelete,
+  onPollVote,
 }: MessageBubbleProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!showMenu) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowMenu(false);
+      }
+    };
+    const closeMenu = () => setShowMenu(false);
+
+    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+    };
+  }, [showMenu]);
+
   const formatTime = (date: Date) => {
     return new Date(date).toLocaleTimeString('en-US', {
       hour: 'numeric',
@@ -36,30 +65,62 @@ export default function MessageBubble({
     });
   };
 
+  const openMenu = () => {
+    const rect = menuButtonRef.current?.getBoundingClientRect();
+    if (!rect) {
+      setShowMenu((value) => !value);
+      return;
+    }
+
+    const menuWidth = 160;
+    const menuHeight = 132;
+    const gutter = 8;
+    const top =
+      window.innerHeight - rect.bottom >= menuHeight + gutter
+        ? rect.bottom + gutter
+        : Math.max(gutter, rect.top - menuHeight - gutter);
+    const left = Math.min(
+      window.innerWidth - menuWidth - gutter,
+      Math.max(gutter, isSentByMe ? rect.right - menuWidth : rect.left)
+    );
+
+    setMenuPosition({ top, left });
+    setShowMenu((value) => !value);
+  };
+
   const renderMedia = () => {
     if (!message.media) return null;
 
-    const { type, url, thumbnailUrl, duration } = message.media;
+    const { type, url, thumbnailUrl, duration, fileName, mimeType } = message.media;
+    const mediaUrl = normalizeMediaUrl(url);
+    const previewUrl = normalizeMediaUrl(thumbnailUrl) || mediaUrl;
+
+    if (!mediaUrl) return null;
 
     if (type === 'image') {
       return (
         <img
-          src={thumbnailUrl || url}
-          alt="Shared image"
+          src={previewUrl}
+          alt={fileName || 'Shared image'}
           className="max-w-xs rounded-lg mb-1 cursor-pointer hover:opacity-90"
-          onClick={() => window.open(url, '_blank')}
+          onClick={() => window.open(mediaUrl, '_blank')}
         />
       );
     }
 
     if (type === 'audio') {
       return (
-        <div className="flex items-center gap-2 mb-1">
-          <audio controls className="max-w-xs">
-            <source src={url} />
+        <div className="mb-1 flex flex-col gap-1">
+          <audio
+            key={mediaUrl}
+            controls
+            preload="metadata"
+            className="h-10 max-w-xs"
+          >
+            <source src={mediaUrl} type={mimeType || 'audio/webm'} />
             Your browser does not support the audio element.
           </audio>
-          {duration && <span className="text-xs text-gray-500">{Math.floor(duration)}s</span>}
+          {duration && <span className="text-xs opacity-70">{Math.floor(duration)}s</span>}
         </div>
       );
     }
@@ -67,7 +128,7 @@ export default function MessageBubble({
     if (type === 'document') {
       return (
         <a
-          href={url}
+          href={mediaUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="mb-1 flex items-center gap-2 rounded-lg bg-gray-100 p-2 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600"
@@ -85,12 +146,101 @@ export default function MessageBubble({
               d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
             />
           </svg>
-          <span className="text-sm">Document</span>
+          <span className="text-sm">{fileName || 'Document'}</span>
         </a>
       );
     }
 
     return null;
+  };
+
+  const renderPoll = () => {
+    if (!message.poll) return null;
+
+    const totalVotes = message.poll.options.reduce(
+      (total, option) => total + option.votes.length,
+      0
+    );
+
+    return (
+      <div className="mb-1 min-w-[220px] space-y-2">
+        <p className="text-sm font-semibold">Poll: {message.poll.question}</p>
+        <div className="space-y-1.5">
+          {message.poll.options.map((option) => {
+            const selected = option.votes.includes(currentUserId);
+            const percent = totalVotes ? Math.round((option.votes.length / totalVotes) * 100) : 0;
+
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => onPollVote?.(message._id, option.id)}
+                disabled={!onPollVote || message.poll?.closed}
+                className={`relative w-full overflow-hidden rounded-xl border px-3 py-2 text-left text-sm transition ${
+                  selected
+                    ? 'border-teal-200 bg-teal-50 text-teal-900 dark:border-teal-500/50 dark:bg-teal-500/20 dark:text-white'
+                    : 'border-slate-200 bg-white/80 text-slate-800 hover:border-teal-300 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-100'
+                }`}
+              >
+                <span
+                  className="absolute inset-y-0 left-0 bg-teal-200/40 dark:bg-teal-400/20"
+                  style={{ width: `${percent}%` }}
+                />
+                <span className="relative flex items-center justify-between gap-3">
+                  <span>{option.text}</span>
+                  <span className="text-xs opacity-75">
+                    {option.votes.length} vote{option.votes.length === 1 ? '' : 's'}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSticker = () => {
+    if (!message.sticker) return null;
+
+    return (
+      <div className="mb-1 flex flex-col items-center gap-1">
+        <span className="text-6xl leading-none" aria-label={message.sticker.label || 'Sticker'}>
+          {message.sticker.emoji}
+        </span>
+        {message.sticker.label && (
+          <span className="text-xs opacity-70">{message.sticker.label}</span>
+        )}
+      </div>
+    );
+  };
+
+  const renderEvent = () => {
+    if (!message.event) return null;
+
+    const startsAt = new Date(message.event.startsAt);
+
+    return (
+      <div className="mb-1 min-w-[220px] rounded-xl border border-slate-200 bg-white/80 p-3 text-sm dark:border-slate-600 dark:bg-slate-900/50">
+        <p className="font-semibold">{message.event.title}</p>
+        <p className="mt-1 text-xs opacity-80">
+          {Number.isNaN(startsAt.getTime())
+            ? message.event.startsAt
+            : startsAt.toLocaleString([], {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              })}
+        </p>
+        {message.event.location && (
+          <p className="mt-1 text-xs opacity-80">{message.event.location}</p>
+        )}
+        {message.event.description && (
+          <p className="mt-2 whitespace-pre-wrap text-xs opacity-90">
+            {message.event.description}
+          </p>
+        )}
+      </div>
+    );
   };
 
   const renderReplyPreview = () => {
@@ -183,7 +333,8 @@ export default function MessageBubble({
 
             {/* More options */}
             <button
-              onClick={() => setShowMenu(!showMenu)}
+              ref={menuButtonRef}
+              onClick={openMenu}
               className="rounded-full bg-white p-1.5 text-gray-600 shadow-md hover:bg-gray-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
               title="More"
             >
@@ -221,7 +372,11 @@ export default function MessageBubble({
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
               <div
-                className={`absolute top-full mt-1 ${isSentByMe ? 'right-0' : 'left-0'} z-20 min-w-[140px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800`}
+                className="fixed z-20 min-w-[150px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800"
+                style={{
+                  top: menuPosition?.top ?? 0,
+                  left: menuPosition?.left ?? 0,
+                }}
               >
                 {onReply && (
                   <button
@@ -276,7 +431,10 @@ export default function MessageBubble({
           >
             {renderReplyPreview()}
             {renderMedia()}
-            {message.body && (
+            {renderPoll()}
+            {renderSticker()}
+            {renderEvent()}
+            {message.body && !message.poll && !message.sticker && !message.event && (
               <p className="text-sm whitespace-pre-wrap break-words">{message.body}</p>
             )}
 

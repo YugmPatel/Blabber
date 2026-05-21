@@ -22,7 +22,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
 import { useTheme } from '@/hooks/useTheme';
 import Avatar from '@/components/Avatar';
-import { apiClient, getAccessToken } from '@/api/client';
+import CameraModal from '@/components/CameraModal';
+import { apiClient, getAccessToken, normalizeMediaUrl } from '@/api/client';
 
 // ── Section registry ────────────────────────────────────────────────────────
 
@@ -93,11 +94,14 @@ function Toggle({
 function ProfileSection() {
   const { user, refreshUser } = useAuth();
   const updateProfile = useUpdateProfile();
-  const profileUser = user as (typeof user & { about?: string; avatarUrl?: string }) | null;
+  const profileUser =
+    user as (typeof user & { about?: string; avatarUrl?: string; role?: string; department?: string }) | null;
 
   const persistedAvatarUrl = profileUser?.avatarUrl || profileUser?.avatar || '';
   const [name, setName] = useState(user?.name || '');
   const [about, setAbout] = useState(profileUser?.about || '');
+  const [role, setRole] = useState(profileUser?.role || '');
+  const [department, setDepartment] = useState(profileUser?.department || '');
   // savedAvatarUrl is the real server URL — never a base64 blob
   const [savedAvatarUrl, setSavedAvatarUrl] = useState(persistedAvatarUrl);
   // localPreview is base64 only for display while upload is in-progress or failed
@@ -105,11 +109,11 @@ function ProfileSection() {
   const [uploadError, setUploadError] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [showCameraCapture, setShowCameraCapture] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  const displayedAvatar = localPreview || savedAvatarUrl;
+  const displayedAvatar = normalizeMediaUrl(localPreview || savedAvatarUrl);
 
   const uploadAvatar = async (
     file: File
@@ -156,7 +160,7 @@ function ProfileSection() {
   const handleSave = async () => {
     try {
       // Only send the real server URL (string), never a base64 blob
-      await updateProfile.mutateAsync({ name, about, avatarUrl: savedAvatarUrl });
+      await updateProfile.mutateAsync({ name, about, role, department, avatarUrl: savedAvatarUrl });
       if (refreshUser) refreshUser();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -168,14 +172,14 @@ function ProfileSection() {
   const handleCancel = () => {
     setName(user?.name || '');
     setAbout(profileUser?.about || '');
+    setRole(profileUser?.role || '');
+    setDepartment(profileUser?.department || '');
     setSavedAvatarUrl(persistedAvatarUrl);
     setLocalPreview('');
     setUploadError('');
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleAvatarFile = async (file: File) => {
     if (!file.type.startsWith('image/')) { alert('Please select an image file'); return; }
     if (file.size > 5 * 1024 * 1024) { alert('Image must be less than 5MB'); return; }
 
@@ -199,7 +203,12 @@ function ProfileSection() {
 
     setShowAvatarMenu(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
-    if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handleAvatarFile(file);
   };
 
   return (
@@ -247,7 +256,10 @@ function ProfileSection() {
                       <Image size={15} /> Choose from gallery
                     </button>
                     <button
-                      onClick={() => cameraInputRef.current?.click()}
+                      onClick={() => {
+                        setShowAvatarMenu(false);
+                        setShowCameraCapture(true);
+                      }}
                       className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
                     >
                       <Camera size={15} /> Take photo
@@ -323,15 +335,33 @@ function ProfileSection() {
           Tell your team a bit about your role.
         </p>
         <div className="mt-4 space-y-4">
-          <div>
-            <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-              Role / Department
-            </label>
-            <input
-              type="text"
-              placeholder="Senior Product Designer"
-              className={INPUT}
-            />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
+                Role
+              </label>
+              <input
+                type="text"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                placeholder="Senior Product Designer"
+                className={INPUT}
+                maxLength={120}
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
+                Department
+              </label>
+              <input
+                type="text"
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                placeholder="Design"
+                className={INPUT}
+                maxLength={120}
+              />
+            </div>
           </div>
           <div>
             <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
@@ -375,7 +405,12 @@ function ProfileSection() {
       </div>
 
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="user" onChange={handleFileSelect} className="hidden" />
+      <CameraModal
+        isOpen={showCameraCapture}
+        onClose={() => setShowCameraCapture(false)}
+        onCapture={handleAvatarFile}
+        confirmLabel="Use Photo"
+      />
     </div>
   );
 }

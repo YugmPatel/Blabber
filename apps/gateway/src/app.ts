@@ -5,8 +5,13 @@ import rateLimit from 'express-rate-limit';
 
 const app: Express = express();
 
-// Security middleware
-app.use(helmet());
+// Security middleware. Media files are fetched by the web app from the gateway
+// origin, which is different from the Vite/web origin in local development.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 // CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'];

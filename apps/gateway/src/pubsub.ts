@@ -53,23 +53,24 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
     // This broadcast ensures other users in the chat room also receive the message.
     // The frontend deduplicates based on message ID to prevent duplicates for the sender.
     io.to(`chat:${eventTyped.data.chatId}`).emit('message:new', {
-      message: {
-        _id: eventTyped.data.messageId,
-        chatId: eventTyped.data.chatId,
-        senderId: eventTyped.data.senderId,
-        body: eventTyped.data.content,
-        media: eventTyped.data.mediaUrl
-          ? {
-              type: eventTyped.data.mediaType ?? 'image',
-              url: eventTyped.data.mediaUrl,
-            }
-          : undefined,
-        replyTo: eventTyped.data.replyTo,
-        reactions: [],
-        status: 'sent',
-        deletedFor: [],
-        createdAt: eventTyped.data.createdAt,
-      },
+      message: eventTyped.data.message ?? {
+          _id: eventTyped.data.messageId,
+          chatId: eventTyped.data.chatId,
+          senderId: eventTyped.data.senderId,
+          type: eventTyped.data.mediaType ?? 'text',
+          body: eventTyped.data.content,
+          media: eventTyped.data.mediaUrl
+            ? {
+                type: eventTyped.data.mediaType ?? 'image',
+                url: eventTyped.data.mediaUrl,
+              }
+            : undefined,
+          replyTo: eventTyped.data.replyTo,
+          reactions: [],
+          status: 'sent',
+          deletedFor: [],
+          createdAt: eventTyped.data.createdAt,
+        },
     });
   });
 
@@ -79,11 +80,13 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
       { event: e.type, messageId: e.data.messageId },
       'Broadcasting MESSAGE_EDITED'
     );
-    io.to(`chat:${e.data.chatId}`).emit('message:edited', {
-      messageId: e.data.messageId,
-      chatId: e.data.chatId,
-      content: e.data.content,
-      editedAt: e.data.editedAt,
+    io.to(`chat:${e.data.chatId}`).emit('message:edit', {
+      message: e.data.message ?? {
+        _id: e.data.messageId,
+        chatId: e.data.chatId,
+        body: e.data.content,
+        editedAt: e.data.editedAt,
+      },
     });
   });
 

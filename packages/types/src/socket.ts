@@ -1,4 +1,59 @@
 // Socket.io Event Types
+export type CallType = 'audio' | 'video';
+
+export interface CallInvitePayload {
+  callId: string;
+  chatId: string;
+  fromUserId: string;
+  fromUserName?: string;
+  toUserId: string;
+  callType: CallType;
+}
+
+export interface CallControlPayload {
+  callId: string;
+  chatId: string;
+  fromUserId: string;
+  toUserId: string;
+}
+
+export interface CallSessionDescription {
+  type: string;
+  sdp?: string;
+}
+
+export interface CallIceCandidate {
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
+}
+
+export interface CallOfferPayload {
+  callId: string;
+  fromUserId: string;
+  toUserId: string;
+  offer: CallSessionDescription;
+}
+
+export interface CallAnswerPayload {
+  callId: string;
+  fromUserId: string;
+  toUserId: string;
+  answer: CallSessionDescription;
+}
+
+export interface CallIceCandidatePayload {
+  callId: string;
+  fromUserId: string;
+  toUserId: string;
+  candidate: CallIceCandidate;
+}
+
+export interface CallErrorPayload {
+  callId?: string;
+  message: string;
+}
 
 // Client to Server Events
 export interface ClientToServerEvents {
@@ -6,7 +61,24 @@ export interface ClientToServerEvents {
   'message:send': (data: {
     chatId: string;
     body: string;
+    type?: 'text' | 'poll' | 'sticker' | 'event';
     mediaId?: string;
+    mediaDuration?: number;
+    poll?: {
+      question: string;
+      options: string[];
+      allowMultiple?: boolean;
+    };
+    sticker?: {
+      emoji: string;
+      label?: string;
+    };
+    event?: {
+      title: string;
+      startsAt: string;
+      location?: string;
+      description?: string;
+    };
     replyToId?: string;
     tempId?: string;
   }) => void;
@@ -21,6 +93,14 @@ export interface ClientToServerEvents {
   }) => void;
   'chat:join': (data: { chatId: string }) => void;
   'chat:leave': (data: { chatId: string }) => void;
+  'call:invite': (data: CallInvitePayload) => void;
+  'call:accept': (data: CallControlPayload) => void;
+  'call:decline': (data: CallControlPayload) => void;
+  'call:cancel': (data: CallControlPayload) => void;
+  'call:end': (data: CallControlPayload) => void;
+  'call:offer': (data: CallOfferPayload) => void;
+  'call:answer': (data: CallAnswerPayload) => void;
+  'call:ice-candidate': (data: CallIceCandidatePayload) => void;
 }
 
 // Server to Client Events
@@ -34,6 +114,15 @@ export interface ServerToClientEvents {
   'typing:update': (data: { chatId: string; userId: string; isTyping: boolean }) => void;
   'chat:updated': (data: { chat: any }) => void;
   'presence:update': (data: { userId: string; online: boolean; lastSeen: Date }) => void;
+  'call:incoming': (data: CallInvitePayload) => void;
+  'call:accept': (data: CallControlPayload) => void;
+  'call:decline': (data: CallControlPayload) => void;
+  'call:cancel': (data: CallControlPayload) => void;
+  'call:end': (data: CallControlPayload) => void;
+  'call:offer': (data: CallOfferPayload) => void;
+  'call:answer': (data: CallAnswerPayload) => void;
+  'call:ice-candidate': (data: CallIceCandidatePayload) => void;
+  'call:error': (data: CallErrorPayload) => void;
   error: (data: { message: string; code?: string }) => void;
 }
 

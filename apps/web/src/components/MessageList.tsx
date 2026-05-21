@@ -15,6 +15,7 @@ interface MessageListProps {
   onReply?: (message: Message) => void;
   onReact?: (messageId: string, emoji: string) => void;
   onDelete?: (messageId: string) => void;
+  onPollVote?: (messageId: string, optionId: string) => void;
 }
 
 export default function MessageList({
@@ -29,6 +30,7 @@ export default function MessageList({
   onReply,
   onReact,
   onDelete,
+  onPollVote,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -158,6 +160,7 @@ export default function MessageList({
                   key={message._id}
                   message={message}
                   isSentByMe={isSentByMe}
+                  currentUserId={currentUserId}
                   showAvatar={showAvatar && isGroupChat}
                   senderName={
                     !isSentByMe && isGroupChat ? getUserName(message.senderId) : undefined
@@ -166,6 +169,7 @@ export default function MessageList({
                   onReply={onReply}
                   onReact={onReact}
                   onDelete={onDelete}
+                  onPollVote={onPollVote}
                 />
               );
             })}

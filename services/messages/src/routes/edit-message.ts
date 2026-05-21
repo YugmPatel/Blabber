@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { UpdateMessageDTOSchema } from '@repo/types';
 import { getMessagesCollection } from '../models/message';
 import { logger } from '@repo/utils';
+import { serializeMessage } from '../serialize-message';
 
 export async function editMessage(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -71,29 +72,7 @@ export async function editMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    // Transform to API format
-    const apiMessage = {
-      _id: result._id.toString(),
-      chatId: result.chatId.toString(),
-      senderId: result.senderId.toString(),
-      body: result.body,
-      media: result.media,
-      replyTo: result.replyTo
-        ? {
-            messageId: result.replyTo.messageId.toString(),
-            body: result.replyTo.body,
-            senderId: result.replyTo.senderId.toString(),
-          }
-        : undefined,
-      reactions: result.reactions.map((r) => ({
-        userId: r.userId.toString(),
-        emoji: r.emoji,
-        createdAt: r.createdAt,
-      })),
-      status: result.status,
-      createdAt: result.createdAt,
-      editedAt: result.editedAt,
-    };
+    const apiMessage = serializeMessage(result);
 
     logger.info(
       {

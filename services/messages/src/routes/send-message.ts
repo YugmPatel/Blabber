@@ -5,6 +5,7 @@ import { getMessagesCollection } from '../models/message';
 import { getDatabase } from '../db';
 import { logger, createEvent } from '@repo/utils';
 import { getPubSub } from '../pubsub';
+import { serializeMessage } from '../serialize-message';
 
 function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' {
   if (fileType.startsWith('image/')) {
@@ -45,7 +46,8 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const { body, mediaId, replyToId, tempId } = bodyResult.data;
+    const { body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, tempId } =
+      bodyResult.data;
 
     const collection = getMessagesCollection();
     const db = getDatabase();
@@ -57,6 +59,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       _id: new ObjectId(),
       chatId: chatObjectId,
       senderId: senderObjectId,
+      type: type ?? 'text',
       body,
       reactions: [],
       status: 'sent' as const,
@@ -92,7 +95,38 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       messageDoc.media = {
         type: getMessageMediaType(mediaDoc.fileType),
         url: mediaDoc.url,
+        mediaId: mediaDoc._id,
+        storageKey: mediaDoc.s3Key,
+        fileName: mediaDoc.fileName,
+        mimeType: mediaDoc.fileType,
+        size: mediaDoc.fileSize,
+        duration: mediaDuration,
       };
+      messageDoc.type = messageDoc.media.type;
+    }
+
+    if (poll) {
+      messageDoc.type = 'poll';
+      messageDoc.poll = {
+        question: poll.question,
+        options: poll.options.map((option, index) => ({
+          id: `option-${index + 1}`,
+          text: option,
+          votes: [],
+        })),
+        allowMultiple: poll.allowMultiple ?? false,
+        closed: false,
+      };
+    }
+
+    if (sticker) {
+      messageDoc.type = 'sticker';
+      messageDoc.sticker = sticker;
+    }
+
+    if (event) {
+      messageDoc.type = 'event';
+      messageDoc.event = event;
     }
 
     // Add replyTo if provided
@@ -137,25 +171,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       }
     );
 
-    // Transform to API format
-    const apiMessage = {
-      _id: messageDoc._id.toString(),
-      chatId: messageDoc.chatId.toString(),
-      senderId: messageDoc.senderId.toString(),
-      body: messageDoc.body,
-      media: messageDoc.media,
-      replyTo: messageDoc.replyTo
-        ? {
-            messageId: messageDoc.replyTo.messageId.toString(),
-            body: messageDoc.replyTo.body,
-            senderId: messageDoc.replyTo.senderId.toString(),
-          }
-        : undefined,
-      reactions: [],
-      status: messageDoc.status,
-      createdAt: messageDoc.createdAt,
-      tempId, // Include tempId for optimistic updates
-    };
+    const apiMessage = serializeMessage(messageDoc, tempId);
 
     logger.info(
       {
@@ -176,6 +192,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
         content: messageDoc.body,
         mediaUrl: messageDoc.media?.url,
         mediaType: messageDoc.media?.type,
+        message: apiMessage,
         replyTo: messageDoc.replyTo?.messageId.toString(),
         createdAt: messageDoc.createdAt.toISOString(),
       });

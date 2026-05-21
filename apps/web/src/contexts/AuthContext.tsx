@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { apiClient, setAccessToken, getAccessToken } from '@/api/client';
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { apiClient, setAccessToken } from '@/api/client';
 
 interface User {
   _id: string;
@@ -7,6 +7,10 @@ interface User {
   email: string;
   name: string;
   avatar?: string;
+  avatarUrl?: string;
+  about?: string;
+  role?: string;
+  department?: string;
 }
 
 interface AuthContextType {

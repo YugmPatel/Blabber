@@ -77,6 +77,9 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
+      about: user.about,
+      role: user.role,
+      department: user.department,
     },
     accessToken,
   });

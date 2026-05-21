@@ -1,3 +1,5 @@
+import { normalizeMediaUrl } from '@/api/client';
+
 // Deterministic color palette — same name always gets the same color
 const PALETTE: [string, string][] = [
   ['#6366f1', '#4f46e5'], // indigo
@@ -52,16 +54,17 @@ interface AvatarProps {
 
 export default function Avatar({ src, alt, size = 'md', online, className = '' }: AvatarProps) {
   const s = SIZE[size];
+  const normalizedSrc = normalizeMediaUrl(src);
 
   return (
     <div className={`relative inline-flex flex-shrink-0 ${className}`}>
       <div
         className={`${s.container} overflow-hidden rounded-full flex items-center justify-center select-none`}
-        style={!src ? { background: pickColor(alt || '?') } : undefined}
+        style={!normalizedSrc ? { background: pickColor(alt || '?') } : undefined}
       >
-        {src ? (
+        {normalizedSrc ? (
           <img
-            src={src}
+            src={normalizedSrc}
             alt={alt}
             className="h-full w-full object-cover"
             onError={(e) => {

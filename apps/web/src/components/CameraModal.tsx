@@ -5,9 +5,15 @@ interface CameraModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCapture: (file: File) => void;
+  confirmLabel?: string;
 }
 
-export default function CameraModal({ isOpen, onClose, onCapture }: CameraModalProps) {
+export default function CameraModal({
+  isOpen,
+  onClose,
+  onCapture,
+  confirmLabel = 'Send Photo',
+}: CameraModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -159,7 +165,7 @@ export default function CameraModal({ isOpen, onClose, onCapture }: CameraModalP
               onClick={handleSend}
               className="px-6 py-3 bg-[#00a884] text-white rounded-full hover:bg-[#008f72]"
             >
-              Send Photo
+              {confirmLabel}
             </button>
           </>
         ) : (
