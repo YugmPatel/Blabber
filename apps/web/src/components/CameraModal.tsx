@@ -4,7 +4,7 @@ import { X, Camera, RotateCcw } from 'lucide-react';
 interface CameraModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCapture: (file: File) => void;
+  onCapture: (file: File) => void | Promise<void>;
   confirmLabel?: string;
 }
 
@@ -16,49 +16,115 @@ export default function CameraModal({
 }: CameraModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [error, setError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+
+  const waitForCameraFrame = (video: HTMLVideoElement) =>
+    new Promise<void>((resolve, reject) => {
+      const startedAt = Date.now();
+
+      const checkFrame = () => {
+        if (video.videoWidth > 0 && video.videoHeight > 0) {
+          resolve();
+          return;
+        }
+
+        if (Date.now() - startedAt > 5000) {
+          reject(new Error('Camera preview timed out'));
+          return;
+        }
+
+        window.setTimeout(checkFrame, 100);
+      };
+
+      checkFrame();
+    });
+
+  const withCameraStartupTimeout = (promise: Promise<unknown>) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        window.setTimeout(() => reject(new Error('Camera preview timed out')), 5000);
+      }),
+    ]);
+
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsStarting(false);
+    setIsCameraReady(false);
+  };
+
+  const startCamera = async () => {
+    try {
+      stopCamera();
+      setError(null);
+      setIsStarting(true);
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('Camera capture is not available in this browser.');
+        setIsStarting(false);
+        return;
+      }
+
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode },
+        audio: false,
+      });
+      streamRef.current = mediaStream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+        const video = videoRef.current;
+        const playPromise = video.play();
+        await withCameraStartupTimeout(
+          Promise.race([
+            waitForCameraFrame(video),
+            playPromise.then(() => waitForCameraFrame(video)),
+          ])
+        );
+        setIsCameraReady(true);
+      }
+    } catch {
+      const hadStream = !!streamRef.current;
+      stopCamera();
+      setError(
+        hadStream
+          ? 'Camera preview could not start. Please try again or use photo upload.'
+          : 'Unable to access camera. Please check permissions.'
+      );
+    } finally {
+      setIsStarting(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
-      startCamera();
+      setCapturedImage(null);
+      void startCamera();
     }
     return () => {
       stopCamera();
     };
   }, [isOpen, facingMode]);
 
-  const startCamera = async () => {
-    try {
-      setError(null);
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode },
-        audio: false,
-      });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
-    } catch (err) {
-      setError('Unable to access camera. Please check permissions.');
-      console.error('Camera error:', err);
-    }
-  };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
-    }
-  };
-
   const handleCapture = () => {
     if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    if (!isCameraReady || !video.videoWidth || !video.videoHeight) {
+      setError('Camera is still starting. Please try again in a moment.');
+      return;
+    }
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
@@ -73,25 +139,30 @@ export default function CameraModal({
 
   const handleRetake = () => {
     setCapturedImage(null);
-    startCamera();
+    void startCamera();
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!capturedImage) return;
 
-    // Convert base64 to blob
-    fetch(capturedImage)
-      .then((res) => res.blob())
-      .then((blob) => {
-        const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        onCapture(file);
-        handleClose();
-      });
+    try {
+      setIsSending(true);
+      const response = await fetch(capturedImage);
+      const blob = await response.blob();
+      const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      await onCapture(file);
+      handleClose();
+    } catch {
+      setError('The captured photo could not be sent. Please try again.');
+      setIsSending(false);
+    }
   };
 
   const handleClose = () => {
     stopCamera();
     setCapturedImage(null);
+    setError(null);
+    setIsSending(false);
     onClose();
   };
 
@@ -127,7 +198,7 @@ export default function CameraModal({
           <div className="text-white text-center p-4">
             <p className="mb-4">{error}</p>
             <button
-              onClick={startCamera}
+              onClick={() => void startCamera()}
               className="px-4 py-2 bg-[#00a884] rounded-lg hover:bg-[#008f72]"
             >
               Try Again
@@ -140,13 +211,20 @@ export default function CameraModal({
             className="max-w-full max-h-full object-contain"
           />
         ) : (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="max-w-full max-h-full object-contain"
-          />
+          <>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="max-w-full max-h-full object-contain"
+            />
+            {isStarting && !isCameraReady && (
+              <div className="absolute rounded-lg bg-black/60 px-4 py-2 text-sm text-white">
+                Starting camera...
+              </div>
+            )}
+          </>
         )}
         <canvas ref={canvasRef} className="hidden" />
       </div>
@@ -163,9 +241,10 @@ export default function CameraModal({
             </button>
             <button
               onClick={handleSend}
-              className="px-6 py-3 bg-[#00a884] text-white rounded-full hover:bg-[#008f72]"
+              disabled={isSending}
+              className="px-6 py-3 bg-[#00a884] text-white rounded-full hover:bg-[#008f72] disabled:opacity-50"
             >
-              {confirmLabel}
+              {isSending ? 'Sending...' : confirmLabel}
             </button>
           </>
         ) : (

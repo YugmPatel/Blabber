@@ -2,11 +2,19 @@ import { useParams } from 'react-router-dom';
 import { useEffect, useState, useCallback } from 'react';
 import { useChat } from '@/hooks/useChats';
 import { useMessages, useDeleteMessage, useAddReaction, useVotePoll } from '@/hooks/useMessages';
+import { useChatActions } from '@/hooks/useChatActions';
+import { useChatDecisions } from '@/hooks/useChatDecisions';
+import { useGroupBrain } from '@/hooks/useGroupBrain';
+import { useWaitingOn } from '@/hooks/useWaitingOn';
 import { useChatSummary } from '@/hooks/useChatSummary';
 import { useUser, useUserPresence } from '@/hooks/useUsers';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppStore } from '@/store/app-store';
 import ChatHeader from '@/components/ChatHeader';
+import ChatActionsPanel from '@/components/ChatActionsPanel';
+import ChatDecisionsPanel from '@/components/ChatDecisionsPanel';
+import GroupBrainPanel from '@/components/GroupBrainPanel';
+import WaitingOnPanel from '@/components/WaitingOnPanel';
 import CatchMeUpCard from '@/components/CatchMeUpCard';
 import MessageList from '@/components/MessageList';
 import TypingDots from '@/components/TypingDots';
@@ -39,6 +47,56 @@ export default function ChatView() {
     generateError,
     generateSummary,
   } = useChatSummary(id);
+
+  const {
+    actions,
+    isLoadingActions,
+    isExtractingActions,
+    isUpdatingAction,
+    actionsError,
+    extractError,
+    updateError,
+    extractActions,
+    updateActionStatus,
+  } = useChatActions(id);
+
+  const {
+    decisions,
+    isLoadingDecisions,
+    isExtractingDecisions,
+    isUpdatingDecision,
+    isDeletingDecision,
+    decisionsError,
+    extractError: decisionExtractError,
+    updateError: decisionUpdateError,
+    deleteError: decisionDeleteError,
+    extractDecisions,
+    updateDecision,
+    deleteDecision,
+  } = useChatDecisions(id);
+
+  const {
+    brain,
+    isLoadingBrain,
+    isFetchingBrain,
+    brainError,
+    refetchBrain,
+  } = useGroupBrain(id);
+
+  const {
+    waitingOn,
+    isLoadingWaitingOn,
+    isExtractingWaitingOn,
+    isUpdatingWaitingOn,
+    isDeletingWaitingOn,
+    waitingOnError,
+    extractError: waitingOnExtractError,
+    updateError: waitingOnUpdateError,
+    deleteError: waitingOnDeleteError,
+    extractWaitingOn,
+    updateWaitingOn,
+    deleteWaitingOn,
+  } = useWaitingOn(id);
 
   // Get all messages from pages
   const messages = messagesData?.pages.flatMap((page) => page.messages) || [];
@@ -100,6 +158,18 @@ export default function ChatView() {
   const handleCatchMeUp = useCallback(() => {
     generateSummary({ messageLimit: 200 });
   }, [generateSummary]);
+
+  const handleFindActions = useCallback(() => {
+    extractActions({ messageLimit: 200 });
+  }, [extractActions]);
+
+  const handleFindDecisions = useCallback(() => {
+    extractDecisions({ messageLimit: 200 });
+  }, [extractDecisions]);
+
+  const handleFindWaitingOn = useCallback(() => {
+    extractWaitingOn({ messageLimit: 200 });
+  }, [extractWaitingOn]);
 
   // Join chat room when component mounts
   useEffect(() => {
@@ -189,6 +259,52 @@ export default function ChatView() {
           isGenerating={isGeneratingSummary}
           errorMessage={summaryError?.message || generateError?.message}
           onCatchMeUp={handleCatchMeUp}
+        />
+        <ChatActionsPanel
+          actions={actions}
+          isLoading={isLoadingActions}
+          isExtracting={isExtractingActions}
+          isUpdating={isUpdatingAction}
+          errorMessage={actionsError?.message || extractError?.message || updateError?.message}
+          onFindActions={handleFindActions}
+          onUpdateStatus={(actionId, status) => updateActionStatus({ actionId, status })}
+        />
+        <ChatDecisionsPanel
+          decisions={decisions}
+          isLoading={isLoadingDecisions}
+          isExtracting={isExtractingDecisions}
+          isUpdating={isUpdatingDecision || isDeletingDecision}
+          errorMessage={
+            decisionsError?.message ||
+            decisionExtractError?.message ||
+            decisionUpdateError?.message ||
+            decisionDeleteError?.message
+          }
+          onFindDecisions={handleFindDecisions}
+          onUpdateDecision={(decisionId, status) => updateDecision({ decisionId, patch: { status } })}
+          onDeleteDecision={deleteDecision}
+        />
+        <GroupBrainPanel
+          brain={brain}
+          isLoading={isLoadingBrain}
+          isFetching={isFetchingBrain}
+          errorMessage={brainError?.message}
+          onRefresh={() => refetchBrain()}
+        />
+        <WaitingOnPanel
+          waitingOn={waitingOn}
+          isLoading={isLoadingWaitingOn}
+          isExtracting={isExtractingWaitingOn}
+          isUpdating={isUpdatingWaitingOn || isDeletingWaitingOn}
+          errorMessage={
+            waitingOnError?.message ||
+            waitingOnExtractError?.message ||
+            waitingOnUpdateError?.message ||
+            waitingOnDeleteError?.message
+          }
+          onFindWaitingOn={handleFindWaitingOn}
+          onUpdateWaitingOn={(itemId, status) => updateWaitingOn({ itemId, patch: { status } })}
+          onDeleteWaitingOn={deleteWaitingOn}
         />
       </div>
 

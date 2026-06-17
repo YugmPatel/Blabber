@@ -3,7 +3,10 @@ import { logger } from '@repo/utils';
 import app from './app';
 import { connectToDatabase, closeDatabase } from './db';
 import { createChatIndexes } from './models/chat';
+import { createChatActionIndexes } from './models/chat-action';
+import { createChatDecisionIndexes } from './models/chat-decision';
 import { createChatSummaryIndexes } from './models/chat-summary';
+import { createWaitingOnIndexes } from './models/chat-waiting-on';
 import { createUserChatPreferencesIndexes } from './models/user-chat-preferences';
 
 const config = loadCommonConfig();
@@ -15,6 +18,9 @@ async function startServer() {
 
     // Create indexes
     await createChatIndexes();
+    await createChatActionIndexes();
+    await createChatDecisionIndexes();
+    await createWaitingOnIndexes();
     await createChatSummaryIndexes();
     await createUserChatPreferencesIndexes();
     logger.info('Database indexes created');

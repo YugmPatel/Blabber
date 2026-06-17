@@ -31,7 +31,9 @@ function formatDuration(seconds: number) {
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
-function getUserName(user: { name?: string; username?: string; email?: string } | null | undefined) {
+function getUserName(
+  user: { name?: string; username?: string; email?: string } | null | undefined
+) {
   return user?.name || user?.username || user?.email || 'Unknown user';
 }
 
@@ -40,6 +42,30 @@ function serializeDescription(description: RTCSessionDescriptionInit) {
     type: description.type,
     sdp: description.sdp,
   };
+}
+
+const callCanceledMessage = 'Call canceled.';
+
+function getMediaErrorMessage(callType: ActiveCall['callType'], error?: unknown) {
+  const devices = callType === 'video' ? 'camera and microphone' : 'microphone';
+
+  if (error instanceof DOMException) {
+    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+      return `Permission denied. Allow ${devices} access to start the call.`;
+    }
+    if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+      return callType === 'video'
+        ? 'No camera or microphone was found.'
+        : 'No microphone was found.';
+    }
+    if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+      return `Could not start the ${devices}. Another app may be using it.`;
+    }
+  }
+
+  return callType === 'video'
+    ? 'Could not access camera or microphone. Please check permissions.'
+    : 'Could not access microphone. Please check permissions.';
 }
 
 export default function CallModal({ socket, isConnected }: CallModalProps) {
@@ -65,10 +91,20 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const invitedCallIdsRef = useRef(new Set<string>());
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isClosingRef = useRef(false);
 
   useEffect(() => {
     activeCallRef.current = activeCall;
   }, [activeCall]);
+
+  useEffect(() => {
+    if (!activeCall) return;
+    isClosingRef.current = false;
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, [activeCall?.callId]);
 
   useEffect(() => {
     if (localVideoRef.current) {
@@ -86,6 +122,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
   }, [remoteStream, activeCall?.status]);
 
   const cleanupResources = useCallback(() => {
+    isClosingRef.current = true;
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
@@ -94,6 +131,18 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = null;
+    }
     pendingIceCandidatesRef.current = [];
     remoteStreamRef.current = null;
     setLocalStream(null);
@@ -101,6 +150,17 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
     setIsMuted(false);
     setIsCameraEnabled(true);
     setDuration(0);
+  }, []);
+
+  const isCurrentCall = useCallback((call: ActiveCall) => {
+    const currentCall = activeCallRef.current;
+    return Boolean(
+      currentCall &&
+        currentCall.callId === call.callId &&
+        currentCall.status !== 'ended' &&
+        currentCall.status !== 'error' &&
+        !isClosingRef.current
+    );
   }, []);
 
   const closeCall = useCallback(
@@ -115,14 +175,22 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
       if (closeTimerRef.current) {
         clearTimeout(closeTimerRef.current);
       }
-      closeTimerRef.current = setTimeout(() => {
-        if (!callId || activeCallRef.current?.callId === callId) {
-          clearActiveCall();
-        }
-      }, message ? 1600 : 900);
+      closeTimerRef.current = setTimeout(
+        () => {
+          if (!callId || activeCallRef.current?.callId === callId) {
+            clearActiveCall();
+          }
+        },
+        message ? 1600 : 900
+      );
     },
     [cleanupResources, clearActiveCall, updateActiveCall]
   );
+
+  const dismissCall = useCallback(() => {
+    cleanupResources();
+    clearActiveCall();
+  }, [cleanupResources, clearActiveCall]);
 
   const emitControl = useCallback(
     (event: 'call:accept' | 'call:decline' | 'call:cancel' | 'call:end', call: ActiveCall) => {
@@ -143,7 +211,11 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
 
     const candidates = pendingIceCandidatesRef.current.splice(0);
     for (const candidate of candidates) {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {
+        // Candidate timing can race with SDP setup; later candidates can still connect.
+      }
     }
   }, []);
 
@@ -153,6 +225,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
         peerConnectionRef.current.close();
       }
 
+      isClosingRef.current = false;
       const pc = new RTCPeerConnection(iceServers);
       peerConnectionRef.current = pc;
 
@@ -170,50 +243,81 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
       };
 
       pc.ontrack = (event) => {
-        const incomingStream = event.streams[0];
-        if (incomingStream) {
-          remoteStreamRef.current = incomingStream;
-          setRemoteStream(incomingStream);
+        const incomingStream = event.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
+        if (
+          !event.streams[0] &&
+          !incomingStream.getTracks().some((track) => track.id === event.track.id)
+        ) {
+          incomingStream.addTrack(event.track);
         }
+        remoteStreamRef.current = incomingStream;
+        setRemoteStream(incomingStream);
       };
 
       pc.onconnectionstatechange = () => {
+        if (isClosingRef.current) return;
         if (pc.connectionState === 'connected') {
           updateActiveCall({ status: 'active' });
         }
-        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-          updateActiveCall({ status: 'error', error: 'Call connection lost.' });
+        if (pc.connectionState === 'failed') {
+          const latestCall = activeCallRef.current;
+          if (latestCall) {
+            emitControl('call:end', latestCall);
+          }
+          closeCall('Call connection lost.');
         }
       };
 
       return pc;
     },
-    [socket, currentUser?._id, updateActiveCall]
+    [socket, currentUser?._id, emitControl, closeCall, updateActiveCall]
   );
 
   const ensureLocalMedia = useCallback(
     async (call: ActiveCall) => {
-      if (localStreamRef.current) return localStreamRef.current;
+      if (localStreamRef.current) {
+        const hasAudio = localStreamRef.current.getAudioTracks().length > 0;
+        const hasRequiredVideo =
+          call.callType === 'audio' || localStreamRef.current.getVideoTracks().length > 0;
+        if (hasAudio && hasRequiredVideo) return localStreamRef.current;
+        localStreamRef.current.getTracks().forEach((track) => track.stop());
+        localStreamRef.current = null;
+      }
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: call.callType === 'video',
-        });
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        setIsCameraEnabled(call.callType === 'video' ? stream.getVideoTracks().some((track) => track.enabled) : false);
-        return stream;
-      } catch {
-        const message =
-          call.callType === 'video'
-            ? 'Could not access camera or microphone. Please check permissions.'
-            : 'Could not access microphone. Please check permissions.';
+      if (!navigator.mediaDevices?.getUserMedia) {
+        const message = 'Media devices are not available in this browser.';
         updateActiveCall({ status: 'error', error: message });
         throw new Error(message);
       }
+
+      try {
+        const constraints: MediaStreamConstraints =
+          call.callType === 'video'
+            ? { audio: true, video: { facingMode: 'user' } }
+            : { audio: true, video: false };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (!isCurrentCall(call)) {
+          stream.getTracks().forEach((track) => track.stop());
+          throw new Error(callCanceledMessage);
+        }
+        localStreamRef.current = stream;
+        setLocalStream(stream);
+        setIsCameraEnabled(
+          call.callType === 'video' ? stream.getVideoTracks().some((track) => track.enabled) : false
+        );
+        return stream;
+      } catch (error) {
+        if (error instanceof Error && error.message === callCanceledMessage) {
+          throw error;
+        }
+        const message = getMediaErrorMessage(call.callType, error);
+        if (activeCallRef.current?.callId === call.callId) {
+          updateActiveCall({ status: 'error', error: message });
+        }
+        throw new Error(message);
+      }
     },
-    [updateActiveCall]
+    [isCurrentCall, updateActiveCall]
   );
 
   const startCallerOffer = useCallback(
@@ -223,21 +327,34 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
       updateActiveCall({ status: 'connecting' });
       try {
         const stream = await ensureLocalMedia(call);
+        if (!isCurrentCall(call)) return;
         const pc = createPeerConnection(stream);
+        isClosingRef.current = false;
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        if (!isCurrentCall(call)) return;
         socket.emit('call:offer', {
           callId: call.callId,
           fromUserId: currentUser._id,
           toUserId: call.peerUserId,
           offer: serializeDescription(offer),
         });
-      } catch {
-        emitControl('call:cancel', call);
-        setTimeout(() => closeCall(), 1200);
+      } catch (error) {
+        if (error instanceof Error && error.message === callCanceledMessage) return;
+        emitControl('call:end', call);
+        setTimeout(() => closeCall(error instanceof Error ? error.message : undefined), 1200);
       }
     },
-    [socket, currentUser?._id, ensureLocalMedia, createPeerConnection, emitControl, closeCall, updateActiveCall]
+    [
+      socket,
+      currentUser?._id,
+      ensureLocalMedia,
+      createPeerConnection,
+      emitControl,
+      closeCall,
+      updateActiveCall,
+      isCurrentCall,
+    ]
   );
 
   useEffect(() => {
@@ -249,6 +366,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
     invitedCallIdsRef.current.add(activeCall.callId);
     ensureLocalMedia(activeCall)
       .then(() => {
+        if (!isCurrentCall(activeCall) || activeCallRef.current?.status !== 'outgoing') return;
         socket.emit('call:invite', {
           callId: activeCall.callId,
           chatId: activeCall.chatId,
@@ -258,16 +376,17 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
           callType: activeCall.callType,
         });
       })
-      .catch(() => {
-        setTimeout(() => closeCall(), 1600);
+      .catch((error) => {
+        if (error instanceof Error && error.message === callCanceledMessage) return;
       });
-  }, [socket, isConnected, currentUser, activeCall, ensureLocalMedia, closeCall]);
+  }, [socket, isConnected, currentUser, activeCall, ensureLocalMedia, isCurrentCall]);
 
   useEffect(() => {
     if (!socket || !currentUser?._id) return;
 
     const handleIncoming = (data: CallInvitePayload) => {
-      if (activeCallRef.current) {
+      const currentCall = activeCallRef.current;
+      if (currentCall && currentCall.status !== 'ended' && currentCall.status !== 'error') {
         socket.emit('call:decline', {
           callId: data.callId,
           chatId: data.chatId,
@@ -275,6 +394,9 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
           toUserId: data.fromUserId,
         });
         return;
+      }
+      if (currentCall) {
+        cleanupResources();
       }
 
       setActiveCall({
@@ -321,11 +443,15 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
 
       try {
         const stream = await ensureLocalMedia(call);
+        if (!isCurrentCall(call)) return;
         const pc = peerConnectionRef.current ?? createPeerConnection(stream);
-        await pc.setRemoteDescription(new RTCSessionDescription(data.offer as RTCSessionDescriptionInit));
+        await pc.setRemoteDescription(
+          new RTCSessionDescription(data.offer as RTCSessionDescriptionInit)
+        );
         await drainPendingIceCandidates();
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        if (!isCurrentCall(call)) return;
         socket.emit('call:answer', {
           callId: call.callId,
           fromUserId: currentUser._id,
@@ -333,10 +459,16 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
           answer: serializeDescription(answer),
         });
         updateActiveCall({ status: 'active' });
-      } catch {
-        updateActiveCall({ status: 'error', error: 'Failed to answer the call.' });
-        emitControl('call:end', call);
-        setTimeout(() => closeCall(), 1600);
+      } catch (error) {
+        if (error instanceof Error && error.message === callCanceledMessage) return;
+        if (activeCallRef.current?.callId === call.callId) {
+          updateActiveCall({
+            status: 'error',
+            error: error instanceof Error ? error.message : 'Failed to answer the call.',
+          });
+          emitControl('call:end', call);
+          cleanupResources();
+        }
       }
     };
 
@@ -346,11 +478,14 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
       if (!call || call.callId !== data.callId || !pc) return;
 
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.answer as RTCSessionDescriptionInit));
+        await pc.setRemoteDescription(
+          new RTCSessionDescription(data.answer as RTCSessionDescriptionInit)
+        );
         await drainPendingIceCandidates();
         updateActiveCall({ status: 'active' });
       } catch {
-        updateActiveCall({ status: 'error', error: 'Failed to connect the call.' });
+        emitControl('call:end', call);
+        closeCall('Failed to connect the call.');
       }
     };
 
@@ -367,7 +502,9 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(data.candidate as RTCIceCandidateInit));
       } catch {
-        pendingIceCandidatesRef.current.push(data.candidate as RTCIceCandidateInit);
+        if (!isClosingRef.current) {
+          pendingIceCandidatesRef.current.push(data.candidate as RTCIceCandidateInit);
+        }
       }
     };
 
@@ -405,11 +542,13 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
     setActiveCall,
     updateActiveCall,
     ensureLocalMedia,
+    cleanupResources,
     createPeerConnection,
     drainPendingIceCandidates,
     emitControl,
     closeCall,
     startCallerOffer,
+    isCurrentCall,
   ]);
 
   useEffect(() => {
@@ -418,7 +557,21 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
     return () => clearInterval(timer);
   }, [activeCall?.status]);
 
-  useEffect(() => cleanupResources, [cleanupResources]);
+  useEffect(() => {
+    if (!activeCall) {
+      cleanupResources();
+    }
+  }, [activeCall, cleanupResources]);
+
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+      cleanupResources();
+    },
+    [cleanupResources]
+  );
 
   const acceptCall = async () => {
     const call = activeCallRef.current;
@@ -426,11 +579,15 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
     updateActiveCall({ status: 'connecting' });
     try {
       const stream = await ensureLocalMedia(call);
+      if (!isCurrentCall(call)) return;
       createPeerConnection(stream);
+      isClosingRef.current = false;
       emitControl('call:accept', call);
-    } catch {
-      emitControl('call:decline', call);
-      setTimeout(() => closeCall(), 1600);
+    } catch (error) {
+      if (error instanceof Error && error.message === callCanceledMessage) return;
+      if (activeCallRef.current?.callId === call.callId) {
+        emitControl('call:decline', call);
+      }
     }
   };
 
@@ -444,7 +601,12 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
   const cancelOrEndCall = () => {
     const call = activeCallRef.current;
     if (!call) return;
-    const event = call.status === 'outgoing' || call.status === 'connecting' ? 'call:cancel' : 'call:end';
+    const event =
+      call.status === 'incoming'
+        ? 'call:decline'
+        : call.status === 'outgoing'
+          ? 'call:cancel'
+          : 'call:end';
     emitControl(event, call);
     closeCall();
   };
@@ -476,7 +638,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
       <div className="relative flex h-[min(720px,92vh)] w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-white shadow-2xl">
         <button
           type="button"
-          onClick={cancelOrEndCall}
+          onClick={isEndedOrError ? dismissCall : cancelOrEndCall}
           aria-label="Close call"
           className="absolute right-4 top-4 z-20 rounded-full bg-white/10 p-2 text-white transition hover:bg-white/20"
         >
@@ -485,7 +647,12 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
 
         <div className="relative flex min-h-0 flex-1 items-center justify-center bg-slate-950">
           {isVideoCall && isActive && remoteStream ? (
-            <video ref={remoteVideoRef} autoPlay playsInline className="h-full w-full object-cover" />
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="h-full w-full object-cover"
+            />
           ) : (
             <div className="flex flex-col items-center text-center">
               <Avatar src={activeCall.peerAvatarUrl} alt={activeCall.peerName} size="xl" />
@@ -495,7 +662,8 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
                 {activeCall.status === 'incoming' &&
                   `Incoming ${activeCall.callType} call from ${activeCall.peerName}`}
                 {activeCall.status === 'connecting' && 'Connecting...'}
-                {activeCall.status === 'active' && (isVideoCall ? 'Connected' : formatDuration(duration))}
+                {activeCall.status === 'active' &&
+                  (isVideoCall ? 'Connected' : formatDuration(duration))}
                 {activeCall.status === 'ended' && (activeCall.error || 'Call ended.')}
                 {activeCall.status === 'error' && activeCall.error}
               </p>
@@ -561,7 +729,9 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
                     type="button"
                     onClick={toggleCamera}
                     className={`flex h-12 w-12 items-center justify-center rounded-full transition ${
-                      !isCameraEnabled ? 'bg-rose-600 hover:bg-rose-500' : 'bg-white/15 hover:bg-white/25'
+                      !isCameraEnabled
+                        ? 'bg-rose-600 hover:bg-rose-500'
+                        : 'bg-white/15 hover:bg-white/25'
                     }`}
                     aria-label={isCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
                   >
@@ -581,7 +751,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
                 {isEndedOrError && (
                   <button
                     type="button"
-                    onClick={clearActiveCall}
+                    onClick={dismissCall}
                     className="rounded-xl bg-white px-6 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
                   >
                     Close

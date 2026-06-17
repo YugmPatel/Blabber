@@ -1,30 +1,26 @@
 import type { ChatIntelligenceSummary } from '@repo/types';
+import { logger } from '@repo/utils';
 import { createMockSummaryProvider } from './providers/mock-summary-provider';
+import { createOpenRouterSummaryProvider } from './providers/openrouter-summary-provider';
 
 export interface SummaryInputMessage {
   _id: string;
   senderId: string;
+  senderName?: string | null;
   body: string;
+  type?: string;
   createdAt: string;
 }
 
 export interface AISummaryContext {
   chatId: string;
   currentUserId: string;
+  currentUserName?: string | null;
   messages: SummaryInputMessage[];
 }
 
 export interface AISummaryProvider {
   generateSummary(context: AISummaryContext): Promise<ChatIntelligenceSummary>;
-}
-
-function hasAnyAIKey(): boolean {
-  return Boolean(
-    process.env.AI_SUMMARY_API_KEY ||
-      process.env.OPENAI_API_KEY ||
-      process.env.CLAUDE_API_KEY ||
-      process.env.GEMINI_API_KEY
-  );
 }
 
 export class AISummaryService {
@@ -35,11 +31,52 @@ export class AISummaryService {
   }
 }
 
+function shouldUseMockFallback(): boolean {
+  return (
+    process.env.OPENROUTER_MOCK_FALLBACK === 'true' ||
+    process.env.AI_SUMMARY_MOCK_FALLBACK === 'true'
+  );
+}
+
+function createFallbackProvider(
+  primary: AISummaryProvider,
+  fallback: AISummaryProvider
+): AISummaryProvider {
+  return {
+    async generateSummary(context: AISummaryContext): Promise<ChatIntelligenceSummary> {
+      try {
+        return await primary.generateSummary(context);
+      } catch (error) {
+        logger.warn(
+          {
+            error: error instanceof Error ? error.message : 'Unknown AI summary error',
+            chatId: context.chatId,
+          },
+          'AI summary provider failed; using mock fallback'
+        );
+        return fallback.generateSummary(context);
+      }
+    },
+  };
+}
+
 export function createAISummaryService(): AISummaryService {
-  if (!hasAnyAIKey()) {
-    return new AISummaryService(createMockSummaryProvider());
+  const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
+  const mockProvider = createMockSummaryProvider();
+
+  if (!openRouterApiKey) {
+    return new AISummaryService(mockProvider);
   }
 
-  // API keys may be set for future providers (OpenAI, Claude, Gemini); until wired, keep deterministic mock.
-  return new AISummaryService(createMockSummaryProvider());
+  const openRouterProvider = createOpenRouterSummaryProvider({
+    apiKey: openRouterApiKey,
+    model: process.env.OPENROUTER_MODEL,
+    referer: process.env.OPENROUTER_HTTP_REFERER || process.env.OPENROUTER_REFERER,
+  });
+
+  if (shouldUseMockFallback()) {
+    return new AISummaryService(createFallbackProvider(openRouterProvider, mockProvider));
+  }
+
+  return new AISummaryService(openRouterProvider);
 }

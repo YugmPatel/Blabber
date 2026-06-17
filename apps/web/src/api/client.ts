@@ -1,5 +1,21 @@
 import axios, { AxiosError } from 'axios';
-import type { ChatIntelligenceSummary, SummarizeChatDTO } from '@repo/types';
+import type {
+  ChatActionExtractionResult,
+  ChatActionItem,
+  ChatActionStatus,
+  ChatDecision,
+  ChatDecisionStatus,
+  ChatIntelligenceSummary,
+  ExtractChatActionsDTO,
+  ExtractChatDecisionsDTO,
+  GroupBrain,
+  UpdateChatDecisionDTO,
+  UpdateWaitingOnDTO,
+  SummarizeChatDTO,
+  WaitingOnExtractionResult,
+  WaitingOnItem,
+  WaitingOnStatus,
+} from '@repo/types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -62,6 +78,126 @@ export async function generateChatSummary(
   const { data } = await apiClient.post<{ summary: ChatIntelligenceSummary }>(
     `/api/intelligence/chats/${chatId}/summarize`,
     payload ?? {}
+  );
+  return data;
+}
+
+export interface ChatActionsResponse {
+  actions: ChatActionItem[];
+}
+
+export async function fetchChatActions(chatId: string): Promise<ChatActionsResponse> {
+  const { data } = await apiClient.get<ChatActionsResponse>(
+    `/api/intelligence/chats/${chatId}/actions`
+  );
+  return data;
+}
+
+export async function extractChatActions(
+  chatId: string,
+  payload?: ExtractChatActionsDTO
+): Promise<ChatActionExtractionResult> {
+  const { data } = await apiClient.post<ChatActionExtractionResult>(
+    `/api/intelligence/chats/${chatId}/actions/extract`,
+    payload ?? {}
+  );
+  return data;
+}
+
+export async function updateChatAction(
+  actionId: string,
+  patch: { status: ChatActionStatus }
+): Promise<{ action: ChatActionItem }> {
+  const { data } = await apiClient.patch<{ action: ChatActionItem }>(
+    `/api/intelligence/actions/${actionId}`,
+    patch
+  );
+  return data;
+}
+
+export interface ChatDecisionsResponse {
+  decisions: ChatDecision[];
+}
+
+export async function fetchChatDecisions(chatId: string): Promise<ChatDecisionsResponse> {
+  const { data } = await apiClient.get<ChatDecisionsResponse>(
+    `/api/intelligence/chats/${chatId}/decisions`
+  );
+  return data;
+}
+
+export async function extractChatDecisions(
+  chatId: string,
+  payload?: ExtractChatDecisionsDTO
+): Promise<{ decisions: ChatDecision[]; generatedAt: string; sourceMessageIds: string[]; summary?: string }> {
+  const { data } = await apiClient.post<{
+    decisions: ChatDecision[];
+    generatedAt: string;
+    sourceMessageIds: string[];
+    summary?: string;
+  }>(`/api/intelligence/chats/${chatId}/decisions/extract`, payload ?? {});
+  return data;
+}
+
+export async function updateChatDecision(
+  decisionId: string,
+  patch: UpdateChatDecisionDTO & { status?: ChatDecisionStatus }
+): Promise<{ decision: ChatDecision }> {
+  const { data } = await apiClient.patch<{ decision: ChatDecision }>(
+    `/api/intelligence/decisions/${decisionId}`,
+    patch
+  );
+  return data;
+}
+
+export async function deleteChatDecision(decisionId: string): Promise<void> {
+  await apiClient.delete(`/api/intelligence/decisions/${decisionId}`);
+}
+
+export interface WaitingOnResponse {
+  waitingOn: WaitingOnItem[];
+}
+
+export async function fetchWaitingOnItems(chatId: string): Promise<WaitingOnResponse> {
+  const { data } = await apiClient.get<WaitingOnResponse>(
+    `/api/intelligence/chats/${chatId}/waiting-on`
+  );
+  return data;
+}
+
+export async function extractWaitingOnItems(
+  chatId: string,
+  payload?: { messageLimit?: number }
+): Promise<WaitingOnExtractionResult> {
+  const { data } = await apiClient.post<WaitingOnExtractionResult>(
+    `/api/intelligence/chats/${chatId}/waiting-on/extract`,
+    payload ?? {}
+  );
+  return data;
+}
+
+export async function updateWaitingOnItem(
+  itemId: string,
+  patch: UpdateWaitingOnDTO & { status?: WaitingOnStatus }
+): Promise<{ item: WaitingOnItem }> {
+  const { data } = await apiClient.patch<{ item: WaitingOnItem }>(
+    `/api/intelligence/waiting-on/${itemId}`,
+    patch
+  );
+  return data;
+}
+
+export async function deleteWaitingOnItem(itemId: string): Promise<void> {
+  await apiClient.delete(`/api/intelligence/waiting-on/${itemId}`);
+}
+
+export interface GroupBrainResponse {
+  brain: GroupBrain;
+}
+
+export async function fetchGroupBrain(chatId: string): Promise<GroupBrainResponse> {
+  const { data } = await apiClient.get<GroupBrainResponse>(
+    `/api/intelligence/chats/${chatId}/brain`
   );
   return data;
 }

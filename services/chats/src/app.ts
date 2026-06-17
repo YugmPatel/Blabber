@@ -63,11 +63,37 @@ import { pinChat, unpinChat, archiveChat, unarchiveChat } from './routes/pin-arc
 import { requireChatAdmin } from './middleware/rbac';
 import { summarizeChat } from './routes/summarize-chat';
 import { getChatSummary } from './routes/get-chat-summary';
+import { extractChatActions, getChatActions, updateChatAction } from './routes/chat-actions';
+import {
+  deleteChatDecision,
+  extractChatDecisions,
+  getChatDecisions,
+  updateChatDecision,
+} from './routes/chat-decisions';
+import { getGroupBrain } from './routes/group-brain';
+import {
+  deleteWaitingOnItem,
+  extractWaitingOnItems,
+  getWaitingOnItems,
+  updateWaitingOnItem,
+} from './routes/waiting-on';
 
 app.post('/', authMiddleware, createChat);
 app.get('/', authMiddleware, listChats);
 app.post('/intelligence/chats/:chatId/summarize', authMiddleware, summarizeChat);
 app.get('/intelligence/chats/:chatId/summary', authMiddleware, getChatSummary);
+app.post('/intelligence/chats/:chatId/actions/extract', authMiddleware, extractChatActions);
+app.get('/intelligence/chats/:chatId/actions', authMiddleware, getChatActions);
+app.patch('/intelligence/actions/:actionId', authMiddleware, updateChatAction);
+app.post('/intelligence/chats/:chatId/decisions/extract', authMiddleware, extractChatDecisions);
+app.get('/intelligence/chats/:chatId/decisions', authMiddleware, getChatDecisions);
+app.patch('/intelligence/decisions/:decisionId', authMiddleware, updateChatDecision);
+app.delete('/intelligence/decisions/:decisionId', authMiddleware, deleteChatDecision);
+app.post('/intelligence/chats/:chatId/waiting-on/extract', authMiddleware, extractWaitingOnItems);
+app.get('/intelligence/chats/:chatId/waiting-on', authMiddleware, getWaitingOnItems);
+app.patch('/intelligence/waiting-on/:itemId', authMiddleware, updateWaitingOnItem);
+app.delete('/intelligence/waiting-on/:itemId', authMiddleware, deleteWaitingOnItem);
+app.get('/intelligence/chats/:chatId/brain', authMiddleware, getGroupBrain);
 app.get('/:id', authMiddleware, getChat);
 app.patch('/:id', authMiddleware, requireChatAdmin, updateChat);
 app.post('/:id/members', authMiddleware, requireChatAdmin, addMember);

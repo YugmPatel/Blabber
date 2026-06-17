@@ -115,6 +115,11 @@ services:
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
       JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
       JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
+      OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-}
+      OPENROUTER_REFERER: ${OPENROUTER_REFERER:-}
+      OPENROUTER_MOCK_FALLBACK: ${OPENROUTER_MOCK_FALLBACK:-false}
     ports:
       - '3003:3003'
     depends_on:

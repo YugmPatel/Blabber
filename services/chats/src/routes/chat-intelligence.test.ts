@@ -19,6 +19,9 @@ vi.mock('@repo/utils', async () => {
 
 describe('Chat intelligence routes', () => {
   beforeEach(async () => {
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_MODEL;
+    delete process.env.OPENROUTER_MOCK_FALLBACK;
     await connectToDatabase();
     const db = getDatabase();
     await db.collection('chats').deleteMany({});
@@ -138,7 +141,9 @@ describe('Chat intelligence routes', () => {
       updatedAt: new Date(),
     });
 
-    const response = await request(app).post(`/intelligence/chats/${chatResult.insertedId.toString()}/summarize`);
+    const response = await request(app).post(
+      `/intelligence/chats/${chatResult.insertedId.toString()}/summarize`
+    );
 
     expect(response.status).toBe(403);
     expect(response.body.error).toBe('Forbidden');

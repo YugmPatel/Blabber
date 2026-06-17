@@ -14,9 +14,17 @@ interface MessageDocument {
   _id: ObjectId;
   chatId: ObjectId;
   senderId: ObjectId;
+  type?: string;
   body: string;
   createdAt: Date;
   deletedFor: ObjectId[];
+}
+
+interface UserDocument {
+  _id: ObjectId;
+  username?: string;
+  email?: string;
+  name?: string;
 }
 
 export const summarizeChat = asyncHandler(async (req: Request, res: Response) => {
@@ -60,7 +68,9 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     });
   }
 
-  const isParticipant = chat.participants.some((participantId) => participantId.equals(userObjectId));
+  const isParticipant = chat.participants.some((participantId) =>
+    participantId.equals(userObjectId)
+  );
   if (!isParticipant) {
     return res.status(403).json({
       error: 'Forbidden',
@@ -79,13 +89,30 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     .limit(messageLimit)
     .toArray();
 
+  const senderIds = Array.from(
+    new Set([userId, ...rawMessages.map((message) => message.senderId.toString())])
+  ).map((id) => new ObjectId(id));
+  const userDocs = await db
+    .collection<UserDocument>('users')
+    .find({ _id: { $in: senderIds } })
+    .project<UserDocument>({ _id: 1, username: 1, email: 1, name: 1 })
+    .toArray();
+  const userNamesById = new Map(
+    userDocs.map((user) => [
+      user._id.toString(),
+      user.name || user.username || user.email || user._id.toString(),
+    ])
+  );
+
   const contextMessages: SummaryInputMessage[] = rawMessages
     .slice()
     .reverse()
     .map((message) => ({
       _id: message._id.toString(),
       senderId: message.senderId.toString(),
+      senderName: userNamesById.get(message.senderId.toString()) ?? null,
       body: message.body,
+      type: message.type ?? 'text',
       createdAt: message.createdAt.toISOString(),
     }));
 
@@ -93,12 +120,16 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
   const summary = await summaryService.generateSummary({
     chatId,
     currentUserId: userId,
+    currentUserName: userNamesById.get(userId) ?? null,
     messages: contextMessages,
   });
 
   const parsedSummary = ChatIntelligenceSummarySchema.safeParse(summary);
   if (!parsedSummary.success) {
-    logger.error({ issues: parsedSummary.error.flatten() }, 'Generated summary failed schema validation');
+    logger.error(
+      { issues: parsedSummary.error.flatten() },
+      'Generated summary failed schema validation'
+    );
     return res.status(500).json({
       error: 'Internal Server Error',
       message: 'Summary generation produced invalid structured output',

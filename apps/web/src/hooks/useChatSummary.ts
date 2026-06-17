@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ChatIntelligenceSummary, SummarizeChatDTO } from '@repo/types';
 import { fetchLatestChatSummary, generateChatSummary } from '@/api/client';
+import { groupBrainKeys } from '@/hooks/useGroupBrain';
 
 export const chatSummaryKeys = {
   all: ['chat-summary'] as const,
@@ -22,6 +23,7 @@ export function useChatSummary(chatId: string | undefined) {
       queryClient.setQueryData(chatSummaryKeys.detail(chatId || ''), {
         summary: data.summary,
       });
+      queryClient.invalidateQueries({ queryKey: groupBrainKeys.detail(chatId || '') });
     },
   });
 

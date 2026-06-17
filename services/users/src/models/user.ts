@@ -34,8 +34,16 @@ export async function createUserIndexes(): Promise<void> {
     // Unique index on email
     await collection.createIndex({ email: 1 }, { unique: true });
 
-    // Text index on username and name for search
-    await collection.createIndex({ username: 'text', name: 'text' }, { name: 'user_search_text' });
+    // Text index on username and name for search. MongoDB rejects creating the
+    // same text index under a new name, so reuse an equivalent existing index.
+    const indexes = await collection.indexes();
+    const hasSearchTextIndex = indexes.some(
+      (index) => index.key?._fts === 'text' && index.weights?.username && index.weights?.name
+    );
+
+    if (!hasSearchTextIndex) {
+      await collection.createIndex({ username: 'text', name: 'text' }, { name: 'user_search_text' });
+    }
 
     logger.info('User indexes created successfully');
   } catch (error) {

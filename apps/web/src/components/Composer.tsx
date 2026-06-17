@@ -1,10 +1,4 @@
-import {
-  useState,
-  useRef,
-  useEffect,
-  type KeyboardEvent,
-  type ChangeEvent,
-} from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react';
 import {
   Plus,
   Mic,
@@ -39,10 +33,61 @@ interface ComposerProps {
 
 // Simple emoji picker data
 const EMOJI_CATEGORIES = {
-  Smileys: ['😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘'],
+  Smileys: [
+    '😀',
+    '😃',
+    '😄',
+    '😁',
+    '😅',
+    '😂',
+    '🤣',
+    '😊',
+    '😇',
+    '🙂',
+    '🙃',
+    '😉',
+    '😌',
+    '😍',
+    '🥰',
+    '😘',
+  ],
   Gestures: ['👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👏', '🙌', '👐', '🤲', '🤝', '🙏'],
-  Hearts: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖'],
-  Objects: ['🎉', '🎊', '🎈', '🎁', '🏆', '🥇', '🥈', '🥉', '⚽', '🏀', '🏈', '⚾', '🎾', '🏐', '🏉', '🎱'],
+  Hearts: [
+    '❤️',
+    '🧡',
+    '💛',
+    '💚',
+    '💙',
+    '💜',
+    '🖤',
+    '🤍',
+    '🤎',
+    '💔',
+    '❣️',
+    '💕',
+    '💞',
+    '💓',
+    '💗',
+    '💖',
+  ],
+  Objects: [
+    '🎉',
+    '🎊',
+    '🎈',
+    '🎁',
+    '🏆',
+    '🥇',
+    '🥈',
+    '🥉',
+    '⚽',
+    '🏀',
+    '🏈',
+    '⚾',
+    '🎾',
+    '🏐',
+    '🏉',
+    '🎱',
+  ],
 };
 
 const STICKERS = [
@@ -59,6 +104,18 @@ const STICKERS = [
   { emoji: '✅', label: 'Done' },
   { emoji: '🚀', label: 'Launch' },
 ];
+
+const SUPPORTED_DOCUMENT_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+  'text/csv',
+  'application/rtf',
+  'text/rtf',
+]);
 
 export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProps) => {
   const [message, setMessage] = useState('');
@@ -87,7 +144,13 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
 
   const socket = useAppStore((state) => state.socket);
   const { sendMessage } = useSendMessage();
-  const { uploadMedia, uploadFile, isUploading, uploadProgress } = useFileUpload();
+  const {
+    uploadMedia,
+    uploadFile,
+    isUploading,
+    uploadProgress,
+    error: uploadError,
+  } = useFileUpload();
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isTypingRef = useRef(false);
 
@@ -230,11 +293,22 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       return;
     }
 
+    if (fileType === 'document' && file.type && !SUPPORTED_DOCUMENT_TYPES.has(file.type)) {
+      setAttachmentNotice({
+        title: 'Document upload coming soon',
+        message:
+          'This document type is not supported yet. PDF, Word, Excel, CSV, TXT, and RTF files can be sent now.',
+      });
+      e.target.value = '';
+      return;
+    }
+
     const media = await uploadAttachment(file);
     if (!media) {
       setAttachmentNotice({
         title: fileType === 'image' ? 'Photo upload failed' : 'Document upload failed',
         message:
+          uploadError ||
           'Media upload is not available for this file right now. Your text message was not sent.',
       });
     } else {
@@ -283,7 +357,8 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   };
 
   const handleVoiceSend = async (audioBlob: Blob, duration: number) => {
-    const audioType = audioBlob.type && audioBlob.type.startsWith('audio/') ? audioBlob.type : 'audio/webm';
+    const audioType =
+      audioBlob.type && audioBlob.type.startsWith('audio/') ? audioBlob.type : 'audio/webm';
     const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: audioType });
     const media = await uploadAttachment(file);
     if (!media) {
@@ -301,7 +376,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         mediaFileName: media.fileName || file.name,
         mediaMimeType: media.mimeType || file.type,
         mediaSize: media.size || file.size,
-        mediaDuration: duration,
+        mediaDuration: duration > 0 ? duration : undefined,
         replyToId: replyToMessage?._id,
       });
       if (onCancelReply) onCancelReply();
@@ -451,7 +526,9 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-teal-600">Reply</p>
-            <p className="truncate text-sm text-slate-700 dark:text-slate-300">{replyToMessage.body}</p>
+            <p className="truncate text-sm text-slate-700 dark:text-slate-300">
+              {replyToMessage.body}
+            </p>
           </div>
           <button
             onClick={onCancelReply}
@@ -484,7 +561,6 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
 
       {/* Input row */}
       <div className="flex items-end gap-2">
-
         {/* ── + action button & floating menu ── */}
         <div ref={actionMenuRef} className="relative flex-shrink-0 self-end pb-0.5">
           <button
