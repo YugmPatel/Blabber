@@ -1,181 +1,374 @@
 # Blabber
 
-### _Talk. Decide. Do._
+An AI-powered real-time conversation workspace that turns everyday chats into summaries, decisions, action items, and shared context.
 
-An AI-native real-time chat application built with React, Node.js microservices, MongoDB, Redis, and WebSocket. Blabber turns group conversations into summaries, tasks, decisions, and shared memory — seamlessly.
+Blabber is not just a chat application. It combines real-time messaging, group collaboration, media sharing, and chat intelligence so conversations remain useful after they happen.
 
-![Blabber](https://img.shields.io/badge/Blabber-AI_Chat-6366f1?style=for-the-badge&logoColor=white)
-![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript)
-![Node.js](https://img.shields.io/badge/Node.js-20-339933?style=flat-square&logo=node.js)
-![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb)
-![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis)
-![Socket.io](https://img.shields.io/badge/Socket.io-4-010101?style=flat-square&logo=socket.io)
-![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3-06B6D4?style=flat-square&logo=tailwindcss)
+## The Problem
 
----
+Most chat apps are good at sending messages, but they are poor at helping people keep track of what was decided, what needs to be done, and what is still waiting for someone.
 
-## Features
+In busy group chats, important context gets buried quickly:
 
-### AI Intelligence
+- Decisions are scattered across long threads.
+- Action items are mentioned once and forgotten.
+- Follow-ups depend on memory instead of structure.
+- New participants have to scroll through old messages to understand what happened.
 
-- **Catch-Me-Up Summaries** — One-click AI summary of any chat thread so you never lose context
-- **Task Extraction** _(coming soon)_ — Automatically surfaces action items from conversations
-- **Shared Memory** _(coming soon)_ — Remembers decisions and context across chats
-- **Waiting On** _(coming soon)_ — Tracks who you're waiting on for responses
+Blabber is designed around a different idea: communication should create useful context, not just more messages.
 
-### Core Chat
+## Why Blabber Is Different
 
-- Real-time messaging with WebSocket (Socket.io)
-- Direct messages and group chats
-- Message reactions, replies, edits, and deletion
-- Typing indicators and read receipts
-- Online/offline presence tracking
-- Image, video, and document sharing
-- Voice messages and camera capture
-- Contact sharing and polls
-- Scheduled messages
+Traditional chat apps focus on delivery. Blabber focuses on understanding.
 
-### UI & Experience
+| Capability | Traditional chat apps | Blabber |
+| --- | --- | --- |
+| Message delivery | Send and receive messages | Real-time delivery with structured backend services |
+| Long conversation understanding | Manual scrolling and searching | Chat summaries and conversation context |
+| Action item tracking | Buried in messages | Extracted action items and follow-up awareness |
+| Decision tracking | Spread across the thread | Decision extraction and decision history |
+| Waiting-on tracking | Users remember manually | Waiting-on items surface pending responsibilities |
+| Group memory | Depends on individual memory | Group brain acts as shared conversation context |
+| AI summaries | Usually external or absent | Built into chat intelligence routes |
+| Media/context handling | Attach files and links | Media uploads, avatars, documents, and link previews |
+| Architecture | Often a single app/server | Gateway plus dedicated microservices |
 
-- **Modern AI-native design** — Clean, premium workspace feel (Tailwind CSS)
-- **Light & Dark mode** — Persistent theme with smooth toggle
-- **Collapsible sidebar** — Drawer-style navigation, desktop and mobile
-- **Polished avatars** — Deterministic color-coded initials, online status dots
-- **WhatsApp-style composer** — `+` action menu for attachments, emoji, voice
-- **Unified Settings** — One settings page with sub-sections (Profile, Privacy, Notifications, Appearance, AI Engine, Help)
-- Video and voice calls (WebRTC)
+## Key Features
 
----
+### Core Messaging
+
+- One-to-one chats
+- Group chats
+- Real-time message delivery
+- Chat list and chat detail views
+- Message editing
+- Message deletion
+- Reactions
+- Read receipts
+- Poll-style message support
+- Reply support
+
+### AI Conversation Intelligence
+
+- Chat summaries
+- Action item extraction
+- Decision extraction
+- Waiting-on tracking
+- Group brain / shared conversation memory
+- Intelligent conversation context for long threads
+
+These features are intended to help users avoid scrolling through long conversations to recover what matters.
+
+### Conversation-to-Action Workflow
+
+Blabber is built around the idea that conversations often create work. The app includes backend and frontend flows for surfacing:
+
+- What needs to be done
+- Who may be responsible
+- What was decided
+- What is still pending
+- What the group should remember
+
+### Group Brain
+
+Group Brain is Blabber's shared memory layer for a chat. Instead of every participant manually remembering decisions, context, and follow-ups, the conversation can preserve useful knowledge and make it easier to access later.
+
+### User and Profile
+
+- Register
+- Login
+- Refresh session
+- Logout
+- Current user profile
+- Profile update
+- Avatar management
+- Password reset flow
+
+### Media and Rich Context
+
+- Image upload
+- Document upload
+- Avatar upload
+- Group avatar upload
+- Link preview support
+- Local media serving
+- S3-style presigned upload support when configured
+
+Blabber treats media as part of the conversation context, not just as isolated attachments.
+
+### Realtime Layer
+
+- Socket.IO gateway
+- Live message events
+- Message update events
+- Message delete events
+- Reactions
+- Read receipts
+- Typing and presence-style realtime events
+- Call signaling support
+- Redis-backed pub/sub flow for realtime broadcasting
+
+### Notifications
+
+- Push subscription routes
+- Push unsubscribe routes
+- Notification sending routes
+
+## Product Use Cases
+
+- Student project groups tracking decisions, responsibilities, and open questions
+- Startup teams discussing product ideas, next steps, and ownership
+- Friends planning trips, dinners, events, or shared purchases
+- Communities managing long-running group conversations
+- Teams that need summaries instead of scrolling through chat history
+- Any group that wants chat to become useful context instead of disappearing into the thread
+
+## Architecture
+
+```text
+Web App
+  |
+  v
+API Gateway + Socket.IO
+  |
+  +--> Auth Service
+  +--> Users Service
+  +--> Chats Service
+  +--> Messages Service
+  +--> Media Service
+  +--> Notifications Service
+  |
+  +--> MongoDB
+  +--> Redis
+```
+
+The web app talks to the gateway. The gateway proxies HTTP requests to the appropriate backend service and also hosts the Socket.IO realtime layer.
+
+MongoDB stores app data such as users, chats, messages, media records, sessions, and intelligence outputs. Redis supports pub/sub, presence-related workflows, caching, and realtime communication patterns.
+
+This structure makes Blabber closer to a production-style distributed system than a single-server chat demo.
 
 ## Tech Stack
 
-| Layer     | Technology                                                      |
-| --------- | --------------------------------------------------------------- |
-| Frontend  | React 18, TypeScript, Vite, TailwindCSS, Zustand, React Query  |
-| Gateway   | Express.js, Socket.io, Redis Pub/Sub adapter                    |
-| Services  | Node.js microservices (auth, users, chats, messages, media, notifications) |
-| Database  | MongoDB 7                                                       |
-| Cache     | Redis 7                                                         |
-| Real-time | Socket.io + Redis Pub/Sub                                       |
-| Auth      | JWT access tokens + HTTP-only refresh cookies                   |
-| Monorepo  | pnpm workspaces                                                 |
-
----
+| Layer | Technology |
+| --- | --- |
+| Frontend | React `19.1.1`, TypeScript, Vite `7`, Tailwind CSS |
+| Frontend state/data | React Query, Zustand, React Router |
+| Backend runtime | Node.js |
+| Backend framework | Express |
+| API gateway | Express, http-proxy-middleware |
+| Realtime | Socket.IO, Socket.IO client |
+| Database | MongoDB 7 |
+| Cache/pubsub | Redis 7 |
+| Auth | JWT access tokens, HttpOnly refresh cookies, bcrypt |
+| Validation | Zod |
+| Media | Local media flow, AWS S3 presign support via AWS SDK |
+| AI provider integration | OpenRouter-compatible provider code with chat completion flows |
+| Package manager | pnpm workspaces, pnpm `8.15.0` |
+| Build orchestration | Turbo |
+| Containers | Docker, Docker Compose |
 
 ## Project Structure
 
-```
-blabber/
-├── apps/
-│   ├── web/                  # React frontend (Vite + TypeScript)
-│   └── gateway/              # API Gateway + WebSocket (Express + Socket.io)
-├── services/
-│   ├── auth/                 # Authentication — JWT, refresh tokens
-│   ├── users/                # User profiles & presence
-│   ├── chats/                # Chat rooms, groups, AI intelligence
-│   ├── messages/             # Message storage & retrieval
-│   ├── media/                # File uploads (images, docs, audio)
-│   └── notifications/        # Push notifications
-├── packages/
-│   ├── types/                # Shared TypeScript types
-│   ├── config/               # Shared configuration
-│   └── utils/                # Shared utilities
-├── docker-compose.full.yml   # Full production-like stack
-└── docker-compose.dev.yml    # Local dev stack
-```
+| Path | Purpose |
+| --- | --- |
+| `apps/web` | React frontend application. |
+| `apps/gateway` | API gateway and Socket.IO server. |
+| `services/auth` | Registration, login, refresh sessions, logout, password reset, and current user routes. |
+| `services/users` | User profiles, profile update, search, block/unblock, and presence lookup. |
+| `services/chats` | Direct/group chats, group management, chat preferences, and intelligence routes. |
+| `services/messages` | Message retrieval, sending, editing, deletion, reactions, read state, and poll votes. |
+| `services/media` | Media presign, local upload, media serving, media records, and link previews. |
+| `services/notifications` | Push notification subscription, unsubscribe, and send routes. |
+| `packages/types` | Shared TypeScript types and Zod schemas. |
+| `packages/config` | Shared environment configuration loaders. |
+| `packages/utils` | Shared utilities, errors, auth middleware, logging, and Redis pub/sub helpers. |
+| `docker-compose.full.yml` | Full-stack Docker setup for web, gateway, services, MongoDB, and Redis. |
 
----
+## Local Development
 
-## Quick Start
+Docker is the most reliable way to run the full application because it starts the web app, gateway, backend services, MongoDB, and Redis together.
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 8+
-- Docker Desktop
+- Node.js `20.11.0`, based on `.nvmrc`
+- pnpm `8.15.0`
+- Docker Desktop or another Docker-compatible runtime
 
-### 1. Clone & Install
+### Install Dependencies
 
 ```bash
-git clone https://github.com/YugmPatel/Blabber.git
-cd Blabber
 pnpm install
 ```
 
-### 2. Start the Full Stack (Docker)
+### Start The Full Stack
+
+Docker Compose v2:
 
 ```bash
 docker compose -f docker-compose.full.yml up -d
 ```
 
-### 3. Open the App
+Legacy Compose command:
 
+```bash
+docker-compose -f docker-compose.full.yml up -d
 ```
+
+Open the web app:
+
+```text
 http://localhost:5173
 ```
 
----
+Gateway health check:
+
+```text
+http://localhost:3000/healthz
+```
+
+### Check Containers
+
+```bash
+docker compose -f docker-compose.full.yml ps
+```
+
+or:
+
+```bash
+docker-compose -f docker-compose.full.yml ps
+```
+
+### Stop Containers
+
+```bash
+docker compose -f docker-compose.full.yml down
+```
+
+or:
+
+```bash
+docker-compose -f docker-compose.full.yml down
+```
+
+### Run Individual Parts Locally
+
+Frontend:
+
+```bash
+pnpm --filter ./apps/web dev
+```
+
+Gateway:
+
+```bash
+pnpm --filter @apps/gateway dev
+```
+
+Example service:
+
+```bash
+pnpm --filter @services/auth dev
+```
+
+Build all packages:
+
+```bash
+pnpm build
+```
+
+Run tests:
+
+```bash
+pnpm test
+```
+
+## Environment Variables
+
+The project uses environment variables for service configuration. See `.env.example` for the full template.
+
+| Variable | Purpose |
+| --- | --- |
+| `VITE_API_URL` | Frontend API base URL. |
+| `VITE_SOCKET_URL` | Frontend Socket.IO URL. |
+| `MONGO_URI` | MongoDB connection string. |
+| `MONGO_DB_NAME` | MongoDB database name. |
+| `REDIS_HOST` | Redis host. |
+| `REDIS_PORT` | Redis port. |
+| `REDIS_PASSWORD` | Optional Redis password. |
+| `JWT_ACCESS_SECRET` | Access token signing secret. |
+| `JWT_REFRESH_SECRET` | Refresh token signing secret. |
+| `JWT_ACCESS_TTL` | Access token lifetime. |
+| `JWT_REFRESH_TTL` | Refresh token lifetime. |
+| `ALLOWED_ORIGINS` | Comma-separated CORS origins. |
+| `AUTH_SERVICE_URL` | Gateway target for auth service. |
+| `USERS_SERVICE_URL` | Gateway target for users service. |
+| `CHATS_SERVICE_URL` | Gateway target for chats service. |
+| `MESSAGES_SERVICE_URL` | Gateway target for messages service. |
+| `MEDIA_SERVICE_URL` | Gateway target for media service. |
+| `NOTIFICATIONS_SERVICE_URL` | Gateway target for notifications service. |
+| `INTELLIGENCE_SERVICE_URL` | Gateway target for chat intelligence routes. |
+| `LOCAL_MEDIA_DIR` | Local directory for stored media files. |
+| `LOCAL_MEDIA_UPLOAD_BASE_URL` | Base URL used for local media upload targets. |
+| `PUBLIC_MEDIA_BASE_URL` | Public base URL returned for local media records. |
+| `S3_MEDIA_BUCKET` | Optional S3 bucket for S3-style media upload. |
+| `S3_REGION` | Optional S3 region. |
+| `MEDIA_BASE_URL` | Public media base URL for S3-style media. |
+| `AWS_ACCESS_KEY_ID` | Optional AWS access key for S3. |
+| `AWS_SECRET_ACCESS_KEY` | Optional AWS secret for S3. |
+| `VAPID_PUBLIC_KEY` | Web push public key. |
+| `VAPID_PRIVATE_KEY` | Web push private key. |
+| `VAPID_SUBJECT` | Web push contact subject. |
+| `OPENROUTER_API_KEY` | Optional AI provider key for chat intelligence. |
+| `OPENROUTER_MODEL` | Optional model name for the AI provider. |
+| `OPENROUTER_HTTP_REFERER` / `OPENROUTER_REFERER` | Optional provider metadata. |
+
+Example placeholder values:
+
+```env
+VITE_API_URL=http://localhost:3000
+VITE_SOCKET_URL=http://localhost:3000
+MONGO_URI=mongodb://localhost:27017
+MONGO_DB_NAME=blabber
+REDIS_HOST=localhost
+REDIS_PORT=6379
+JWT_ACCESS_SECRET=replace-with-at-least-32-characters
+JWT_REFRESH_SECRET=replace-with-at-least-32-characters
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+OPENROUTER_API_KEY=
+```
+
+AI provider keys can be configured through environment variables such as `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`.
+
+## API Overview
+
+All browser-facing HTTP APIs go through the gateway.
+
+| Gateway path | Service | Purpose |
+| --- | --- | --- |
+| `/api/auth` | Auth service | Register, login, refresh, logout, password reset, current user. |
+| `/api/users` | Users service | User profiles, search, profile updates, block/unblock, presence lookup. |
+| `/api/chats` | Chats service | Direct chats, group chats, chat metadata, members, pin/archive. |
+| `/api/messages` | Messages service | Message list, send, edit, delete, reactions, read state, poll voting. |
+| `/api/media` | Media service | Presign uploads, local media upload, media serving, link previews. |
+| `/api/intelligence` | Chats service | Summaries, actions, decisions, waiting-on items, group brain. |
+| `/api/notifications` | Notifications service | Push subscribe, unsubscribe, and send routes. |
 
 ## Service Ports
 
-| Service  | Port  |
-| -------- | ----- |
-| Frontend | 5173  |
-| Gateway  | 3000  |
-| Auth     | 3001  |
-| Users    | 3002  |
-| Chats    | 3003  |
-| Messages | 3004  |
-| Media    | 3005  |
-| MongoDB  | 27018 |
-| Redis    | 6380  |
-
----
-
-## UI Highlights
-
-### Login / Register
-Split-panel layout — abstract layered aurora gradient on the left (CSS-only SVG waves in teal, purple, and navy) and a clean form on the right with the Blabber logo.
-
-### Main Shell
-Collapsible sidebar with chat navigation, a `+` button for new conversations, and a profile/account menu at the bottom with a dark mode toggle. The right side shows only the active chat or a clean empty state ("Ready to turn noise into signal?").
-
-### Chat View
-Inline Catch-Me-Up card above the message list for quick AI summaries. Composer bar with a floating `+` action menu (Documents, Photos, Camera, Audio, Contact, Poll, Event).
-
-### Settings
-Unified settings page at `/settings` with a left sub-navigation panel: Profile, Privacy, Notifications, Appearance (dark mode toggle), AI Engine, and Help.
-
----
-
-## Development
-
-```bash
-# Install dependencies
-pnpm install
-
-# Run full stack via Docker
-docker compose -f docker-compose.full.yml up -d
-
-# Rebuild a specific service after code changes
-docker compose -f docker-compose.full.yml up -d --build web
-
-# Frontend only (requires services running)
-pnpm --filter ./apps/web dev
-
-# Type-check frontend
-pnpm --filter ./apps/web build
-```
-
----
+| Service | Port |
+| --- | --- |
+| Web app | 5173 |
+| Gateway | 3000 |
+| Auth service | 3001 |
+| Users service | 3002 |
+| Chats service | 3003 |
+| Messages service | 3004 |
+| Media service | 3005 |
+| Notifications service | 3006 |
+| MongoDB | 27018 on host, 27017 in Docker network |
+| Redis | 6380 on host, 6379 in Docker network |
 
 ## License
 
 MIT
-
----
-
-<p align="center">
-  <b>Blabber</b> — Talk. Decide. Do.
-</p>
