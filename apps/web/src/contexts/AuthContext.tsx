@@ -8,6 +8,7 @@ interface User {
   name: string;
   avatar?: string;
   avatarUrl?: string;
+  avatarSource?: 'google' | 'upload' | 'none';
   about?: string;
   role?: string;
   department?: string;
@@ -47,8 +48,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   useEffect(() => {
     const initAuth = async () => {
       // Check if we're already on login/register page
-      const isAuthPage =
-        window.location.pathname === '/login' || window.location.pathname === '/register';
+      const publicAuthPages = ['/login', '/register', '/forgot-password', '/reset-password'];
+      const isAuthPage = publicAuthPages.includes(window.location.pathname);
 
       if (isAuthPage) {
         // Skip refresh on auth pages

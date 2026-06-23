@@ -1,9 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
-import { AddReactionDTOSchema } from '@repo/types';
+import { AddReactionDTOSchema, EventType, MessageReactionEvent } from '@repo/types';
 import { getMessagesCollection } from '../models/message';
-import { logger } from '@repo/utils';
+import { createEvent, logger } from '@repo/utils';
 import { serializeMessage } from '../serialize-message';
+import { assertChatMembership } from '../chat-access';
+import { getPubSub } from '../pubsub';
 
 export async function reactToMessage(
   req: Request,
@@ -50,14 +52,31 @@ export async function reactToMessage(
       return;
     }
 
+    await assertChatMembership(message.chatId, userObjectId);
+
     // Check if user already has a reaction on this message
     const existingReactionIndex = message.reactions.findIndex(
       (r) => r.userId.toString() === userId
     );
+    const existingReaction = existingReactionIndex !== -1 ? message.reactions[existingReactionIndex] : null;
 
     let result;
+    let operation: 'set' | 'remove' = 'set';
 
-    if (existingReactionIndex !== -1) {
+    if (existingReaction?.emoji === emoji) {
+      operation = 'remove';
+      result = await collection.findOneAndUpdate(
+        { _id: messageObjectId },
+        {
+          $pull: {
+            reactions: {
+              userId: userObjectId,
+            },
+          },
+        },
+        { returnDocument: 'after' }
+      );
+    } else if (existingReactionIndex !== -1) {
       // Update existing reaction (one emoji per user)
       result = await collection.findOneAndUpdate(
         { _id: messageObjectId, 'reactions.userId': userObjectId },
@@ -92,6 +111,22 @@ export async function reactToMessage(
     }
 
     const apiMessage = serializeMessage(result);
+
+    try {
+      const pubsub = getPubSub();
+      const event = createEvent<MessageReactionEvent>(EventType.MESSAGE_REACTION, {
+        messageId,
+        chatId: apiMessage.chatId,
+        userId,
+        emoji,
+        operation,
+        reactions: apiMessage.reactions,
+        message: apiMessage,
+      });
+      await pubsub.publish(event);
+    } catch (error) {
+      logger.error({ error, messageId }, 'Failed to publish MESSAGE_REACTION event');
+    }
 
     logger.info(
       {

@@ -19,6 +19,7 @@ export function serializeMessage(message: MessageDocument, tempId?: string) {
     _id: objectIdToString(message._id),
     chatId: objectIdToString(message.chatId),
     senderId: objectIdToString(message.senderId),
+    clientMessageId: message.clientMessageId,
     type: inferMessageType(message),
     body: message.body,
     media: message.media

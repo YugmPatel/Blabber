@@ -4,6 +4,7 @@ import { PasswordResetDTOSchema } from '@repo/types';
 import { asyncHandler, ValidationError, UnauthorizedError } from '@repo/utils';
 import { getUsersCollection } from '../models/user';
 import { getPasswordResetTokensCollection } from '../models/password-reset-token';
+import { getDeviceSessionsCollection } from '../models/device-session';
 
 export const passwordReset = asyncHandler(async (req: Request, res: Response) => {
   // Validate request body
@@ -59,6 +60,8 @@ export const passwordReset = asyncHandler(async (req: Request, res: Response) =>
       },
     }
   );
+
+  await getDeviceSessionsCollection().deleteMany({ userId: matchingToken.userId });
 
   res.status(200).json({
     success: true,

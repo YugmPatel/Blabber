@@ -69,14 +69,16 @@ export const useSendMessage = () => {
         return;
       }
 
-      // Generate temporary ID for optimistic update
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      // Generate a stable client-side ID that correlates optimistic, ack, pubsub, and retry paths.
+      const clientMessageId = `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const tempId = clientMessageId;
 
       // Create optimistic message
       const optimisticMessage: Message = {
         _id: tempId,
         chatId,
         senderId: user._id,
+        clientMessageId,
         type: mediaKind ?? type ?? 'text',
         body,
         media: mediaId
@@ -147,6 +149,7 @@ export const useSendMessage = () => {
         sticker,
         event,
         replyToId,
+        clientMessageId,
         tempId,
       });
     },

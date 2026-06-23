@@ -31,6 +31,7 @@ export interface CallIceCandidate {
 
 export interface CallOfferPayload {
   callId: string;
+  chatId: string;
   fromUserId: string;
   toUserId: string;
   offer: CallSessionDescription;
@@ -38,6 +39,7 @@ export interface CallOfferPayload {
 
 export interface CallAnswerPayload {
   callId: string;
+  chatId: string;
   fromUserId: string;
   toUserId: string;
   answer: CallSessionDescription;
@@ -45,6 +47,7 @@ export interface CallAnswerPayload {
 
 export interface CallIceCandidatePayload {
   callId: string;
+  chatId: string;
   fromUserId: string;
   toUserId: string;
   candidate: CallIceCandidate;
@@ -80,6 +83,7 @@ export interface ClientToServerEvents {
       description?: string;
     };
     replyToId?: string;
+    clientMessageId?: string;
     tempId?: string;
   }) => void;
   'message:read': (data: { messageIds: string[] }) => void;
@@ -90,9 +94,19 @@ export interface ClientToServerEvents {
     type: 'direct' | 'group';
     participantIds: string[];
     title?: string;
+    description?: string;
+    groupContext?: string;
+    avatarUrl?: string;
+    groupKind?: 'standard' | 'temporary';
+    expiresAt?: string;
   }) => void;
   'chat:join': (data: { chatId: string }) => void;
   'chat:leave': (data: { chatId: string }) => void;
+  'client:activity': (data: {
+    activeChatId?: string | null;
+    visible: boolean;
+    focused: boolean;
+  }) => void;
   'call:invite': (data: CallInvitePayload) => void;
   'call:accept': (data: CallControlPayload) => void;
   'call:decline': (data: CallControlPayload) => void;
@@ -105,15 +119,27 @@ export interface ClientToServerEvents {
 
 // Server to Client Events
 export interface ServerToClientEvents {
-  'message:ack': (data: { tempId?: string; messageId: string; message: any }) => void;
+  'message:ack': (data: { tempId?: string; clientMessageId?: string; messageId: string; message: any }) => void;
   'message:new': (data: { message: any; tempId?: string }) => void;
   'message:edit': (data: { message: any }) => void;
-  'message:delete': (data: { messageId: string; chatId: string }) => void;
+  'message:deleted': (data: { messageId: string; chatId: string; deletedBy?: string }) => void;
+  'message:reaction': (data: {
+    messageId: string;
+    chatId: string;
+    userId: string;
+    emoji: string;
+    operation?: 'set' | 'remove';
+    reactions?: any[];
+    message?: any;
+  }) => void;
+  'message:read': (data: { messageIds: string[]; userId: string; chatId?: string }) => void;
   'receipt:delivered': (data: { messageId: string; userId: string }) => void;
   'receipt:read': (data: { messageIds: string[]; userId: string }) => void;
   'typing:update': (data: { chatId: string; userId: string; isTyping: boolean }) => void;
   'chat:updated': (data: { chat: any }) => void;
-  'presence:update': (data: { userId: string; online: boolean; lastSeen: Date }) => void;
+  'action:created': (data: { chatId: string; action: any }) => void;
+  'action:updated': (data: { chatId: string; action: any }) => void;
+  'presence:update': (data: { userId: string; online: boolean; lastSeen: Date | string | null }) => void;
   'call:incoming': (data: CallInvitePayload) => void;
   'call:accept': (data: CallControlPayload) => void;
   'call:decline': (data: CallControlPayload) => void;

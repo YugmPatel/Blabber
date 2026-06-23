@@ -4,6 +4,7 @@ import { ObjectId } from 'mongodb';
 import { asyncHandler, UnauthorizedError } from '@repo/utils';
 import { getDeviceSessionsCollection } from '../models/device-session';
 import { verifyRefreshToken } from '../utils/jwt';
+import { getRefreshCookieOptions } from '../utils/cookies';
 
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   // Read refresh token from cookie
@@ -49,11 +50,7 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
   await deviceSessionsCollection.deleteOne({ _id: matchingSession._id });
 
   // Clear refresh token cookie
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-  });
+  res.clearCookie('refreshToken', getRefreshCookieOptions());
 
   // Return success response
   res.status(200).json({

@@ -3,6 +3,8 @@ import type {
   ChatActionExtractionResult,
   ChatActionItem,
   ChatActionStatus,
+  CreateChatActionDTO,
+  GroupBrainAnswer,
   ChatDecision,
   ChatDecisionStatus,
   ChatIntelligenceSummary,
@@ -17,7 +19,7 @@ import type {
   WaitingOnStatus,
 } from '@repo/types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -62,6 +64,29 @@ export const normalizeMediaUrl = (url?: string | null): string | undefined => {
   }
 };
 
+export interface PasswordActionResponse {
+  success: boolean;
+  message: string;
+}
+
+export async function requestPasswordReset(email: string): Promise<PasswordActionResponse> {
+  const { data } = await apiClient.post<PasswordActionResponse>('/api/auth/password/forgot', {
+    email,
+  });
+  return data;
+}
+
+export async function resetPassword(
+  token: string,
+  newPassword: string
+): Promise<PasswordActionResponse> {
+  const { data } = await apiClient.post<PasswordActionResponse>('/api/auth/password/reset', {
+    token,
+    newPassword,
+  });
+  return data;
+}
+
 export interface ChatSummaryResponse {
   summary: ChatIntelligenceSummary | null;
 }
@@ -93,6 +118,11 @@ export async function fetchChatActions(chatId: string): Promise<ChatActionsRespo
   return data;
 }
 
+export async function fetchMyActions(): Promise<ChatActionsResponse> {
+  const { data } = await apiClient.get<ChatActionsResponse>('/api/intelligence/actions/mine');
+  return data;
+}
+
 export async function extractChatActions(
   chatId: string,
   payload?: ExtractChatActionsDTO
@@ -111,6 +141,17 @@ export async function updateChatAction(
   const { data } = await apiClient.patch<{ action: ChatActionItem }>(
     `/api/intelligence/actions/${actionId}`,
     patch
+  );
+  return data;
+}
+
+export async function createChatAction(
+  chatId: string,
+  payload: CreateChatActionDTO
+): Promise<{ action: ChatActionItem; duplicate?: boolean }> {
+  const { data } = await apiClient.post<{ action: ChatActionItem; duplicate?: boolean }>(
+    `/api/intelligence/chats/${chatId}/actions`,
+    payload
   );
   return data;
 }
@@ -202,6 +243,40 @@ export async function fetchGroupBrain(chatId: string): Promise<GroupBrainRespons
   return data;
 }
 
+export async function askGroupBrain(
+  chatId: string,
+  question: string
+): Promise<GroupBrainAnswer> {
+  const { data } = await apiClient.post<GroupBrainAnswer>(
+    `/api/intelligence/chats/${chatId}/brain/ask`,
+    { question }
+  );
+  return data;
+}
+
+export interface CallHistoryItem {
+  id: string;
+  callId: string;
+  chatId: string;
+  chatTitle?: string;
+  chatType: 'direct' | 'group';
+  callType: 'audio' | 'video';
+  callerId: string;
+  participantIds: string[];
+  participantProfiles: { _id: string; name: string; avatarUrl?: string }[];
+  outcome: 'ringing' | 'answered' | 'missed' | 'declined' | 'cancelled' | 'ended';
+  startedAt: string;
+  answeredAt?: string;
+  endedAt?: string;
+  durationSeconds?: number;
+  note?: string;
+}
+
+export async function fetchCallHistory(): Promise<{ calls: CallHistoryItem[] }> {
+  const { data } = await apiClient.get<{ calls: CallHistoryItem[] }>('/api/calls');
+  return data;
+}
+
 // Request interceptor to add Bearer token
 apiClient.interceptors.request.use(
   (config: any) => {
@@ -223,8 +298,11 @@ apiClient.interceptors.response.use(
       _retry?: boolean;
     };
 
+    const requestUrl = originalRequest.url || '';
+    const isPasswordResetRequest = requestUrl.startsWith('/api/auth/password/');
+
     // If 401 and we haven't retried yet, attempt token refresh
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest._retry && !isPasswordResetRequest) {
       originalRequest._retry = true;
 
       try {

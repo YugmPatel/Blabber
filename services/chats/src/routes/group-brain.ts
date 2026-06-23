@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import {
+  GroupBrainAnswerSchema,
   GroupBrainSchema,
   type ChatActionItem,
   type ChatDecision,
@@ -15,6 +16,7 @@ import {
 } from '@repo/types';
 import { asyncHandler, logger } from '@repo/utils';
 import { getDatabase } from '../db';
+import { isChatExpired } from '../serialize-chat';
 import { getChatsCollection } from '../models/chat';
 import { getChatActionsCollection, type ChatActionDocument } from '../models/chat-action';
 import { getChatDecisionsCollection, type ChatDecisionDocument } from '../models/chat-decision';
@@ -267,6 +269,18 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
   if (!chat) {
     return res.status(404).json({ error: 'Not Found', message: 'Chat not found' });
   }
+  if (chat.type !== 'group') {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'Group Brain is available for group chats only',
+    });
+  }
+  if (isChatExpired(chat)) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'This temporary group has ended',
+    });
+  }
 
   const isParticipant = chat.participants.some((participantId) => participantId.equals(userObjectId));
   if (!isParticipant) {
@@ -293,7 +307,7 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
   const actions = actionDocs.map(toActionItem);
   const decisions = decisionDocs.map(toDecision);
   const waitingOn = waitingOnDocs.map(toWaitingOnItem);
-  const summaryText = latestSummary?.summary.summary;
+  const summaryText = latestSummary?.summary.summary || chat.groupContext;
   const summaryLinks: GroupBrainLink[] = (latestSummary?.summary.importantLinks || []).map((link) => ({
     title: link.label ?? undefined,
     url: link.url,
@@ -353,4 +367,98 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
   }
 
   return res.status(200).json({ brain: parsedBrain.data });
+});
+
+function scoreMessageForQuestion(message: MessageDocument, terms: string[]): number {
+  const text = message.body.toLowerCase();
+  return terms.reduce((score, term) => score + (text.includes(term) ? 1 : 0), 0);
+}
+
+export const askGroupBrain = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const { chatId } = req.params;
+  const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+  if (!question) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Question is required' });
+  }
+
+  const chatObjectId = toObjectId(chatId);
+  const userObjectId = toObjectId(userId);
+  if (!chatObjectId || !userObjectId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid chat ID' });
+  }
+
+  const chat = await getChatsCollection().findOne({ _id: chatObjectId });
+  if (!chat) {
+    return res.status(404).json({ error: 'Not Found', message: 'Chat not found' });
+  }
+  if (chat.type !== 'group') {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'Group Brain is available for group chats only',
+    });
+  }
+  if (isChatExpired(chat)) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'This temporary group has ended',
+    });
+  }
+
+  const isParticipant = chat.participants.some((participantId) => participantId.equals(userObjectId));
+  if (!isParticipant) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'You are not a participant in this chat',
+    });
+  }
+
+  const terms: string[] = Array.from(
+    new Set<string>(
+      question
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((term: string) => term.length > 2)
+    )
+  );
+
+  const messages = await getDatabase()
+    .collection<MessageDocument>('messages')
+    .find({ chatId: chatObjectId, deletedFor: { $ne: userObjectId } })
+    .sort({ createdAt: -1 })
+    .limit(500)
+    .toArray();
+
+  const matches = messages
+    .map((message) => ({ message, score: scoreMessageForQuestion(message, terms) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || b.message.createdAt.getTime() - a.message.createdAt.getTime())
+    .slice(0, 3);
+
+  const answer = matches.length
+    ? `Group history points to: ${matches.map((entry) => entry.message.body).join(' ')}`
+    : 'The group history does not clearly establish an answer to that question.';
+
+  const response = {
+    answer,
+    confidence: matches.length ? 'grounded' as const : 'uncertain' as const,
+    sourceMessageIds: matches.map((entry) => entry.message._id.toString()),
+    sourceDates: matches.map((entry) => entry.message.createdAt.toISOString()),
+  };
+
+  const parsed = GroupBrainAnswerSchema.safeParse(response);
+  if (!parsed.success) {
+    logger.error({ issues: parsed.error.flatten(), chatId }, 'Group Brain answer failed schema validation');
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Group Brain answer produced invalid output',
+    });
+  }
+
+  return res.status(200).json(parsed.data);
 });

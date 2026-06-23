@@ -4,6 +4,8 @@ import app from './app';
 import { connectToDatabase, closeDatabase } from './db';
 import { connectToRedis, closeRedis } from './redis';
 import { createUserIndexes } from './models/user';
+import { createStatusIndexes } from './models/status';
+import { createUserSettingsIndexes } from './models/user-settings';
 
 const config = loadCommonConfig();
 
@@ -17,6 +19,8 @@ async function startServer() {
 
     // Create indexes
     await createUserIndexes();
+    await createStatusIndexes();
+    await createUserSettingsIndexes();
     logger.info('Database indexes created');
 
     // Start Express server

@@ -22,7 +22,7 @@ export default function ChatsLayout() {
   const [searchQuery, setSearchQuery] = useState('');
   const { id } = useParams();
   const { user: currentUser } = useAuth();
-  const { data: chats = [], isLoading, error } = useChats();
+  const { data: chats = [], isLoading, error, refetch, isFetching } = useChats();
 
   // Bootstrap theme class on mount so the stored preference applies immediately
   useTheme();
@@ -170,7 +170,24 @@ export default function ChatsLayout() {
               {isLoading ? (
                 <p className="p-4 text-sm text-slate-500 dark:text-slate-400">Loading chats...</p>
               ) : error ? (
-                <p className="p-4 text-sm text-rose-500">Failed to load chats</p>
+                <div className="p-4">
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/60 dark:bg-rose-950/30">
+                    <p className="text-sm font-semibold text-rose-700 dark:text-rose-300">
+                      Could not load chats
+                    </p>
+                    <p className="mt-1 text-sm text-rose-600/80 dark:text-rose-200/80">
+                      Check your connection and try again.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => refetch()}
+                      disabled={isFetching}
+                      className="mt-3 rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-rose-500 disabled:opacity-60"
+                    >
+                      {isFetching ? 'Retrying...' : 'Retry'}
+                    </button>
+                  </div>
+                </div>
               ) : trimmedSearchQuery && visibleChats.length === 0 ? (
                 <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-slate-500 dark:text-slate-400">
                   No conversations found

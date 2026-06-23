@@ -41,12 +41,12 @@ export const useUserPresence = (userId: string | undefined) => {
   return useQuery({
     queryKey: userKeys.presence(userId || ''),
     queryFn: async () => {
-      const { data } = await apiClient.get<{ online: boolean; lastSeen: string }>(
+      const { data } = await apiClient.get<{ online: boolean; lastSeen: string | null }>(
         `/api/users/presence/${userId}`
       );
       return {
         online: data.online,
-        lastSeen: new Date(data.lastSeen),
+        lastSeen: data.lastSeen ? new Date(data.lastSeen) : null,
       };
     },
     enabled: !!userId,

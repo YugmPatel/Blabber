@@ -1,7 +1,9 @@
 import { Server as SocketIOServer } from 'socket.io';
+import axios from 'axios';
 import { RedisPubSub } from '@repo/utils';
 import { loadRedisConfig } from '@repo/config';
 import { logger } from '@repo/utils';
+import { serviceUrls } from './config.js';
 import {
   AppEvent,
   EventType,
@@ -18,9 +20,91 @@ import {
   UserOfflineEvent,
   UserTypingEvent,
   UserStopTypingEvent,
+  ActionCreatedEvent,
+  ActionUpdatedEvent,
 } from '@repo/types';
 
 let pubsub: RedisPubSub | null = null;
+
+function isRecipientActivelyViewingChat(io: SocketIOServer, userId: string, chatId: string): boolean {
+  const socketIds = io.sockets.adapter.rooms.get(`user:${userId}`);
+  if (!socketIds) return false;
+
+  for (const socketId of socketIds) {
+    const socket = io.sockets.sockets.get(socketId);
+    const activity = socket?.data.activity as
+      | { activeChatId?: string | null; visible?: boolean; focused?: boolean }
+      | undefined;
+
+    if (activity?.visible && activity?.focused && activity.activeChatId === chatId) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function buildMessagePreview(event: MessageSentEvent) {
+  const senderName = event.data.senderName || 'Someone';
+  const mediaType = event.data.mediaType || event.data.message?.media?.type;
+  const text = (event.data.content || event.data.message?.body || '').trim();
+
+  if (mediaType === 'image') return `${senderName} sent an image`;
+  if (mediaType === 'audio') return `${senderName} sent a voice message`;
+  if (mediaType === 'document') return `${senderName} sent a document`;
+  if (text) return `${senderName}: ${text.slice(0, 140)}`;
+  return `${senderName} sent a message`;
+}
+
+function buildNoPreviewBody(event: MessageSentEvent) {
+  return `${event.data.senderName || 'Someone'} sent you a new message`;
+}
+
+async function sendMessagePushes(io: SocketIOServer, event: MessageSentEvent): Promise<void> {
+  const participants = event.data.participants ?? [];
+  if (participants.length === 0) return;
+
+  const senderId = event.data.senderId;
+  const recipients = participants.filter((participantId) => participantId !== senderId);
+  const uniqueRecipients = Array.from(new Set(recipients));
+
+  await Promise.all(
+    uniqueRecipients.map(async (recipientId) => {
+      if (isRecipientActivelyViewingChat(io, recipientId, event.data.chatId)) {
+        return;
+      }
+
+      const isGroup = event.data.chatType === 'group';
+      const title = isGroup && event.data.chatTitle ? `Blabber · ${event.data.chatTitle}` : 'Blabber';
+
+      try {
+        await axios.post(`${serviceUrls.notifications}/send`, {
+          userId: recipientId,
+          kind: 'message',
+          title,
+          body: buildMessagePreview(event),
+          data: {
+            chatId: event.data.chatId,
+            messageId: event.data.messageId,
+            senderId,
+            route: `/chats/${event.data.chatId}`,
+            noPreviewBody: buildNoPreviewBody(event),
+          },
+        });
+      } catch (error: any) {
+        logger.error(
+          {
+            error: error.response?.data || error.message,
+            recipientId,
+            chatId: event.data.chatId,
+            messageId: event.data.messageId,
+          },
+          'Failed to send message push notification'
+        );
+      }
+    })
+  );
+}
 
 export function initPubSub(io: SocketIOServer): RedisPubSub {
   if (pubsub) {
@@ -48,30 +132,39 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
   pubsub.on(EventType.MESSAGE_SENT, (event: AppEvent) => {
     const eventTyped = event as MessageSentEvent;
     logger.debug({ event: eventTyped.type, chatId: eventTyped.data.chatId }, 'Broadcasting MESSAGE_SENT');
-    // Emit to all users in the chat room with proper message format
-    // Note: The sender already received the message via message:ack from the socket handler.
-    // This broadcast ensures other users in the chat room also receive the message.
-    // The frontend deduplicates based on message ID to prevent duplicates for the sender.
-    io.to(`chat:${eventTyped.data.chatId}`).emit('message:new', {
+    const payload = {
+      tempId: eventTyped.data.clientMessageId,
       message: eventTyped.data.message ?? {
-          _id: eventTyped.data.messageId,
-          chatId: eventTyped.data.chatId,
-          senderId: eventTyped.data.senderId,
-          type: eventTyped.data.mediaType ?? 'text',
-          body: eventTyped.data.content,
-          media: eventTyped.data.mediaUrl
-            ? {
-                type: eventTyped.data.mediaType ?? 'image',
-                url: eventTyped.data.mediaUrl,
-              }
-            : undefined,
-          replyTo: eventTyped.data.replyTo,
-          reactions: [],
-          status: 'sent',
-          deletedFor: [],
-          createdAt: eventTyped.data.createdAt,
-        },
-    });
+        _id: eventTyped.data.messageId,
+        chatId: eventTyped.data.chatId,
+        senderId: eventTyped.data.senderId,
+        clientMessageId: eventTyped.data.clientMessageId,
+        type: eventTyped.data.mediaType ?? 'text',
+        body: eventTyped.data.content,
+        media: eventTyped.data.mediaUrl
+          ? {
+              type: eventTyped.data.mediaType ?? 'image',
+              url: eventTyped.data.mediaUrl,
+            }
+          : undefined,
+        replyTo: eventTyped.data.replyTo,
+        reactions: [],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: eventTyped.data.createdAt,
+      },
+    };
+
+    const participants = Array.from(new Set(eventTyped.data.participants ?? []));
+    if (participants.length > 0) {
+      participants.forEach((userId) => {
+        io.to(`user:${userId}`).emit('message:new', payload);
+      });
+    } else {
+      io.to(`chat:${eventTyped.data.chatId}`).emit('message:new', payload);
+    }
+
+    void sendMessagePushes(io, eventTyped);
   });
 
   pubsub.on(EventType.MESSAGE_EDITED, (event: AppEvent) => {
@@ -114,6 +207,9 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
       chatId: e.data.chatId,
       userId: e.data.userId,
       emoji: e.data.emoji,
+      operation: e.data.operation,
+      reactions: e.data.reactions,
+      message: e.data.message,
     });
   });
 
@@ -185,6 +281,28 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
     // Also notify the removed user
     io.to(`user:${e.data.userId}`).emit('chat:left', {
       chatId: e.data.chatId,
+    });
+  });
+
+  pubsub.on(EventType.ACTION_CREATED, (event: AppEvent) => {
+    const e = event as ActionCreatedEvent;
+    logger.debug({ event: e.type, chatId: e.data.chatId }, 'Broadcasting ACTION_CREATED');
+    e.data.participants.forEach((userId) => {
+      io.to(`user:${userId}`).emit('action:created', {
+        chatId: e.data.chatId,
+        action: e.data.action,
+      });
+    });
+  });
+
+  pubsub.on(EventType.ACTION_UPDATED, (event: AppEvent) => {
+    const e = event as ActionUpdatedEvent;
+    logger.debug({ event: e.type, chatId: e.data.chatId }, 'Broadcasting ACTION_UPDATED');
+    e.data.participants.forEach((userId) => {
+      io.to(`user:${userId}`).emit('action:updated', {
+        chatId: e.data.chatId,
+        action: e.data.action,
+      });
     });
   });
 

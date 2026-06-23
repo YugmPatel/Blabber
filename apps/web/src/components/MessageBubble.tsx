@@ -18,6 +18,59 @@ interface MessageBubbleProps {
 }
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+const URL_REGEX = /(https?:\/\/[^\s<>"']+)/gi;
+const TRAILING_URL_PUNCTUATION = /[),.!?:;]+$/;
+
+function splitTrailingPunctuation(url: string) {
+  const punctuation = url.match(TRAILING_URL_PUNCTUATION)?.[0] || '';
+  if (!punctuation) return { href: url, trailing: '' };
+  return {
+    href: url.slice(0, -punctuation.length),
+    trailing: punctuation,
+  };
+}
+
+function LinkifiedText({ text, isSentByMe }: { text: string; isSentByMe: boolean }) {
+  const parts = text.split(URL_REGEX);
+
+  return (
+    <p className="whitespace-pre-wrap break-words text-sm">
+      {parts.map((part, index) => {
+        if (!part.match(URL_REGEX)) return <span key={`${part}-${index}`}>{part}</span>;
+
+        const { href, trailing } = splitTrailingPunctuation(part);
+        let parsed: URL;
+        try {
+          parsed = new URL(href);
+        } catch {
+          return <span key={`${part}-${index}`}>{part}</span>;
+        }
+
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return <span key={`${part}-${index}`}>{part}</span>;
+        }
+
+        return (
+          <span key={`${href}-${index}`}>
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`font-medium underline underline-offset-2 ${
+                isSentByMe
+                  ? 'text-white decoration-white/60 hover:decoration-white'
+                  : 'text-teal-700 decoration-teal-500/50 hover:decoration-teal-700 dark:text-teal-300'
+              }`}
+            >
+              {href}
+            </a>
+            {trailing}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
 
 export default function MessageBubble({
   message,
@@ -435,7 +488,7 @@ export default function MessageBubble({
             {renderSticker()}
             {renderEvent()}
             {message.body && !message.poll && !message.sticker && !message.event && (
-              <p className="text-sm whitespace-pre-wrap break-words">{message.body}</p>
+              <LinkifiedText text={message.body} isSentByMe={isSentByMe} />
             )}
 
             {/* Time and status */}

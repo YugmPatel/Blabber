@@ -1,5 +1,5 @@
 import type { ChatActionExtractionResult } from '@repo/types';
-import { logger } from '@repo/utils';
+import { AppError, logger } from '@repo/utils';
 import { createMockActionProvider } from './providers/mock-action-provider';
 import { createOpenRouterActionProvider } from './providers/openrouter-action-provider';
 
@@ -21,6 +21,9 @@ export interface ActionExtractionContext {
   chatId: string;
   currentUserId: string;
   currentUserName?: string | null;
+  chatTitle?: string | null;
+  chatDescription?: string | null;
+  groupContext?: string | null;
   participants: ActionParticipant[];
   messages: ActionInputMessage[];
 }
@@ -35,6 +38,18 @@ export class ActionExtractionService {
   async extractActions(context: ActionExtractionContext): Promise<ChatActionExtractionResult> {
     return this.provider.extractActions(context);
   }
+}
+
+function createUnavailableProvider(): ActionExtractionProvider {
+  return {
+    async extractActions(): Promise<ChatActionExtractionResult> {
+      throw new AppError(
+        503,
+        'AI action extraction is unavailable because OPENROUTER_API_KEY is not configured',
+        'AI_NOT_CONFIGURED'
+      );
+    },
+  };
 }
 
 function shouldUseMockFallback(): boolean {
@@ -67,8 +82,12 @@ export function createActionExtractionService(): ActionExtractionService {
   const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
   const mockProvider = createMockActionProvider();
 
-  if (!openRouterApiKey) {
+  if (!openRouterApiKey && shouldUseMockFallback()) {
     return new ActionExtractionService(mockProvider);
+  }
+
+  if (!openRouterApiKey) {
+    return new ActionExtractionService(createUnavailableProvider());
   }
 
   const openRouterProvider = createOpenRouterActionProvider({

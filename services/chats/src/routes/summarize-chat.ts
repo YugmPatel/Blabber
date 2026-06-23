@@ -4,6 +4,7 @@ import { asyncHandler, logger } from '@repo/utils';
 import { ChatIntelligenceSummarySchema, SummarizeChatDTOSchema } from '@repo/types';
 import { getChatsCollection } from '../models/chat';
 import { getChatSummariesCollection } from '../models/chat-summary';
+import { isChatExpired } from '../serialize-chat';
 import { getDatabase } from '../db';
 import {
   createAISummaryService,
@@ -77,14 +78,38 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
       message: 'You are not a participant in this chat',
     });
   }
+  if (isChatExpired(chat)) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'This temporary group has ended',
+    });
+  }
 
   const db = getDatabase();
   const messagesCollection = db.collection<MessageDocument>('messages');
+  const readState = await db
+    .collection('chatReadStates')
+    .findOne<{ lastReadAt?: Date }>({ chatId: chatObjectId, userId: userObjectId });
+  const lastReadAt = readState?.lastReadAt;
+  const unreadCount = lastReadAt
+    ? await messagesCollection.countDocuments({
+        chatId: chatObjectId,
+        deletedFor: { $ne: userObjectId },
+        senderId: { $ne: userObjectId },
+        createdAt: { $gt: lastReadAt },
+      })
+    : 0;
+
+  const baseQuery: Record<string, unknown> = {
+    chatId: chatObjectId,
+    deletedFor: { $ne: userObjectId },
+  };
+  if (unreadCount > 0 && lastReadAt) {
+    baseQuery.createdAt = { $gt: lastReadAt };
+  }
+
   const rawMessages = await messagesCollection
-    .find({
-      chatId: chatObjectId,
-      deletedFor: { $ne: userObjectId },
-    })
+    .find(baseQuery)
     .sort({ createdAt: -1 })
     .limit(messageLimit)
     .toArray();
@@ -121,6 +146,9 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     chatId,
     currentUserId: userId,
     currentUserName: userNamesById.get(userId) ?? null,
+    chatTitle: chat.title ?? null,
+    chatDescription: chat.description ?? null,
+    groupContext: chat.groupContext ?? null,
     messages: contextMessages,
   });
 
@@ -137,11 +165,24 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
   }
 
   const now = new Date();
+  const scopedSummary = {
+    ...parsedSummary.data,
+    overview: parsedSummary.data.overview || parsedSummary.data.summary,
+    scope: {
+      label:
+        unreadCount > 0
+          ? `${rawMessages.length} unread messages${lastReadAt ? ` since ${lastReadAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`
+          : `Last ${rawMessages.length} messages`,
+      messageCount: rawMessages.length,
+      since: unreadCount > 0 && lastReadAt ? lastReadAt.toISOString() : undefined,
+      mode: unreadCount > 0 ? 'unread' as const : 'recent' as const,
+    },
+  };
   await getChatSummariesCollection().insertOne({
     _id: new ObjectId(),
     chatId: chatObjectId,
     generatedByUserId: userObjectId,
-    summary: parsedSummary.data,
+    summary: scopedSummary,
     createdAt: now,
     updatedAt: now,
   });
@@ -150,11 +191,11 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     {
       chatId,
       userId,
-      sourceMessages: parsedSummary.data.sourceMessageIds.length,
+      sourceMessages: scopedSummary.sourceMessageIds.length,
       messageLimit,
     },
     'Chat summary generated'
   );
 
-  return res.status(200).json({ summary: parsedSummary.data });
+  return res.status(200).json({ summary: scopedSummary });
 });

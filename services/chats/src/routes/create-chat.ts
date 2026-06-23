@@ -3,6 +3,8 @@ import { ObjectId } from 'mongodb';
 import { CreateChatDTOSchema } from '@repo/types';
 import { asyncHandler } from '@repo/utils';
 import { getChatsCollection } from '../models/chat';
+import { getDatabase } from '../db';
+import { serializeChat } from '../serialize-chat';
 
 export const createChat = asyncHandler(async (req: Request, res: Response) => {
   // Validate request body
@@ -16,7 +18,7 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  const { type, participantIds, title, avatarUrl } = validationResult.data;
+  const { type, participantIds, title, description, groupContext, avatarUrl, groupKind, expiresAt } = validationResult.data;
 
   // Get authenticated user ID from middleware
   const userId = (req as any).user?.userId;
@@ -27,8 +29,15 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  // Convert participant IDs to ObjectIds
-  let participantObjectIds = participantIds.map((id) => new ObjectId(id));
+  if (!participantIds.every(ObjectId.isValid)) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'One or more participant IDs are invalid',
+    });
+  }
+
+  // Convert participant IDs to ObjectIds and remove duplicates
+  let participantObjectIds = Array.from(new Set(participantIds)).map((id) => new ObjectId(id));
 
   // For direct chats, validate exactly 2 participants before adding creator
   if (type === 'direct' && participantObjectIds.length !== 2) {
@@ -44,6 +53,26 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
     participantObjectIds.push(creatorObjectId);
   }
 
+  const existingUserCount = await getDatabase()
+    .collection('users')
+    .countDocuments({ _id: { $in: participantObjectIds } });
+  if (existingUserCount !== participantObjectIds.length) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'One or more selected participants do not exist',
+    });
+  }
+
+  const expiresDate = expiresAt ? new Date(expiresAt) : undefined;
+  if (type === 'group' && groupKind === 'temporary') {
+    if (!expiresDate || Number.isNaN(expiresDate.getTime()) || expiresDate <= new Date()) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Temporary groups require a future expiration time',
+      });
+    }
+  }
+
   // For group chats, set creator as initial admin
   const admins = type === 'group' ? [creatorObjectId] : [];
 
@@ -53,8 +82,13 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
     type,
     participants: participantObjectIds,
     admins,
+    ownerId: type === 'group' ? creatorObjectId : undefined,
     title: type === 'group' ? title : undefined,
+    description: type === 'group' ? description : undefined,
+    groupContext: type === 'group' ? groupContext : undefined,
     avatarUrl,
+    groupKind: type === 'group' ? groupKind || 'standard' : undefined,
+    expiresAt: type === 'group' && groupKind === 'temporary' ? expiresDate : undefined,
     createdAt: now,
     updatedAt: now,
   };
@@ -72,26 +106,7 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  // Serialize chat for response
-  const serializedChat: any = {
-    _id: createdChat._id.toString(),
-    type: createdChat.type,
-    participants: createdChat.participants.map((id) => id.toString()),
-    admins: createdChat.admins.map((id) => id.toString()),
-    createdAt: createdChat.createdAt,
-    updatedAt: createdChat.updatedAt,
-  };
-
-  // Only include optional fields if they exist
-  if (createdChat.title) {
-    serializedChat.title = createdChat.title;
-  }
-  if (createdChat.avatarUrl) {
-    serializedChat.avatarUrl = createdChat.avatarUrl;
-  }
-  if (createdChat.lastMessageRef) {
-    serializedChat.lastMessageRef = createdChat.lastMessageRef;
-  }
+  const serializedChat = await serializeChat(createdChat, { includeParticipants: true });
 
   return res.status(201).json({
     chat: serializedChat,

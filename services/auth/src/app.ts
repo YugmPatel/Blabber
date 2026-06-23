@@ -63,12 +63,15 @@ import { logout } from './routes/logout';
 import { passwordForgot } from './routes/password-forgot';
 import { passwordReset } from './routes/password-reset';
 import { getMe } from './routes/me';
+import { googleStart, googleCallback } from './routes/google-oauth';
 app.post('/register', register);
 app.post('/login', login);
 app.post('/refresh', refresh);
 app.post('/logout', logout);
 app.post('/password/forgot', passwordForgot);
 app.post('/password/reset', passwordReset);
+app.get('/google/start', googleStart);
+app.get('/google/callback', googleCallback);
 app.get('/me', authMiddleware, getMe);
 
 // 404 handler

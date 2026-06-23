@@ -52,6 +52,13 @@ export type ChatSummaryNoiseItem = z.infer<typeof ChatSummaryNoiseItemSchema>;
 
 export const ChatIntelligenceSummarySchema = z.object({
   summary: z.string(),
+  overview: z.string().optional(),
+  scope: z.object({
+    label: z.string(),
+    messageCount: z.number().int().nonnegative(),
+    since: z.string().optional(),
+    mode: z.enum(['unread', 'recent', 'custom']).optional(),
+  }).optional(),
   decisions: z.array(ChatSummaryDecisionSchema),
   tasks: z.array(ChatSummaryTaskSchema),
   questionsForMe: z.array(ChatSummaryQuestionSchema),
@@ -81,7 +88,15 @@ export const ChatActionTypeSchema = z.enum([
 
 export type ChatActionType = z.infer<typeof ChatActionTypeSchema>;
 
-export const ChatActionStatusSchema = z.enum(['pending', 'accepted', 'dismissed', 'completed']);
+export const ChatActionStatusSchema = z.enum([
+  'open',
+  'in_progress',
+  'completed',
+  // Legacy statuses are accepted for backward-compatible reads.
+  'pending',
+  'accepted',
+  'dismissed',
+]);
 
 export type ChatActionStatus = z.infer<typeof ChatActionStatusSchema>;
 
@@ -136,10 +151,31 @@ export const ExtractChatActionsDTOSchema = z.object({
 export type ExtractChatActionsDTO = z.infer<typeof ExtractChatActionsDTOSchema>;
 
 export const UpdateChatActionDTOSchema = z.object({
-  status: ChatActionStatusSchema,
+  status: z.enum(['open', 'in_progress', 'completed']),
 });
 
 export type UpdateChatActionDTO = z.infer<typeof UpdateChatActionDTOSchema>;
+
+export const CreateChatActionDTOSchema = z.object({
+  title: z.string().min(1).max(240),
+  description: z.string().max(1000).optional(),
+  ownerUserId: z.string().optional(),
+  ownerName: z.string().optional(),
+  dueDate: z.string().optional(),
+  sourceMessageIds: z.array(z.string()).min(1),
+  sourceText: z.string().optional(),
+});
+
+export type CreateChatActionDTO = z.infer<typeof CreateChatActionDTOSchema>;
+
+export const GroupBrainAnswerSchema = z.object({
+  answer: z.string(),
+  confidence: z.enum(['grounded', 'uncertain']),
+  sourceMessageIds: z.array(z.string()),
+  sourceDates: z.array(z.string()).optional(),
+});
+
+export type GroupBrainAnswer = z.infer<typeof GroupBrainAnswerSchema>;
 
 export const ChatDecisionStatusSchema = z.enum(['proposed', 'final', 'changed', 'dismissed']);
 

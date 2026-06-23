@@ -1,54 +1,45 @@
-import { CalendarClock, Check, CircleCheck, ClipboardList, RefreshCw, X } from 'lucide-react';
-import type { ChatActionItem, ChatActionStatus, ChatActionType } from '@repo/types';
+import { CalendarClock, CheckCircle2, Circle, Clock3 } from 'lucide-react';
+import type { ChatActionItem, ChatActionStatus } from '@repo/types';
 
 interface ChatActionsPanelProps {
   actions: ChatActionItem[];
   isLoading: boolean;
-  isExtracting: boolean;
   isUpdating: boolean;
   errorMessage?: string;
-  onFindActions: () => void;
+  onRetry?: () => void;
   onUpdateStatus: (actionId: string, status: ChatActionStatus) => void;
 }
 
-const groupLabels: Record<ChatActionType, string> = {
-  task: 'Tasks',
-  event: 'Events',
-  reminder: 'Reminders',
-  request: 'Requests',
-  follow_up: 'Follow-ups',
-  promise: 'Promises',
+const statusLabels: Record<string, string> = {
+  open: 'Open',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+  pending: 'Open',
+  accepted: 'Open',
+  dismissed: 'Completed',
 };
 
-const typeLabels: Record<ChatActionType, string> = {
-  task: 'Task',
-  event: 'Event',
-  reminder: 'Reminder',
-  request: 'Request',
-  follow_up: 'Follow-up',
-  promise: 'Promise',
-};
-
-const groupOrder: ChatActionType[] = ['task', 'event', 'reminder', 'request', 'follow_up', 'promise'];
-
-function statusClasses(status: ChatActionStatus): string {
-  switch (status) {
-    case 'accepted':
-      return 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/30 dark:text-teal-300';
-    case 'completed':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300';
-    case 'dismissed':
-      return 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400';
-    default:
-      return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300';
-  }
+function normalizedStatus(status: ChatActionStatus) {
+  if (status === 'completed' || status === 'dismissed') return 'completed';
+  if (status === 'in_progress') return 'in_progress';
+  return 'open';
 }
 
-function actionTime(action: ChatActionItem): string | undefined {
-  return action.eventStart || action.dueDate || action.eventEnd;
+function safeActions(actions: ChatActionItem[] | null | undefined) {
+  return Array.isArray(actions) ? actions : [];
 }
 
-function ActionCard({
+function sourceIds(action: ChatActionItem) {
+  return Array.isArray(action.sourceMessageIds) ? action.sourceMessageIds : [];
+}
+
+function statusClasses(status: string): string {
+  if (status === 'completed') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300';
+  if (status === 'in_progress') return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300';
+  return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300';
+}
+
+function ActionRow({
   action,
   isUpdating,
   onUpdateStatus,
@@ -57,75 +48,62 @@ function ActionCard({
   isUpdating: boolean;
   onUpdateStatus: (actionId: string, status: ChatActionStatus) => void;
 }) {
-  const time = actionTime(action);
+  const status = normalizedStatus(action.status);
   const actionId = action.id;
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+    <article className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              {typeLabels[action.type]}
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClasses(status)}`}>
+              {statusLabels[status]}
             </span>
-            <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${statusClasses(action.status)}`}>
-              {action.status}
-            </span>
-            {typeof action.confidence === 'number' && (
-              <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                {Math.round(action.confidence * 100)}%
+            {action.dueDate && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                <CalendarClock size={11} />
+                {action.dueDate}
               </span>
             )}
           </div>
           <h4 className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">{action.title}</h4>
           {action.description && (
-            <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-              {action.description}
-            </p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{action.description}</p>
           )}
-          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
-            {action.assignedTo?.name && <span>Assigned to {action.assignedTo.name}</span>}
-            {time && (
-              <span className="inline-flex items-center gap-1">
-                <CalendarClock size={11} />
-                {time}
-              </span>
-            )}
-            <span>{action.sourceMessageIds.length} source</span>
-          </div>
+          <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+            Owner: {action.assignedTo?.name || 'Unassigned'} · {sourceIds(action).length} source
+          </p>
         </div>
       </div>
 
-      {actionId && action.status !== 'dismissed' && action.status !== 'completed' && (
+      {actionId && status !== 'completed' && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {action.status === 'pending' && (
-            <button
-              type="button"
-              onClick={() => onUpdateStatus(actionId, 'accepted')}
-              disabled={isUpdating}
-              className="inline-flex items-center gap-1 rounded-md border border-teal-200 px-2 py-1 text-xs font-semibold text-teal-700 transition hover:bg-teal-50 disabled:opacity-60 dark:border-teal-800 dark:text-teal-300 dark:hover:bg-teal-950/30"
-            >
-              <Check size={12} />
-              Accept
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => onUpdateStatus(actionId, 'open')}
+            disabled={isUpdating || status === 'open'}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300"
+          >
+            <Circle size={12} />
+            Open
+          </button>
+          <button
+            type="button"
+            onClick={() => onUpdateStatus(actionId, 'in_progress')}
+            disabled={isUpdating || status === 'in_progress'}
+            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50 dark:border-blue-800 dark:text-blue-300"
+          >
+            <Clock3 size={12} />
+            In Progress
+          </button>
           <button
             type="button"
             onClick={() => onUpdateStatus(actionId, 'completed')}
             disabled={isUpdating}
-            className="inline-flex items-center gap-1 rounded-md border border-emerald-200 px-2 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+            className="inline-flex items-center gap-1 rounded-md border border-emerald-200 px-2 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-800 dark:text-emerald-300"
           >
-            <CircleCheck size={12} />
-            Complete
-          </button>
-          <button
-            type="button"
-            onClick={() => onUpdateStatus(actionId, 'dismissed')}
-            disabled={isUpdating}
-            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            <X size={12} />
-            Dismiss
+            <CheckCircle2 size={12} />
+            Completed
           </button>
         </div>
       )}
@@ -136,76 +114,69 @@ function ActionCard({
 export default function ChatActionsPanel({
   actions,
   isLoading,
-  isExtracting,
   isUpdating,
   errorMessage,
-  onFindActions,
+  onRetry,
   onUpdateStatus,
 }: ChatActionsPanelProps) {
-  const grouped = groupOrder
-    .map((type) => ({
-      type,
-      actions: actions.filter((action) => action.type === type),
-    }))
-    .filter((group) => group.actions.length > 0);
+  const items = safeActions(actions);
+  const active = items.filter((action) => normalizedStatus(action.status) !== 'completed');
+  const completed = items.filter((action) => normalizedStatus(action.status) === 'completed');
+  const openCount = active.filter((action) => normalizedStatus(action.status) === 'open').length;
+  const progressCount = active.filter((action) => normalizedStatus(action.status) === 'in_progress').length;
 
   return (
-    <section className="border-b border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-center gap-3 px-4 py-2.5">
-        <ClipboardList size={14} className="flex-shrink-0 text-indigo-500" />
-        <div className="min-w-0 flex-1">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-indigo-600 dark:text-indigo-300">
-            Actions
-          </span>
-          {!isLoading && actions.length === 0 && !errorMessage && (
-            <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">No actions found yet.</span>
-          )}
-          {actions.length > 0 && (
-            <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
-              {actions.length} found
-            </span>
-          )}
-          {isLoading && <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">Loading...</span>}
-          {errorMessage && <span className="ml-2 text-xs text-rose-500">{errorMessage}</span>}
-        </div>
-        <button
-          type="button"
-          onClick={onFindActions}
-          disabled={isExtracting}
-          className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
-        >
-          <RefreshCw size={12} className={isExtracting ? 'animate-spin' : ''} />
-          {isExtracting ? 'Finding...' : 'Find Actions'}
-        </button>
+    <section className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <div className="px-4 py-3">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Actions</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {isLoading ? 'Loading actions...' : `${openCount} open · ${progressCount} in progress`}
+        </p>
+        {errorMessage && (
+          <div className="mt-1 flex items-center gap-2">
+            <p className="text-xs text-rose-500">{errorMessage}</p>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="rounded-md border border-rose-200 px-2 py-0.5 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-300 dark:hover:bg-rose-950/30"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {isExtracting && (
-        <div className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-          Finding tasks, events, and follow-ups...
-        </div>
-      )}
+      <div className="space-y-2 border-t border-slate-100 p-3 dark:border-slate-800">
+        {active.length ? (
+          active.map((action) => (
+            <ActionRow
+              key={action.id || `${action.title}-${sourceIds(action).join('-')}`}
+              action={action}
+              isUpdating={isUpdating}
+              onUpdateStatus={onUpdateStatus}
+            />
+          ))
+        ) : (
+          <p className="text-xs text-slate-400 dark:text-slate-500">No active actions yet.</p>
+        )}
 
-      {grouped.length > 0 && (
-        <div className="space-y-3 border-t border-slate-100 px-4 pb-3 pt-3 dark:border-slate-800">
-          {grouped.map((group) => (
-            <div key={group.type}>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
-                {groupLabels[group.type]}
-              </h3>
-              <div className="space-y-2">
-                {group.actions.map((action) => (
-                  <ActionCard
-                    key={action.id || `${action.type}-${action.title}-${action.sourceMessageIds.join('-')}`}
-                    action={action}
-                    isUpdating={isUpdating}
-                    onUpdateStatus={onUpdateStatus}
-                  />
-                ))}
-              </div>
+        {completed.length > 0 && (
+          <details className="rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-950">
+            <summary className="cursor-pointer font-semibold text-slate-600 dark:text-slate-300">
+              Completed ({completed.length})
+            </summary>
+            <div className="mt-2 space-y-1">
+              {completed.slice(0, 8).map((action) => (
+                <p key={action.id || action.title} className="truncate text-slate-500 dark:text-slate-400">
+                  {action.title}
+                </p>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          </details>
+        )}
+      </div>
     </section>
   );
 }

@@ -6,6 +6,7 @@ import { asyncHandler, ValidationError, UnauthorizedError } from '@repo/utils';
 import { getUsersCollection } from '../models/user';
 import { getDeviceSessionsCollection } from '../models/device-session';
 import { generateAccessToken, generateRefreshToken, getRefreshTokenTTL } from '../utils/jwt';
+import { getRefreshCookieOptions } from '../utils/cookies';
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
   // Validate request body
@@ -61,13 +62,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   });
 
   // Set httpOnly cookie for refresh token with SameSite=Lax
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: refreshTTL,
-  });
+  res.cookie('refreshToken', refreshToken, getRefreshCookieOptions(refreshTTL));
 
   // Return user data and access token
   res.status(200).json({
@@ -77,6 +72,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
+      avatarSource: user.avatarSource ?? (user.googleId && user.avatarUrl ? 'google' : user.avatarUrl ? 'upload' : 'none'),
       about: user.about,
       role: user.role,
       department: user.department,

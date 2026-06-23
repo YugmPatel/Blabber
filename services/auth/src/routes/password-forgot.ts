@@ -3,11 +3,17 @@ import bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { ObjectId } from 'mongodb';
 import { PasswordResetRequestDTOSchema } from '@repo/types';
-import { asyncHandler, ValidationError } from '@repo/utils';
+import { asyncHandler, logger, ValidationError } from '@repo/utils';
 import { getUsersCollection } from '../models/user';
 import { getPasswordResetTokensCollection } from '../models/password-reset-token';
+import { sendPasswordResetEmail } from '../utils/email';
+
+const GENERIC_PASSWORD_RESET_MESSAGE =
+  'If an account with that email exists, a password reset link has been sent.';
 
 export const passwordForgot = asyncHandler(async (req: Request, res: Response) => {
+  logger.info({ event: 'password_reset.request_received' }, 'Password reset request received');
+
   // Validate request body
   const validation = PasswordResetRequestDTOSchema.safeParse(req.body);
 
@@ -25,11 +31,21 @@ export const passwordForgot = asyncHandler(async (req: Request, res: Response) =
   // Always return success to prevent email enumeration
   // Even if user doesn't exist, we return success
   if (!user) {
+    logger.info(
+      { event: 'password_reset.account_not_matched' },
+      'Password reset request did not match an account'
+    );
+
     return res.status(200).json({
       success: true,
-      message: 'If an account with that email exists, a password reset link has been sent.',
+      message: GENERIC_PASSWORD_RESET_MESSAGE,
     });
   }
+
+  logger.info(
+    { event: 'password_reset.account_matched', userId: user._id.toString() },
+    'Password reset request matched an account'
+  );
 
   // Generate secure reset token (32 bytes = 64 hex characters)
   const resetToken = randomBytes(32).toString('hex');
@@ -56,15 +72,26 @@ export const passwordForgot = asyncHandler(async (req: Request, res: Response) =
     used: false,
   });
 
-  // In a real application, you would send an email here with the reset token
-  // For now, we'll just log it (in development) or return success
-  // TODO: Integrate email service to send reset link
-  // Example: await sendPasswordResetEmail(user.email, resetToken);
+  logger.info(
+    { event: 'password_reset.token_created', userId: user._id.toString() },
+    'Password reset token created'
+  );
+
+  logger.info(
+    { event: 'password_reset.email_send_started', userId: user._id.toString() },
+    'Password reset email send started'
+  );
+
+  const emailSent = await sendPasswordResetEmail(user.email, resetToken);
+  if (emailSent) {
+    logger.info(
+      { event: 'password_reset.email_send_succeeded', userId: user._id.toString() },
+      'Password reset email send succeeded'
+    );
+  }
 
   return res.status(200).json({
     success: true,
-    message: 'If an account with that email exists, a password reset link has been sent.',
-    // In development, include the token for testing purposes
-    ...(process.env.NODE_ENV === 'development' && { resetToken }),
+    message: GENERIC_PASSWORD_RESET_MESSAGE,
   });
 });

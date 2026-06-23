@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { asyncHandler } from '@repo/utils';
 import { getChatsCollection } from '../models/chat';
+import { serializeChat } from '../serialize-chat';
 
 export const getChat = asyncHandler(async (req: Request, res: Response) => {
   // Get authenticated user ID from middleware
@@ -29,7 +30,7 @@ export const getChat = asyncHandler(async (req: Request, res: Response) => {
   const collection = getChatsCollection();
 
   // Find chat by ID
-  const chat = await collection.findOne({ _id: chatId });
+  const chat = await collection.findOne({ _id: chatId, deletedAt: { $exists: false } });
 
   if (!chat) {
     return res.status(404).json({
@@ -50,31 +51,7 @@ export const getChat = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  // Serialize chat for response
-  const serializedChat: any = {
-    _id: chat._id.toString(),
-    type: chat.type,
-    participants: chat.participants.map((id) => id.toString()),
-    admins: chat.admins.map((id) => id.toString()),
-    createdAt: chat.createdAt,
-    updatedAt: chat.updatedAt,
-  };
-
-  // Include optional fields if they exist
-  if (chat.title) {
-    serializedChat.title = chat.title;
-  }
-  if (chat.avatarUrl) {
-    serializedChat.avatarUrl = chat.avatarUrl;
-  }
-  if (chat.lastMessageRef) {
-    serializedChat.lastMessageRef = {
-      messageId: chat.lastMessageRef.messageId.toString(),
-      body: chat.lastMessageRef.body,
-      senderId: chat.lastMessageRef.senderId.toString(),
-      createdAt: chat.lastMessageRef.createdAt,
-    };
-  }
+  const serializedChat = await serializeChat(chat, { includeParticipants: true });
 
   return res.status(200).json({
     chat: serializedChat,

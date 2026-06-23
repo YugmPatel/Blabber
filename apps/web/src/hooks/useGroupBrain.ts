@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import type { GroupBrain } from '@repo/types';
-import { fetchGroupBrain } from '@/api/client';
+import { askGroupBrain, fetchGroupBrain } from '@/api/client';
 
 export const groupBrainKeys = {
   all: ['group-brain'] as const,
@@ -14,11 +14,19 @@ export function useGroupBrain(chatId: string | undefined) {
     enabled: Boolean(chatId),
   });
 
+  const askMutation = useMutation({
+    mutationFn: async (question: string) => askGroupBrain(chatId || '', question),
+  });
+
   return {
     brain: brainQuery.data?.brain ?? null,
     isLoadingBrain: brainQuery.isLoading,
     isFetchingBrain: brainQuery.isFetching,
     brainError: brainQuery.error,
     refetchBrain: brainQuery.refetch,
+    askBrain: askMutation.mutate,
+    brainAnswer: askMutation.data ?? null,
+    isAskingBrain: askMutation.isPending,
+    askBrainError: askMutation.error,
   };
 }

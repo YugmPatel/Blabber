@@ -1,5 +1,5 @@
 import type { DecisionExtractionResult } from '@repo/types';
-import { logger } from '@repo/utils';
+import { AppError, logger } from '@repo/utils';
 import { createMockDecisionProvider } from './providers/mock-decision-provider';
 import { createOpenRouterDecisionProvider } from './providers/openrouter-decision-provider';
 
@@ -37,6 +37,18 @@ export class DecisionExtractionService {
   }
 }
 
+function createUnavailableProvider(): DecisionExtractionProvider {
+  return {
+    async extractDecisions(): Promise<DecisionExtractionResult> {
+      throw new AppError(
+        503,
+        'AI decision extraction is unavailable because OPENROUTER_API_KEY is not configured',
+        'AI_NOT_CONFIGURED'
+      );
+    },
+  };
+}
+
 function shouldUseMockFallback(): boolean {
   return process.env.OPENROUTER_MOCK_FALLBACK === 'true';
 }
@@ -67,8 +79,12 @@ export function createDecisionExtractionService(): DecisionExtractionService {
   const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
   const mockProvider = createMockDecisionProvider();
 
-  if (!openRouterApiKey) {
+  if (!openRouterApiKey && shouldUseMockFallback()) {
     return new DecisionExtractionService(mockProvider);
+  }
+
+  if (!openRouterApiKey) {
+    return new DecisionExtractionService(createUnavailableProvider());
   }
 
   const openRouterProvider = createOpenRouterDecisionProvider({

@@ -4,6 +4,18 @@ import { serviceUrls } from '../config.js';
 
 const router: Router = Router();
 
+function hasJsonBody(req: any) {
+  return req.body && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+}
+
+function writeJsonBody(proxyReq: any, req: any) {
+  if (!hasJsonBody(req)) return;
+  const bodyData = JSON.stringify(req.body);
+  proxyReq.setHeader('Content-Type', 'application/json');
+  proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+  proxyReq.write(bodyData);
+}
+
 // Proxy to Auth Service
 router.use(
   '/api/auth',
@@ -19,13 +31,7 @@ router.use(
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
-      // Forward request body for POST/PUT/PATCH
-      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      writeJsonBody(proxyReq, req);
     },
     onProxyRes: (proxyRes, _req, res) => {
       // Forward Set-Cookie headers - ensure they work across the proxy
@@ -66,13 +72,7 @@ router.use(
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
-      // Forward request body for POST/PUT/PATCH
-      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
       console.error('Users service proxy error:', err);
@@ -101,13 +101,7 @@ router.use(
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
-      // Forward request body for POST/PUT/PATCH
-      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
       console.error('Chats service proxy error:', err);
@@ -134,12 +128,7 @@ router.use(
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
-      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
       console.error('Intelligence service proxy error:', err);
@@ -168,18 +157,39 @@ router.use(
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
-      // Forward request body for POST/PUT/PATCH
-      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
       console.error('Messages service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Messages service unavailable' });
+      }
+    },
+  })
+);
+
+// Proxy to Call History endpoints (served by Chats Service)
+router.use(
+  '/api/calls',
+  createProxyMiddleware({
+    target: serviceUrls.chats,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/calls': '/calls',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      if (req.headers.authorization) {
+        proxyReq.setHeader('Authorization', req.headers.authorization);
+      }
+      if (req.headers.cookie) {
+        proxyReq.setHeader('Cookie', req.headers.cookie);
+      }
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Calls service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Calls service unavailable' });
       }
     },
   })
@@ -202,16 +212,7 @@ router.use(
       if (req.headers.cookie) {
         proxyReq.setHeader('Cookie', req.headers.cookie);
       }
-      if (
-        req.is('application/json') &&
-        req.body &&
-        (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')
-      ) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
       console.error('Media service proxy error:', err);
@@ -232,12 +233,7 @@ router.use(
       '^/api/notifications': '',
     },
     onProxyReq: (proxyReq, req: any) => {
-      if (req.body && (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
-        const bodyData = JSON.stringify(req.body);
-        proxyReq.setHeader('Content-Type', 'application/json');
-        proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-        proxyReq.write(bodyData);
-      }
+      writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
       console.error('Notifications service proxy error:', err);

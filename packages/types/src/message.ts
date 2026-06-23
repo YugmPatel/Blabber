@@ -12,6 +12,7 @@ export interface Message {
   _id: string;
   chatId: string;
   senderId: string;
+  clientMessageId?: string;
   type?: 'text' | 'image' | 'audio' | 'document' | 'poll' | 'sticker' | 'event';
   body: string;
   media?: {
@@ -69,6 +70,7 @@ export const MessageSchema = z.object({
   _id: z.string(),
   chatId: z.string(),
   senderId: z.string(),
+  clientMessageId: z.string().optional(),
   type: z.enum(['text', 'image', 'audio', 'document', 'poll', 'sticker', 'event']).optional(),
   body: z.string().max(10000),
   media: z.object({
@@ -136,6 +138,7 @@ export const CreateMessageDTOSchema = z.object({
     description: z.string().max(1000).optional(),
   }).optional(),
   replyToId: z.string().optional(),
+  clientMessageId: z.string().optional(),
   tempId: z.string().optional(),
 });
 

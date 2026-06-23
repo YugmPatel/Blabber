@@ -6,6 +6,7 @@ import { asyncHandler, ValidationError } from '@repo/utils';
 import { getUsersCollection } from '../models/user';
 import { getDeviceSessionsCollection } from '../models/device-session';
 import { generateAccessToken, generateRefreshToken, getRefreshTokenTTL } from '../utils/jwt';
+import { getRefreshCookieOptions } from '../utils/cookies';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   // Validate request body
@@ -42,6 +43,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     email,
     passwordHash,
     name,
+    avatarSource: 'none' as const,
     contacts: [],
     blocked: [],
     lastSeen: now,
@@ -80,13 +82,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   });
 
   // Set httpOnly cookie for refresh token
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: refreshTTL,
-  });
+  res.cookie('refreshToken', refreshToken, getRefreshCookieOptions(refreshTTL));
 
   // Return user data and access token
   res.status(201).json({
@@ -95,6 +91,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
       username: userDoc.username,
       email: userDoc.email,
       name: userDoc.name,
+      avatarSource: userDoc.avatarSource,
     },
     accessToken,
   });

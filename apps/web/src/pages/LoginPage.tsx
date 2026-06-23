@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { API_URL } from '@/api/client';
 import { Eye, EyeOff } from 'lucide-react';
 import BlabberLogo from '@/components/BlabberLogo';
 
@@ -80,6 +81,7 @@ function BrandPanel() {
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login, isAuthenticated } = useAuth();
 
   const [email, setEmail] = useState('');
@@ -87,6 +89,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
   useEffect(() => {
@@ -94,6 +97,21 @@ export default function LoginPage() {
       navigate('/chats', { replace: true });
     }
   }, [isAuthenticated, navigate]);
+
+  useEffect(() => {
+    const oauthError = searchParams.get('oauth');
+    if (!oauthError) return;
+
+    const messages: Record<string, string> = {
+      google_config_missing: 'Google sign-in is not configured for this environment yet.',
+      google_cancelled: 'Google sign-in was cancelled.',
+      google_invalid_state: 'Google sign-in could not be verified. Please try again.',
+      google_unverified_email: 'Google did not provide a verified email address.',
+      google_failed: 'Google sign-in failed. Please try again.',
+    };
+
+    setError(messages[oauthError] || 'Google sign-in failed. Please try again.');
+  }, [searchParams]);
 
   const validateForm = (): boolean => {
     if (!email.trim()) {
@@ -129,6 +147,12 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleGoogleSignIn = () => {
+    setError('');
+    setIsGoogleLoading(true);
+    window.location.href = `${API_URL}/api/auth/google/start`;
   };
 
   return (
@@ -229,12 +253,12 @@ export default function LoginPage() {
                   />
                   Remember me
                 </label>
-                <button
-                  type="button"
+                <Link
+                  to="/forgot-password"
                   className="text-[13px] font-semibold text-slate-700 transition hover:text-slate-900 focus:outline-none focus-visible:underline"
                 >
                   Forgot Password?
-                </button>
+                </Link>
               </div>
 
               <button
@@ -257,6 +281,8 @@ export default function LoginPage() {
               {/* Social buttons */}
               <button
                 type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading || isGoogleLoading}
                 className="flex h-11 w-full items-center justify-center gap-2.5 rounded-[13px] border border-slate-200 bg-white text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
               >
                 <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -265,19 +291,7 @@ export default function LoginPage() {
                   <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" />
                   <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" />
                 </svg>
-                Sign in with Google
-              </button>
-              <button
-                type="button"
-                className="flex h-11 w-full items-center justify-center gap-2.5 rounded-[13px] border border-slate-200 bg-white text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
-              >
-                <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true">
-                  <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-                  <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-                  <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-                  <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-                </svg>
-                Sign in with Microsoft
+                {isGoogleLoading ? 'Redirecting to Google…' : 'Sign in with Google'}
               </button>
             </form>
 

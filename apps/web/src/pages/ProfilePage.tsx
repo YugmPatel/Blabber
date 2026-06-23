@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Camera, Check, Loader2, Trash2, Image, User, Bell, Sparkles, Palette } from 'lucide-react';
@@ -34,6 +34,14 @@ export default function ProfilePage() {
   const [showCameraCapture, setShowCameraCapture] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const displayedAvatar = normalizeMediaUrl(localPreview || avatarUrl);
+
+  useEffect(() => {
+    setName(user?.name || '');
+    setAbout(profileUser?.about || '');
+    setRole(profileUser?.role || '');
+    setDepartment(profileUser?.department || '');
+    setAvatarUrl(profileUser?.avatarUrl || profileUser?.avatar || '');
+  }, [user?._id, user?.name, profileUser?.about, profileUser?.role, profileUser?.department, profileUser?.avatarUrl, profileUser?.avatar]);
 
   const uploadAvatar = async (file: File): Promise<string | null> => {
     setIsUploading(true);
@@ -110,6 +118,8 @@ export default function ProfilePage() {
       if (mediaUrl) {
         setAvatarUrl(mediaUrl);
         setLocalPreview('');
+        await updateProfile.mutateAsync({ name, about, role, department, avatarUrl: mediaUrl });
+        if (refreshUser) refreshUser();
       } else {
         alert('Avatar upload failed. Changes to your photo will not be saved.');
       }

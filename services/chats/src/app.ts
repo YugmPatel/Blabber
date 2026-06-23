@@ -57,47 +57,73 @@ app.get('/healthz', (_req: Request, res: Response) => {
 import { createChat } from './routes/create-chat';
 import { listChats } from './routes/list-chats';
 import { getChat } from './routes/get-chat';
-import { addMember, removeMember } from './routes/manage-members';
+import {
+  addMember,
+  deleteGroup,
+  demoteMember,
+  leaveGroup,
+  promoteMember,
+  removeMember,
+  transferOwnership,
+} from './routes/manage-members';
 import { updateChat } from './routes/update-chat';
 import { pinChat, unpinChat, archiveChat, unarchiveChat } from './routes/pin-archive';
-import { requireChatAdmin } from './middleware/rbac';
+import { requireChatAdmin, requireGroupParticipant } from './middleware/rbac';
 import { summarizeChat } from './routes/summarize-chat';
 import { getChatSummary } from './routes/get-chat-summary';
-import { extractChatActions, getChatActions, updateChatAction } from './routes/chat-actions';
+import { createChatAction, extractChatActions, getChatActions, getMyChatActions, updateChatAction } from './routes/chat-actions';
 import {
   deleteChatDecision,
   extractChatDecisions,
   getChatDecisions,
   updateChatDecision,
 } from './routes/chat-decisions';
-import { getGroupBrain } from './routes/group-brain';
+import { askGroupBrain, getGroupBrain } from './routes/group-brain';
 import {
   deleteWaitingOnItem,
   extractWaitingOnItems,
   getWaitingOnItems,
   updateWaitingOnItem,
 } from './routes/waiting-on';
+import {
+  getIntelligenceAvailability,
+  requireChatIntelligenceEnabled,
+} from './middleware/user-settings';
+import { listCallHistory, recordCallEvent } from './routes/call-history';
+import { createGroupCallToken } from './routes/group-call-token';
 
 app.post('/', authMiddleware, createChat);
 app.get('/', authMiddleware, listChats);
-app.post('/intelligence/chats/:chatId/summarize', authMiddleware, summarizeChat);
-app.get('/intelligence/chats/:chatId/summary', authMiddleware, getChatSummary);
-app.post('/intelligence/chats/:chatId/actions/extract', authMiddleware, extractChatActions);
-app.get('/intelligence/chats/:chatId/actions', authMiddleware, getChatActions);
-app.patch('/intelligence/actions/:actionId', authMiddleware, updateChatAction);
-app.post('/intelligence/chats/:chatId/decisions/extract', authMiddleware, extractChatDecisions);
-app.get('/intelligence/chats/:chatId/decisions', authMiddleware, getChatDecisions);
-app.patch('/intelligence/decisions/:decisionId', authMiddleware, updateChatDecision);
-app.delete('/intelligence/decisions/:decisionId', authMiddleware, deleteChatDecision);
-app.post('/intelligence/chats/:chatId/waiting-on/extract', authMiddleware, extractWaitingOnItems);
-app.get('/intelligence/chats/:chatId/waiting-on', authMiddleware, getWaitingOnItems);
-app.patch('/intelligence/waiting-on/:itemId', authMiddleware, updateWaitingOnItem);
-app.delete('/intelligence/waiting-on/:itemId', authMiddleware, deleteWaitingOnItem);
-app.get('/intelligence/chats/:chatId/brain', authMiddleware, getGroupBrain);
+app.get('/intelligence/availability', authMiddleware, getIntelligenceAvailability);
+app.post('/intelligence/chats/:chatId/summarize', authMiddleware, requireChatIntelligenceEnabled, summarizeChat);
+app.get('/intelligence/chats/:chatId/summary', authMiddleware, requireChatIntelligenceEnabled, getChatSummary);
+app.post('/intelligence/chats/:chatId/actions/extract', authMiddleware, requireChatIntelligenceEnabled, extractChatActions);
+app.post('/intelligence/chats/:chatId/actions', authMiddleware, requireChatIntelligenceEnabled, createChatAction);
+app.get('/intelligence/chats/:chatId/actions', authMiddleware, requireChatIntelligenceEnabled, getChatActions);
+app.get('/intelligence/actions/mine', authMiddleware, requireChatIntelligenceEnabled, getMyChatActions);
+app.patch('/intelligence/actions/:actionId', authMiddleware, requireChatIntelligenceEnabled, updateChatAction);
+app.post('/intelligence/chats/:chatId/decisions/extract', authMiddleware, requireChatIntelligenceEnabled, extractChatDecisions);
+app.get('/intelligence/chats/:chatId/decisions', authMiddleware, requireChatIntelligenceEnabled, getChatDecisions);
+app.patch('/intelligence/decisions/:decisionId', authMiddleware, requireChatIntelligenceEnabled, updateChatDecision);
+app.delete('/intelligence/decisions/:decisionId', authMiddleware, requireChatIntelligenceEnabled, deleteChatDecision);
+app.post('/intelligence/chats/:chatId/waiting-on/extract', authMiddleware, requireChatIntelligenceEnabled, extractWaitingOnItems);
+app.get('/intelligence/chats/:chatId/waiting-on', authMiddleware, requireChatIntelligenceEnabled, getWaitingOnItems);
+app.patch('/intelligence/waiting-on/:itemId', authMiddleware, requireChatIntelligenceEnabled, updateWaitingOnItem);
+app.delete('/intelligence/waiting-on/:itemId', authMiddleware, requireChatIntelligenceEnabled, deleteWaitingOnItem);
+app.get('/intelligence/chats/:chatId/brain', authMiddleware, requireChatIntelligenceEnabled, getGroupBrain);
+app.post('/intelligence/chats/:chatId/brain/ask', authMiddleware, requireChatIntelligenceEnabled, askGroupBrain);
+app.get('/calls', authMiddleware, listCallHistory);
+app.post('/calls/events', authMiddleware, recordCallEvent);
+app.post('/:id/calls/group-token', authMiddleware, createGroupCallToken);
 app.get('/:id', authMiddleware, getChat);
 app.patch('/:id', authMiddleware, requireChatAdmin, updateChat);
 app.post('/:id/members', authMiddleware, requireChatAdmin, addMember);
 app.delete('/:id/members/:userId', authMiddleware, requireChatAdmin, removeMember);
+app.post('/:id/admins', authMiddleware, requireChatAdmin, promoteMember);
+app.delete('/:id/admins', authMiddleware, requireChatAdmin, demoteMember);
+app.patch('/:id/owner', authMiddleware, requireChatAdmin, transferOwnership);
+app.post('/:id/leave', authMiddleware, requireGroupParticipant, leaveGroup);
+app.delete('/:id', authMiddleware, requireChatAdmin, deleteGroup);
 app.post('/:id/pin', authMiddleware, pinChat);
 app.post('/:id/unpin', authMiddleware, unpinChat);
 app.post('/:id/archive', authMiddleware, archiveChat);

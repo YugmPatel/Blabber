@@ -1,8 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
-import { MarkReadDTOSchema } from '@repo/types';
+import { EventType, MarkReadDTOSchema, MessageReadEvent } from '@repo/types';
 import { getMessagesCollection } from '../models/message';
-import { logger } from '@repo/utils';
+import { getDatabase } from '../db';
+import { createEvent, logger } from '@repo/utils';
+import { assertChatMembership } from '../chat-access';
+import { getPubSub } from '../pubsub';
 
 export async function markMessagesAsRead(
   req: Request,
@@ -42,20 +45,66 @@ export async function markMessagesAsRead(
     }
 
     const collection = getMessagesCollection();
+    const db = getDatabase();
     const messageObjectIds = messageIds.map((id) => new ObjectId(id));
+    const userObjectId = new ObjectId(userId);
+    const settings = await db.collection('userSettings').findOne({ userId: userObjectId });
+    const readReceiptsEnabled = settings?.readReceiptsEnabled !== false;
+
+    const messages = await collection
+      .find({ _id: { $in: messageObjectIds } }, { projection: { _id: 1, chatId: 1, createdAt: 1 } })
+      .toArray();
+
+    if (messages.length !== messageObjectIds.length) {
+      res.status(404).json({ error: 'Not Found', message: 'One or more messages were not found' });
+      return;
+    }
+
+    const chatIds = Array.from(new Set(messages.map((message) => message.chatId.toString())));
+    await Promise.all(chatIds.map((chatId) => assertChatMembership(new ObjectId(chatId), userObjectId)));
 
     // Batch update: mark all messages as read
     // Only update messages that are not already read
-    const result = await collection.updateMany(
-      {
-        _id: { $in: messageObjectIds },
-        status: { $ne: 'read' },
-      },
-      {
-        $set: {
-          status: 'read',
-        },
-      }
+    const result = readReceiptsEnabled
+      ? await collection.updateMany(
+          {
+            _id: { $in: messageObjectIds },
+            senderId: { $ne: userObjectId },
+            status: { $ne: 'read' },
+          },
+          {
+            $set: {
+              status: 'read',
+            },
+          }
+        )
+      : { modifiedCount: 0 };
+
+    await Promise.all(
+      chatIds.map((chatId) => {
+        const latestReadAt = messages
+          .filter((message) => message.chatId.toString() === chatId)
+          .reduce<Date | null>((latest, message: any) => {
+            const createdAt = message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt);
+            return !latest || createdAt > latest ? createdAt : latest;
+          }, null);
+
+        if (!latestReadAt) return Promise.resolve();
+
+        return db.collection('chatReadStates').updateOne(
+          { userId: userObjectId, chatId: new ObjectId(chatId) },
+          {
+            $max: { lastReadAt: latestReadAt },
+            $set: { updatedAt: new Date() },
+            $setOnInsert: {
+              userId: userObjectId,
+              chatId: new ObjectId(chatId),
+              createdAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+      })
     );
 
     logger.info(
@@ -66,6 +115,27 @@ export async function markMessagesAsRead(
       },
       'Messages marked as read'
     );
+
+    if (readReceiptsEnabled) try {
+      const pubsub = getPubSub();
+      await Promise.all(
+        chatIds.map((chatId) => {
+          const idsForChat = messages
+            .filter((message) => message.chatId.toString() === chatId)
+            .map((message) => message._id.toString());
+
+          const event = createEvent<MessageReadEvent>(EventType.MESSAGE_READ, {
+            chatId,
+            userId,
+            messageIds: idsForChat,
+          });
+
+          return pubsub.publish(event);
+        })
+      );
+    } catch (error) {
+      logger.error({ error, userId, messageIds }, 'Failed to publish MESSAGE_READ event');
+    }
 
     res.status(200).json({
       success: true,

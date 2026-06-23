@@ -60,7 +60,7 @@ export default function ChatList({
               chat={chat}
               isActive={chat._id === id}
               isPinned={true}
-              unreadCount={unreadCounts[chat._id]}
+              unreadCount={unreadCounts[chat._id] ?? chat.unreadCount ?? 0}
             />
           ))}
         </div>
@@ -73,7 +73,7 @@ export default function ChatList({
               chat={chat}
               isActive={chat._id === id}
               isPinned={false}
-              unreadCount={unreadCounts[chat._id]}
+              unreadCount={unreadCounts[chat._id] ?? chat.unreadCount ?? 0}
             />
           ))}
         </div>

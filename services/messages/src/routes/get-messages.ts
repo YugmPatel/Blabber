@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getMessagesCollection } from '../models/message';
 import { logger } from '@repo/utils';
 import { serializeMessage } from '../serialize-message';
+import { assertChatMembership } from '../chat-access';
 
 // Query parameters schema
 const GetMessagesQuerySchema = z.object({
@@ -50,6 +51,8 @@ export async function getMessages(req: Request, res: Response, next: NextFunctio
     const collection = getMessagesCollection();
     const chatObjectId = new ObjectId(chatId);
     const userObjectId = new ObjectId(userId);
+
+    await assertChatMembership(chatObjectId, userObjectId);
 
     // Build query
     const query: any = {

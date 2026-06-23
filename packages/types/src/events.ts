@@ -15,6 +15,10 @@ export enum EventType {
   CHAT_PINNED = 'chat:pinned',
   CHAT_ARCHIVED = 'chat:archived',
 
+  // Intelligence events
+  ACTION_CREATED = 'action:created',
+  ACTION_UPDATED = 'action:updated',
+
   // User events
   USER_ONLINE = 'user:online',
   USER_OFFLINE = 'user:offline',
@@ -36,9 +40,14 @@ export interface MessageSentEvent extends BaseEvent {
     messageId: string;
     chatId: string;
     senderId: string;
+    senderName?: string;
+    clientMessageId?: string;
     content: string;
     mediaUrl?: string;
     mediaType?: 'image' | 'audio' | 'document';
+    chatType?: 'direct' | 'group';
+    chatTitle?: string;
+    participants?: string[];
     message?: any;
     replyTo?: string;
     createdAt: string;
@@ -72,6 +81,13 @@ export interface MessageReactionEvent extends BaseEvent {
     chatId: string;
     userId: string;
     emoji: string;
+    operation?: 'set' | 'remove';
+    reactions?: Array<{
+      userId: string;
+      emoji: string;
+      createdAt: string | Date;
+    }>;
+    message?: any;
   };
 }
 
@@ -124,6 +140,24 @@ export interface ChatMemberRemovedEvent extends BaseEvent {
   };
 }
 
+export interface ActionCreatedEvent extends BaseEvent {
+  type: EventType.ACTION_CREATED;
+  data: {
+    chatId: string;
+    participants: string[];
+    action: any;
+  };
+}
+
+export interface ActionUpdatedEvent extends BaseEvent {
+  type: EventType.ACTION_UPDATED;
+  data: {
+    chatId: string;
+    participants: string[];
+    action: any;
+  };
+}
+
 // User events
 export interface UserOnlineEvent extends BaseEvent {
   type: EventType.USER_ONLINE;
@@ -167,6 +201,8 @@ export type AppEvent =
   | ChatUpdatedEvent
   | ChatMemberAddedEvent
   | ChatMemberRemovedEvent
+  | ActionCreatedEvent
+  | ActionUpdatedEvent
   | UserOnlineEvent
   | UserOfflineEvent
   | UserTypingEvent

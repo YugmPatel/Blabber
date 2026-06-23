@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Search, Loader2, Users, Check, Clock, Timer, Trash2, Camera } from 'lucide-react';
+import { X, Search, Loader2, Users, Check, Clock, Timer, Archive, Camera } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { apiClient, getAccessToken } from '@/api/client';
@@ -13,7 +13,7 @@ interface NewGroupModalProps {
   onClose: () => void;
 }
 
-type ExpirationOption = 'never' | '1day' | '3days' | '1week' | '2weeks' | '1month' | 'custom';
+type ExpirationOption = '1hour' | '24hours' | '3days' | '1week' | 'custom';
 
 interface AvatarPresignResponse {
   uploadUrl: string;
@@ -24,14 +24,12 @@ interface AvatarPresignResponse {
   uploadAuthRequired?: boolean;
 }
 
-const expirationOptions: { value: ExpirationOption; label: string; days?: number }[] = [
-  { value: 'never', label: 'Never (Permanent)' },
-  { value: '1day', label: '1 Day', days: 1 },
-  { value: '3days', label: '3 Days', days: 3 },
-  { value: '1week', label: '1 Week', days: 7 },
-  { value: '2weeks', label: '2 Weeks', days: 14 },
-  { value: '1month', label: '1 Month', days: 30 },
-  { value: 'custom', label: 'Custom Date' },
+const expirationOptions: { value: ExpirationOption; label: string; ms?: number }[] = [
+  { value: '1hour', label: '1 hour', ms: 60 * 60 * 1000 },
+  { value: '24hours', label: '24 hours', ms: 24 * 60 * 60 * 1000 },
+  { value: '3days', label: '3 days', ms: 3 * 24 * 60 * 60 * 1000 },
+  { value: '1week', label: '1 week', ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: 'custom', label: 'Custom' },
 ];
 
 export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
@@ -40,8 +38,10 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [groupName, setGroupName] = useState('');
+  const [groupDescription, setGroupDescription] = useState('');
+  const [groupContext, setGroupContext] = useState('');
   const [isTemporary, setIsTemporary] = useState(false);
-  const [expiration, setExpiration] = useState<ExpirationOption>('1week');
+  const [expiration, setExpiration] = useState<ExpirationOption>('24hours');
   const [customExpirationDate, setCustomExpirationDate] = useState('');
   const [disappearingMessages, setDisappearingMessages] = useState(false);
   const [disappearingDuration, setDisappearingDuration] = useState<'24h' | '7d' | '90d'>('24h');
@@ -55,15 +55,12 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
 
   const getExpirationDate = (): Date | null => {
     if (!isTemporary) return null;
-    if (expiration === 'never') return null;
     if (expiration === 'custom' && customExpirationDate) {
       return new Date(customExpirationDate);
     }
     const option = expirationOptions.find((o) => o.value === expiration);
-    if (option?.days) {
-      const date = new Date();
-      date.setDate(date.getDate() + option.days);
-      return date;
+    if (option?.ms) {
+      return new Date(Date.now() + option.ms);
     }
     return null;
   };
@@ -94,7 +91,11 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
         type: 'group',
         participantIds,
         title: groupName.trim() || 'New Group',
+        description: groupDescription.trim() || undefined,
+        groupContext: groupContext.trim() || undefined,
         ...(groupAvatarUrl ? { avatarUrl: groupAvatarUrl } : {}),
+        groupKind: isTemporary ? 'temporary' : 'standard',
+        expiresAt: getExpirationDate()?.toISOString(),
       };
 
       const response = await apiClient.post<{ chat: Chat }>('/api/chats', payload);
@@ -164,8 +165,10 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     setSearchQuery('');
     setSelectedUsers([]);
     setGroupName('');
+    setGroupDescription('');
+    setGroupContext('');
     setIsTemporary(false);
-    setExpiration('1week');
+    setExpiration('24hours');
     setCustomExpirationDate('');
     setDisappearingMessages(false);
     setGroupAvatar('');
@@ -213,6 +216,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
 
   const handleCreate = () => {
     if (!groupName.trim() || isUploadingAvatar) return;
+    if (isTemporary && !getExpirationDate()) return;
     createGroupMutation.mutate();
   };
 
@@ -293,7 +297,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
               <div className="mb-3 flex items-center gap-6 text-xs font-semibold uppercase tracking-[0.1em] text-slate-400">
                 <span className="text-[#0f766e]">Basics</span>
                 <span>Members</span>
-                <span>AI Rules</span>
+                <span>Group Context</span>
               </div>
               <div className="relative">
                 <Search
@@ -439,6 +443,33 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                 />
               </div>
 
+              <div className="mb-4">
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Description</label>
+                <textarea
+                  value={groupDescription}
+                  onChange={(e) => setGroupDescription(e.target.value)}
+                  placeholder="What is this group for?"
+                  maxLength={500}
+                  className="min-h-20 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-400 focus:ring-2 focus:ring-[#99f6e4] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-teal-500"
+                />
+              </div>
+
+              <div className="mb-4">
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Group Context
+                </label>
+                <textarea
+                  value={groupContext}
+                  onChange={(e) => setGroupContext(e.target.value)}
+                  placeholder="Optional: goals, norms, important background, or how Chat Intelligence should understand this group."
+                  maxLength={2000}
+                  className="min-h-28 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-400 focus:ring-2 focus:ring-[#99f6e4] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-teal-500"
+                />
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Used by Summary, Actions, and Group Brain. Members can see it; admins can edit it.
+                </p>
+              </div>
+
               {/* Members preview */}
               <div className="mb-4">
                 <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -468,7 +499,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                     </div>
                     <div>
                       <p className="font-medium text-slate-900 dark:text-white">Temporary Group</p>
-                      <p className="text-sm text-slate-500 dark:text-slate-400">Auto-delete after set time</p>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Ends at a set time, then becomes read-only</p>
                     </div>
                   </div>
                   <button
@@ -507,23 +538,26 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                     </div>
                     {expiration === 'custom' && (
                       <input
-                        type="date"
+                        type="datetime-local"
+                        aria-label="Custom expiration date and time"
                         value={customExpirationDate}
-                        min={new Date().toISOString().split('T')[0]}
+                        min={new Date().toISOString().slice(0, 16)}
                         onChange={(e) => setCustomExpirationDate(e.target.value)}
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-orange-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                       />
                     )}
                     {getExpirationDate() && (
                       <div className="flex items-center gap-2 rounded-lg bg-orange-50 p-2 text-sm text-orange-700">
-                        <Trash2 size={16} />
+                        <Archive size={16} />
                         <span>
-                          Group will be deleted on{' '}
-                          {getExpirationDate()?.toLocaleDateString('en-US', {
+                          Group will end on{' '}
+                          {getExpirationDate()?.toLocaleString(undefined, {
                             weekday: 'long',
                             month: 'long',
                             day: 'numeric',
                             year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
                           })}
                         </span>
                       </div>
@@ -584,7 +618,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             <div className="border-t border-slate-200 p-4 dark:border-slate-700">
               <button
                 onClick={handleCreate}
-                disabled={createGroupMutation.isPending || isUploadingAvatar || !groupName.trim()}
+                disabled={createGroupMutation.isPending || isUploadingAvatar || !groupName.trim() || (isTemporary && !getExpirationDate())}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 dark:disabled:bg-slate-700 dark:disabled:text-slate-400"
               >
                 {createGroupMutation.isPending ? (
@@ -629,7 +663,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             )}
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Group Preview</h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Define a topic to set context for AI summaries.
+              Add shared context so Summary, Actions, and Group Brain understand the group.
             </p>
             <div className="mt-3 flex justify-center gap-2">
               <span className="rounded-full bg-[#e7f8f4] px-2 py-1 text-[10px] font-semibold text-[#0f766e]">

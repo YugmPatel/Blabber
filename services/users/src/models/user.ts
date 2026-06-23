@@ -9,6 +9,8 @@ export interface User {
   passwordHash: string;
   name: string;
   avatarUrl?: string;
+  avatarSource?: 'google' | 'upload' | 'none';
+  googleAvatarUrl?: string;
   about?: string;
   role?: string;
   department?: string;
@@ -80,21 +82,39 @@ export async function searchUsersByText(
 
 export async function updateUserProfile(
   userId: string | ObjectId,
-  updates: Partial<Pick<User, 'name' | 'avatarUrl' | 'about' | 'role' | 'department'>>
+  updates: Partial<Pick<User, 'name' | 'avatarUrl' | 'about' | 'role' | 'department' | 'avatarSource'>>
 ): Promise<User | null> {
   const collection = getUsersCollection();
   const _id = typeof userId === 'string' ? new ObjectId(userId) : userId;
 
-  const result = await collection.findOneAndUpdate(
-    { _id },
-    {
-      $set: {
-        ...updates,
-        updatedAt: new Date(),
-      },
-    },
-    { returnDocument: 'after' }
-  );
+  const existing = await collection.findOne({ _id });
+  if (!existing) return null;
+
+  const setUpdates: Partial<User> & { updatedAt: Date } = {
+    ...updates,
+    updatedAt: new Date(),
+  };
+  const unsetUpdates: Record<string, ''> = {};
+
+  if ('avatarUrl' in updates) {
+    if (updates.avatarUrl) {
+      setUpdates.avatarSource = updates.avatarSource ?? 'upload';
+    } else if (existing.googleAvatarUrl) {
+      setUpdates.avatarUrl = existing.googleAvatarUrl;
+      setUpdates.avatarSource = 'google';
+    } else {
+      delete setUpdates.avatarUrl;
+      setUpdates.avatarSource = 'none';
+      unsetUpdates.avatarUrl = '';
+    }
+  }
+
+  const update: any = { $set: setUpdates };
+  if (Object.keys(unsetUpdates).length > 0) {
+    update.$unset = unsetUpdates;
+  }
+
+  const result = await collection.findOneAndUpdate({ _id }, update, { returnDocument: 'after' });
 
   return result;
 }

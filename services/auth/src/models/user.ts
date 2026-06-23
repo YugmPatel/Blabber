@@ -8,9 +8,14 @@ export interface UserDocument {
   passwordHash: string;
   name: string;
   avatarUrl?: string;
+  avatarSource?: 'google' | 'upload' | 'none';
+  googleAvatarUrl?: string;
   about?: string;
   role?: string;
   department?: string;
+  googleId?: string;
+  authProvider?: 'password' | 'google' | 'both';
+  emailVerified?: boolean;
   contacts: ObjectId[];
   blocked: ObjectId[];
   lastSeen: Date;
@@ -31,6 +36,9 @@ export async function createUserIndexes(): Promise<void> {
 
   // Create unique index on email
   await collection.createIndex({ email: 1 }, { unique: true });
+
+  // Create sparse unique index on Google subject for OAuth users
+  await collection.createIndex({ googleId: 1 }, { unique: true, sparse: true });
 
   // Create text index for search - skip if already exists with different name
   try {

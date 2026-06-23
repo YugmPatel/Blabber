@@ -3,6 +3,7 @@ import { logger } from '@repo/utils';
 import app from './app';
 import { connectToDatabase, closeDatabase } from './db';
 import { createPushSubscriptionIndexes } from './models/push-subscription';
+import { createNotificationPreferenceIndexes } from './models/notification-preferences';
 
 const config = loadCommonConfig();
 
@@ -13,6 +14,7 @@ async function startServer() {
 
     // Create indexes
     await createPushSubscriptionIndexes();
+    await createNotificationPreferenceIndexes();
     logger.info('Database indexes created');
 
     // Start Express server

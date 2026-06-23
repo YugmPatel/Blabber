@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { ObjectId } from 'mongodb';
 import { logger } from '@repo/utils';
-import { createPushSubscription } from '../models/push-subscription';
+import { upsertPushSubscription } from '../models/push-subscription';
 
 // Zod schema for push subscription
 const subscribeSchema = z.object({
@@ -33,44 +33,25 @@ export async function subscribe(req: Request, res: Response) {
 
     const { userId, subscription } = validation.data;
 
-    try {
-      // Create push subscription
-      const pushSubscription = await createPushSubscription({
-        userId: new ObjectId(userId),
+    const pushSubscription = await upsertPushSubscription({
+      userId: new ObjectId(userId),
+      endpoint: subscription.endpoint,
+      keys: subscription.keys,
+      userAgent: req.headers['user-agent'],
+    });
+
+    logger.info(
+      {
+        userId,
         endpoint: subscription.endpoint,
-        keys: subscription.keys,
-        userAgent: req.headers['user-agent'],
-      });
+      },
+      'Push subscription upserted'
+    );
 
-      logger.info(
-        {
-          userId,
-          endpoint: subscription.endpoint,
-        },
-        'Push subscription created'
-      );
-
-      return res.status(201).json({
-        success: true,
-        subscriptionId: pushSubscription._id,
-      });
-    } catch (error: any) {
-      // Handle duplicate endpoint error
-      if (error.code === 11000) {
-        logger.warn(
-          {
-            endpoint: subscription.endpoint,
-          },
-          'Duplicate push subscription endpoint'
-        );
-
-        return res.status(200).json({
-          success: true,
-          message: 'Subscription already exists',
-        });
-      }
-      throw error;
-    }
+    return res.status(201).json({
+      success: true,
+      subscriptionId: pushSubscription._id,
+    });
   } catch (error: any) {
     logger.error({ error: error.message }, 'Failed to create push subscription');
 

@@ -51,8 +51,12 @@ app.get('/healthz', (_req: Request, res: Response) => {
 import { subscribe } from './routes/subscribe';
 import { unsubscribe } from './routes/unsubscribe';
 import { send } from './routes/send';
+import { getPreferences, getVapidPublicKey, updatePreferences } from './routes/preferences';
 app.post('/push/subscribe', subscribe);
 app.post('/push/unsubscribe', unsubscribe);
+app.get('/push/vapid-public-key', getVapidPublicKey);
+app.get('/preferences/:userId', getPreferences);
+app.patch('/preferences/:userId', updatePreferences);
 app.post('/send', send);
 
 // 404 handler

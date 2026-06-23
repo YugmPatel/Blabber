@@ -6,6 +6,7 @@ export interface MessageDocument {
   _id: ObjectId;
   chatId: ObjectId;
   senderId: ObjectId;
+  clientMessageId?: string;
   type?: 'text' | 'image' | 'audio' | 'document' | 'poll' | 'sticker' | 'event';
   body: string;
   media?: {
@@ -69,6 +70,15 @@ export async function createMessageIndexes(): Promise<void> {
 
     // Index for sender queries
     await collection.createIndex({ senderId: 1 }, { name: 'senderId' });
+
+    await collection.createIndex(
+      { chatId: 1, senderId: 1, clientMessageId: 1 },
+      {
+        name: 'chat_sender_clientMessageId',
+        unique: true,
+        partialFilterExpression: { clientMessageId: { $exists: true } },
+      }
+    );
 
     logger.info('Message indexes created successfully');
   } catch (error) {

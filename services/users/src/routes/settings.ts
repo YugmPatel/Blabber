@@ -1,0 +1,98 @@
+import { Request, Response } from 'express';
+import { ObjectId } from 'mongodb';
+import { asyncHandler, ValidationError } from '@repo/utils';
+import {
+  DEFAULT_USER_SETTINGS,
+  getOrCreateUserSettings,
+  getUserSettingsCollection,
+  ThemePreference,
+} from '../models/user-settings';
+
+const booleanFields = [
+  'readReceiptsEnabled',
+  'presenceVisible',
+  'lastSeenVisible',
+  'incomingCallsEnabled',
+  'chatIntelligenceEnabled',
+] as const;
+
+function serializeSettings(settings: any) {
+  return {
+    readReceiptsEnabled: settings.readReceiptsEnabled ?? DEFAULT_USER_SETTINGS.readReceiptsEnabled,
+    presenceVisible: settings.presenceVisible ?? DEFAULT_USER_SETTINGS.presenceVisible,
+    lastSeenVisible: settings.lastSeenVisible ?? DEFAULT_USER_SETTINGS.lastSeenVisible,
+    incomingCallsEnabled: settings.incomingCallsEnabled ?? DEFAULT_USER_SETTINGS.incomingCallsEnabled,
+    themePreference: settings.themePreference ?? DEFAULT_USER_SETTINGS.themePreference,
+    chatIntelligenceEnabled:
+      settings.chatIntelligenceEnabled ?? DEFAULT_USER_SETTINGS.chatIntelligenceEnabled,
+    updatedAt: settings.updatedAt,
+  };
+}
+
+export const getMySettings = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+    return;
+  }
+
+  const settings = await getOrCreateUserSettings(new ObjectId(userId));
+  res.status(200).json({ settings: serializeSettings(settings) });
+});
+
+export const updateMySettings = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+    return;
+  }
+
+  const patch: Record<string, boolean | ThemePreference> = {};
+  for (const field of booleanFields) {
+    if (field in req.body) {
+      if (typeof req.body[field] !== 'boolean') {
+        throw new ValidationError(`${field} must be a boolean`);
+      }
+      patch[field] = req.body[field];
+    }
+  }
+
+  if ('themePreference' in req.body) {
+    if (!['light', 'dark', 'system'].includes(req.body.themePreference)) {
+      throw new ValidationError('themePreference must be light, dark, or system');
+    }
+    patch.themePreference = req.body.themePreference;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError('No valid settings provided');
+  }
+
+  const userObjectId = new ObjectId(userId);
+  await getOrCreateUserSettings(userObjectId);
+  const result = await getUserSettingsCollection().findOneAndUpdate(
+    { userId: userObjectId },
+    { $set: { ...patch, updatedAt: new Date() } },
+    { returnDocument: 'after' }
+  );
+
+  res.status(200).json({ settings: serializeSettings(result ?? { ...DEFAULT_USER_SETTINGS, updatedAt: new Date() }) });
+});
+
+export const getPublicSettings = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!ObjectId.isValid(id)) {
+    res.status(400).json({ error: 'Bad Request', message: 'Invalid user ID format' });
+    return;
+  }
+
+  const settings = await getOrCreateUserSettings(new ObjectId(id));
+  res.status(200).json({
+    settings: {
+      presenceVisible: settings.presenceVisible,
+      lastSeenVisible: settings.lastSeenVisible,
+      incomingCallsEnabled: settings.incomingCallsEnabled,
+      chatIntelligenceEnabled: settings.chatIntelligenceEnabled,
+    },
+  });
+});

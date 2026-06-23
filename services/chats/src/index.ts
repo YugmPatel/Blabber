@@ -8,6 +8,9 @@ import { createChatDecisionIndexes } from './models/chat-decision';
 import { createChatSummaryIndexes } from './models/chat-summary';
 import { createWaitingOnIndexes } from './models/chat-waiting-on';
 import { createUserChatPreferencesIndexes } from './models/user-chat-preferences';
+import { createChatReadStateIndexes } from './models/chat-read-state';
+import { createCallHistoryIndexes } from './models/call-history';
+import { initPubSub, closePubSub } from './pubsub';
 
 const config = loadCommonConfig();
 
@@ -23,6 +26,9 @@ async function startServer() {
     await createWaitingOnIndexes();
     await createChatSummaryIndexes();
     await createUserChatPreferencesIndexes();
+    await createChatReadStateIndexes();
+    await createCallHistoryIndexes();
+    initPubSub();
     logger.info('Database indexes created');
 
     // Start Express server
@@ -42,6 +48,7 @@ async function startServer() {
 
       server.close(async () => {
         logger.info('HTTP server closed');
+        await closePubSub();
         await closeDatabase();
         process.exit(0);
       });

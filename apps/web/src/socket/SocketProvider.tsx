@@ -29,7 +29,7 @@ interface SocketProviderProps {
 
 export const SocketProvider = ({ children }: SocketProviderProps) => {
   const { accessToken, isAuthenticated } = useAuth();
-  const { socket, isConnected, setSocket, setIsConnected } = useAppStore();
+  const { socket, isConnected, setSocket, setIsConnected, activeChat } = useAppStore();
 
   // Subscribe to socket events (with null check)
   useSocketEvents(socket && isConnected ? (socket as TypedSocket) : null);
@@ -97,6 +97,30 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, accessToken]);
+
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+
+    const emitActivity = () => {
+      socket.emit('client:activity', {
+        activeChatId: activeChat,
+        visible: document.visibilityState === 'visible',
+        focused: document.hasFocus(),
+      });
+    };
+
+    emitActivity();
+
+    window.addEventListener('focus', emitActivity);
+    window.addEventListener('blur', emitActivity);
+    document.addEventListener('visibilitychange', emitActivity);
+
+    return () => {
+      window.removeEventListener('focus', emitActivity);
+      window.removeEventListener('blur', emitActivity);
+      document.removeEventListener('visibilitychange', emitActivity);
+    };
+  }, [socket, isConnected, activeChat]);
 
   const value: SocketContextType = {
     socket: socket as TypedSocket | null,

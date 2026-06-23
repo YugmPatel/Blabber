@@ -37,6 +37,7 @@ export function createMockSummaryProvider(): AISummaryProvider {
 
       return {
         summary: summaryText,
+        overview: summaryText,
         decisions:
           context.messages.length > 0
             ? [

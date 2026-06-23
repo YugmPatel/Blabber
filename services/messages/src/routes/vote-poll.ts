@@ -5,6 +5,7 @@ import { createEvent, logger } from '@repo/utils';
 import { getMessagesCollection } from '../models/message';
 import { getPubSub } from '../pubsub';
 import { serializeMessage } from '../serialize-message';
+import { assertChatMembership } from '../chat-access';
 
 export async function votePoll(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -40,6 +41,8 @@ export async function votePoll(req: Request, res: Response, next: NextFunction):
       res.status(404).json({ error: 'Not Found', message: 'Poll message not found' });
       return;
     }
+
+    await assertChatMembership(message.chatId, voterObjectId);
 
     if (message.poll.closed) {
       res.status(400).json({ error: 'Bad Request', message: 'Poll is closed' });

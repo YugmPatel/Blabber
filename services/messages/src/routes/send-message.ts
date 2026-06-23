@@ -6,6 +6,7 @@ import { getDatabase } from '../db';
 import { logger, createEvent } from '@repo/utils';
 import { getPubSub } from '../pubsub';
 import { serializeMessage } from '../serialize-message';
+import { assertChatMembership, assertChatWritable } from '../chat-access';
 
 function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' {
   if (fileType.startsWith('image/')) {
@@ -46,13 +47,30 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const { body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, tempId } =
+    const { body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, tempId, clientMessageId } =
       bodyResult.data;
+    const stableClientMessageId = clientMessageId || tempId;
 
     const collection = getMessagesCollection();
     const db = getDatabase();
     const chatObjectId = new ObjectId(chatId);
     const senderObjectId = new ObjectId(userId);
+
+    const chatAccess = await assertChatMembership(chatObjectId, senderObjectId);
+    assertChatWritable(chatAccess);
+
+    if (stableClientMessageId) {
+      const existingMessage = await collection.findOne({
+        chatId: chatObjectId,
+        senderId: senderObjectId,
+        clientMessageId: stableClientMessageId,
+      });
+
+      if (existingMessage) {
+        res.status(200).json(serializeMessage(existingMessage, stableClientMessageId));
+        return;
+      }
+    }
 
     // Build message document
     const messageDoc: any = {
@@ -66,6 +84,10 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       deletedFor: [],
       createdAt: new Date(),
     };
+
+    if (stableClientMessageId) {
+      messageDoc.clientMessageId = stableClientMessageId;
+    }
 
     // Add media if provided
     if (mediaId) {
@@ -139,7 +161,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       const replyToObjectId = new ObjectId(replyToId);
       const replyToMessage = await collection.findOne({ _id: replyToObjectId });
 
-      if (!replyToMessage) {
+      if (!replyToMessage || !replyToMessage.chatId.equals(chatObjectId)) {
         res.status(404).json({ error: 'Not Found', message: 'Reply message not found' });
         return;
       }
@@ -156,6 +178,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
 
     // Update chat's lastMessageRef
     const chatsCollection = db.collection('chats');
+    const chatDoc = await chatsCollection.findOne({ _id: chatObjectId });
     await chatsCollection.updateOne(
       { _id: chatObjectId },
       {
@@ -171,7 +194,12 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       }
     );
 
-    const apiMessage = serializeMessage(messageDoc, tempId);
+    const apiMessage = serializeMessage(messageDoc, stableClientMessageId);
+    const sender = await db.collection('users').findOne(
+      { _id: senderObjectId },
+      { projection: { name: 1, username: 1 } }
+    );
+    const senderName = sender?.name || sender?.username || 'Someone';
 
     logger.info(
       {
@@ -189,9 +217,14 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
         messageId: messageDoc._id.toString(),
         chatId: chatId,
         senderId: userId,
+        senderName,
+        clientMessageId: stableClientMessageId,
         content: messageDoc.body,
         mediaUrl: messageDoc.media?.url,
         mediaType: messageDoc.media?.type,
+        chatType: chatDoc?.type,
+        chatTitle: chatDoc?.title,
+        participants: chatDoc?.participants?.map((participantId: ObjectId) => participantId.toString()),
         message: apiMessage,
         replyTo: messageDoc.replyTo?.messageId.toString(),
         createdAt: messageDoc.createdAt.toISOString(),

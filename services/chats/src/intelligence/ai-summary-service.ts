@@ -1,5 +1,5 @@
 import type { ChatIntelligenceSummary } from '@repo/types';
-import { logger } from '@repo/utils';
+import { AppError, logger } from '@repo/utils';
 import { createMockSummaryProvider } from './providers/mock-summary-provider';
 import { createOpenRouterSummaryProvider } from './providers/openrouter-summary-provider';
 
@@ -16,6 +16,9 @@ export interface AISummaryContext {
   chatId: string;
   currentUserId: string;
   currentUserName?: string | null;
+  chatTitle?: string | null;
+  chatDescription?: string | null;
+  groupContext?: string | null;
   messages: SummaryInputMessage[];
 }
 
@@ -29,6 +32,18 @@ export class AISummaryService {
   async generateSummary(context: AISummaryContext): Promise<ChatIntelligenceSummary> {
     return this.provider.generateSummary(context);
   }
+}
+
+function createUnavailableProvider(): AISummaryProvider {
+  return {
+    async generateSummary(): Promise<ChatIntelligenceSummary> {
+      throw new AppError(
+        503,
+        'AI summary is unavailable because OPENROUTER_API_KEY is not configured',
+        'AI_NOT_CONFIGURED'
+      );
+    },
+  };
 }
 
 function shouldUseMockFallback(): boolean {
@@ -64,8 +79,12 @@ export function createAISummaryService(): AISummaryService {
   const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
   const mockProvider = createMockSummaryProvider();
 
-  if (!openRouterApiKey) {
+  if (!openRouterApiKey && shouldUseMockFallback()) {
     return new AISummaryService(mockProvider);
+  }
+
+  if (!openRouterApiKey) {
+    return new AISummaryService(createUnavailableProvider());
   }
 
   const openRouterProvider = createOpenRouterSummaryProvider({

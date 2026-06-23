@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
-import { UpdateChatDTOSchema } from '@repo/types';
-import { asyncHandler } from '@repo/utils';
+import { EventType, UpdateChatDTOSchema, type ChatUpdatedEvent } from '@repo/types';
+import { asyncHandler, createEvent, logger } from '@repo/utils';
 import { getChatsCollection } from '../models/chat';
+import { serializeChat } from '../serialize-chat';
+import { getPubSub } from '../pubsub';
 
 /**
  * Update group chat metadata (admin only)
@@ -18,13 +20,19 @@ export const updateChat = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  const { title, avatarUrl } = validationResult.data;
+  const { title, description, groupContext, avatarUrl, expiresAt } = validationResult.data;
 
   // Check if at least one field is provided
-  if (!title && !avatarUrl) {
+  if (
+    title === undefined &&
+    description === undefined &&
+    groupContext === undefined &&
+    avatarUrl === undefined &&
+    expiresAt === undefined
+  ) {
     return res.status(400).json({
       error: 'Validation Error',
-      message: 'At least one field (title or avatarUrl) must be provided',
+      message: 'At least one field must be provided',
     });
   }
 
@@ -49,10 +57,31 @@ export const updateChat = asyncHandler(async (req: Request, res: Response) => {
   if (avatarUrl !== undefined) {
     updateFields.avatarUrl = avatarUrl;
   }
+  if (description !== undefined) {
+    updateFields.description = description;
+  }
+  if (groupContext !== undefined) {
+    updateFields.groupContext = groupContext;
+  }
+  if (expiresAt !== undefined) {
+    const expiresDate = new Date(expiresAt);
+    if (chat.groupKind !== 'temporary' || Number.isNaN(expiresDate.getTime()) || expiresDate <= new Date()) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Temporary group extensions require a future expiration time',
+      });
+    }
+    updateFields.expiresAt = expiresDate;
+  }
+
+  const update: any = { $set: updateFields };
+  if (expiresAt !== undefined) {
+    update.$unset = { endedAt: '' };
+  }
 
   // Update chat
   const collection = getChatsCollection();
-  const result = await collection.updateOne({ _id: chat._id }, { $set: updateFields });
+  const result = await collection.updateOne({ _id: chat._id }, update);
 
   if (result.modifiedCount === 0) {
     return res.status(500).json({
@@ -71,24 +100,18 @@ export const updateChat = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  // Serialize chat for response
-  const serializedChat: any = {
-    _id: updatedChat._id.toString(),
-    type: updatedChat.type,
-    participants: updatedChat.participants.map((id) => id.toString()),
-    admins: updatedChat.admins.map((id) => id.toString()),
-    createdAt: updatedChat.createdAt,
-    updatedAt: updatedChat.updatedAt,
-  };
-
-  if (updatedChat.title) {
-    serializedChat.title = updatedChat.title;
-  }
-  if (updatedChat.avatarUrl) {
-    serializedChat.avatarUrl = updatedChat.avatarUrl;
-  }
-  if (updatedChat.lastMessageRef) {
-    serializedChat.lastMessageRef = updatedChat.lastMessageRef;
+  const serializedChat = await serializeChat(updatedChat, { includeParticipants: true });
+  try {
+    await getPubSub().publish(
+      createEvent<ChatUpdatedEvent>(EventType.CHAT_UPDATED, {
+        chatId: updatedChat._id.toString(),
+        name: updatedChat.title,
+        avatar: updatedChat.avatarUrl,
+        updatedBy: (req as any).user?.userId || 'system',
+      })
+    );
+  } catch (error) {
+    logger.error({ error, chatId: updatedChat._id.toString() }, 'Failed to publish chat updated event');
   }
 
   return res.status(200).json({

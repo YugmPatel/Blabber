@@ -1,9 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
-import { UpdateMessageDTOSchema } from '@repo/types';
+import { EventType, MessageEditedEvent, UpdateMessageDTOSchema } from '@repo/types';
 import { getMessagesCollection } from '../models/message';
-import { logger } from '@repo/utils';
+import { createEvent, logger } from '@repo/utils';
 import { serializeMessage } from '../serialize-message';
+import { assertChatMembership } from '../chat-access';
+import { getPubSub } from '../pubsub';
 
 export async function editMessage(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -46,6 +48,8 @@ export async function editMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
+    await assertChatMembership(message.chatId, userObjectId);
+
     // Verify the user is the sender
     if (!message.senderId.equals(userObjectId)) {
       res.status(403).json({
@@ -73,6 +77,20 @@ export async function editMessage(req: Request, res: Response, next: NextFunctio
     }
 
     const apiMessage = serializeMessage(result);
+
+    try {
+      const pubsub = getPubSub();
+      const event = createEvent<MessageEditedEvent>(EventType.MESSAGE_EDITED, {
+        messageId: apiMessage._id,
+        chatId: apiMessage.chatId,
+        content: apiMessage.body,
+        message: apiMessage,
+        editedAt: apiMessage.editedAt?.toISOString() ?? new Date().toISOString(),
+      });
+      await pubsub.publish(event);
+    } catch (error) {
+      logger.error({ error, messageId }, 'Failed to publish MESSAGE_EDITED event');
+    }
 
     logger.info(
       {

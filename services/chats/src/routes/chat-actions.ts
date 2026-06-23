@@ -1,12 +1,17 @@
 import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
-import { asyncHandler, logger } from '@repo/utils';
+import { asyncHandler, createEvent, logger } from '@repo/utils';
 import {
+  CreateChatActionDTOSchema,
+  EventType,
   ChatActionExtractionResultSchema,
   ExtractChatActionsDTOSchema,
   UpdateChatActionDTOSchema,
+  type ActionCreatedEvent,
+  type ActionUpdatedEvent,
   type ChatActionExtractionResult,
   type ChatActionItem,
+  type ChatActionStatus,
 } from '@repo/types';
 import { getChatsCollection } from '../models/chat';
 import {
@@ -19,6 +24,8 @@ import {
   type ActionInputMessage,
   type ActionParticipant,
 } from '../intelligence/action-extraction-service';
+import { getPubSub } from '../pubsub';
+import { isChatExpired } from '../serialize-chat';
 
 interface MessageDocument {
   _id: ObjectId;
@@ -46,6 +53,7 @@ function personName(user: UserDocument): string {
 }
 
 function toActionItem(doc: ChatActionDocument): ChatActionItem {
+  const status = normalizeActionStatus(doc.status);
   return {
     id: doc._id.toString(),
     chatId: doc.chatId.toString(),
@@ -57,7 +65,7 @@ function toActionItem(doc: ChatActionDocument): ChatActionItem {
     dueDate: doc.dueDate,
     eventStart: doc.eventStart,
     eventEnd: doc.eventEnd,
-    status: doc.status,
+    status,
     priority: doc.priority,
     confidence: doc.confidence,
     sourceMessageIds: doc.sourceMessageIds.map((id) => id.toString()),
@@ -66,6 +74,13 @@ function toActionItem(doc: ChatActionDocument): ChatActionItem {
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
+}
+
+function normalizeActionStatus(status: ChatActionStatus): ChatActionStatus {
+  if (status === 'completed') return 'completed';
+  if (status === 'accepted' || status === 'pending') return 'open';
+  if (status === 'dismissed') return 'completed';
+  return status;
 }
 
 function buildActionKey(action: ChatActionItem): string {
@@ -93,6 +108,27 @@ async function getChatForParticipant(chatId: string, userId: string) {
   }
 
   return { status: 200 as const, chat, chatObjectId, userObjectId };
+}
+
+function requireGroupChat(chat: { type: string } | null, res: Response): boolean {
+  if (chat?.type === 'group') return true;
+  res.status(400).json({
+    error: 'Validation Error',
+    message: 'Actions are available for group chats only',
+  });
+  return false;
+}
+
+function requireActiveGroup(chat: { type: string; groupKind?: 'standard' | 'temporary'; expiresAt?: Date; endedAt?: Date; deletedAt?: Date } | null, res: Response): boolean {
+  if (!requireGroupChat(chat, res)) return false;
+  if (chat && isChatExpired(chat)) {
+    res.status(400).json({
+      error: 'Validation Error',
+      message: 'This temporary group has ended',
+    });
+    return false;
+  }
+  return true;
 }
 
 async function loadUserNames(userIds: string[]): Promise<Map<string, string>> {
@@ -141,6 +177,7 @@ export const extractChatActions = asyncHandler(async (req: Request, res: Respons
   if (chatResult.status !== 200) {
     return errorForChatStatus(chatResult.status, res);
   }
+  if (!requireActiveGroup(chatResult.chat, res)) return;
 
   const messageLimit = bodyResult.data.messageLimit ?? 200;
   const db = getDatabase();
@@ -180,6 +217,9 @@ export const extractChatActions = asyncHandler(async (req: Request, res: Respons
     chatId,
     currentUserId: userId,
     currentUserName: userNamesById.get(userId) ?? null,
+    chatTitle: chatResult.chat.title ?? null,
+    chatDescription: chatResult.chat.description ?? null,
+    groupContext: chatResult.chat.groupContext ?? null,
     participants,
     messages: contextMessages,
   });
@@ -196,57 +236,21 @@ export const extractChatActions = asyncHandler(async (req: Request, res: Respons
     });
   }
 
-  const collection = getChatActionsCollection();
-  const now = new Date();
-  const actions: ChatActionItem[] = [];
-
-  for (const action of parsedResult.data.actions) {
-    const actionKey = buildActionKey(action);
-    const existing = await collection.findOne({ chatId: chatResult.chatObjectId!, actionKey });
-    if (existing) {
-      actions.push(toActionItem(existing));
-      continue;
-    }
-
-    const sourceMessageIds = action.sourceMessageIds.map((id) => new ObjectId(id));
-    const document: ChatActionDocument = {
-      _id: new ObjectId(),
-      chatId: chatResult.chatObjectId!,
-      actionKey,
-      type: action.type,
-      title: action.title,
-      description: action.description,
-      assignedTo: action.assignedTo,
-      createdBy: action.createdBy,
-      dueDate: action.dueDate,
-      eventStart: action.eventStart,
-      eventEnd: action.eventEnd,
-      status: action.status,
-      priority: action.priority,
-      confidence: action.confidence,
-      sourceMessageIds,
-      sourceText: action.sourceText,
-      metadata: action.metadata,
-      generatedByUserId: chatResult.userObjectId!,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await collection.insertOne(document);
-    actions.push(toActionItem(document));
-  }
-
   const response: ChatActionExtractionResult = {
     chatId,
     summary: parsedResult.data.summary,
-    actions,
+    actions: parsedResult.data.actions.map((action) => ({
+      ...action,
+      chatId,
+      status: 'open',
+    })),
     generatedAt: parsedResult.data.generatedAt,
     sourceMessageIds: parsedResult.data.sourceMessageIds,
   };
 
   logger.info(
-    { chatId, userId, actions: actions.length, messageLimit },
-    'Chat actions extracted'
+    { chatId, userId, actions: response.actions.length, messageLimit },
+    'Chat action suggestions extracted'
   );
 
   return res.status(200).json(response);
@@ -263,6 +267,7 @@ export const getChatActions = asyncHandler(async (req: Request, res: Response) =
   if (chatResult.status !== 200) {
     return errorForChatStatus(chatResult.status, res);
   }
+  if (!requireGroupChat(chatResult.chat, res)) return;
 
   const actions = await getChatActionsCollection()
     .find({ chatId: chatResult.chatObjectId! })
@@ -270,6 +275,145 @@ export const getChatActions = asyncHandler(async (req: Request, res: Response) =
     .toArray();
 
   return res.status(200).json({ actions: actions.map(toActionItem) });
+});
+
+export const getMyChatActions = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const userObjectId = assertObjectId(userId);
+  if (!userObjectId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
+  }
+
+  const chats = await getChatsCollection()
+    .find({ participants: userObjectId, type: 'group', deletedAt: { $exists: false } })
+    .project({ _id: 1, title: 1 })
+    .toArray();
+  const chatTitleById = new Map(chats.map((chat) => [chat._id.toString(), chat.title || 'Group chat']));
+  const actions = await getChatActionsCollection()
+    .find({
+      chatId: { $in: chats.map((chat) => chat._id) },
+      'assignedTo.userId': userId,
+    })
+    .sort({ updatedAt: -1 })
+    .toArray();
+
+  return res.status(200).json({
+    actions: actions.map((doc) => ({
+      ...toActionItem(doc),
+      chatTitle: chatTitleById.get(doc.chatId.toString()) || 'Group chat',
+    })),
+  });
+});
+
+export const createChatAction = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const { chatId } = req.params;
+  const chatResult = await getChatForParticipant(chatId, userId);
+  if (chatResult.status !== 200) {
+    return errorForChatStatus(chatResult.status, res);
+  }
+  if (!requireActiveGroup(chatResult.chat, res)) return;
+
+  const bodyResult = CreateChatActionDTOSchema.safeParse(req.body ?? {});
+  if (!bodyResult.success) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'Invalid action payload',
+      details: bodyResult.error.errors,
+    });
+  }
+
+  if (!bodyResult.data.sourceMessageIds.every(ObjectId.isValid)) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'One or more source message IDs are invalid',
+    });
+  }
+
+  const sourceObjectIds = bodyResult.data.sourceMessageIds.map((id) => new ObjectId(id));
+  const sourceCount = await getDatabase().collection<MessageDocument>('messages').countDocuments({
+    _id: { $in: sourceObjectIds },
+    chatId: chatResult.chatObjectId!,
+    deletedFor: { $ne: chatResult.userObjectId! },
+  });
+  if (sourceCount !== sourceObjectIds.length) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'One or more source messages are not available in this group',
+    });
+  }
+
+  const ownerUserId = bodyResult.data.ownerUserId || userId;
+  const userNames = await loadUserNames([ownerUserId, userId]);
+  const actionCandidate: ChatActionItem = {
+    chatId,
+    type: 'task',
+    title: bodyResult.data.title,
+    description: bodyResult.data.description,
+    assignedTo: {
+      userId: ownerUserId,
+      name: bodyResult.data.ownerName || userNames.get(ownerUserId),
+    },
+    createdBy: {
+      userId,
+      name: userNames.get(userId),
+    },
+    dueDate: bodyResult.data.dueDate,
+    status: 'open',
+    sourceMessageIds: bodyResult.data.sourceMessageIds,
+    sourceText: bodyResult.data.sourceText,
+  };
+
+  const actionKey = buildActionKey(actionCandidate);
+  const collection = getChatActionsCollection();
+  const existing = await collection.findOne({ chatId: chatResult.chatObjectId!, actionKey });
+  if (existing) {
+    return res.status(200).json({ action: toActionItem(existing), duplicate: true });
+  }
+
+  const now = new Date();
+  const document: ChatActionDocument = {
+    _id: new ObjectId(),
+    chatId: chatResult.chatObjectId!,
+    actionKey,
+    type: 'task',
+    title: bodyResult.data.title,
+    description: bodyResult.data.description,
+    assignedTo: actionCandidate.assignedTo,
+    createdBy: actionCandidate.createdBy,
+    dueDate: bodyResult.data.dueDate,
+    status: 'open',
+    sourceMessageIds: sourceObjectIds,
+    sourceText: bodyResult.data.sourceText,
+    generatedByUserId: chatResult.userObjectId!,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await collection.insertOne(document);
+  const action = toActionItem(document);
+
+  try {
+    await getPubSub().publish(
+      createEvent<ActionCreatedEvent>(EventType.ACTION_CREATED, {
+        chatId,
+        participants: chatResult.chat.participants.map((id) => id.toString()),
+        action,
+      })
+    );
+  } catch (error) {
+    logger.error({ error, chatId, actionId: action.id }, 'Failed to publish action created event');
+  }
+
+  return res.status(201).json({ action });
 });
 
 export const updateChatAction = asyncHandler(async (req: Request, res: Response) => {
@@ -302,6 +446,16 @@ export const updateChatAction = asyncHandler(async (req: Request, res: Response)
   if (chatResult.status !== 200) {
     return errorForChatStatus(chatResult.status, res);
   }
+  if (!requireActiveGroup(chatResult.chat, res)) return;
+
+  const assignedUserId = action.assignedTo?.userId;
+  const isOwner = assignedUserId ? assignedUserId === userId : true;
+  if (!isOwner) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'Only the assigned owner can update this action status',
+    });
+  }
 
   const updatedAt = new Date();
   const updated = await collection.findOneAndUpdate(
@@ -310,5 +464,18 @@ export const updateChatAction = asyncHandler(async (req: Request, res: Response)
     { returnDocument: 'after' }
   );
 
-  return res.status(200).json({ action: toActionItem(updated!) });
+  const updatedAction = toActionItem(updated!);
+  try {
+    await getPubSub().publish(
+      createEvent<ActionUpdatedEvent>(EventType.ACTION_UPDATED, {
+        chatId: updatedAction.chatId,
+        participants: chatResult.chat.participants.map((id) => id.toString()),
+        action: updatedAction,
+      })
+    );
+  } catch (error) {
+    logger.error({ error, actionId }, 'Failed to publish action updated event');
+  }
+
+  return res.status(200).json({ action: updatedAction });
 });

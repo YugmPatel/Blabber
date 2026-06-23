@@ -185,6 +185,82 @@ describe('useSocketEvents', () => {
         expect(data?.pages[0].messages).toHaveLength(1);
       });
     });
+
+    it('should replace optimistic message when message:new arrives before ack', async () => {
+      const chatId = 'chat-1';
+      const clientMessageId = 'client-123';
+      const optimisticMessage: Message = {
+        _id: clientMessageId,
+        chatId,
+        senderId: 'user-1',
+        clientMessageId,
+        body: 'Race test',
+        reactions: [],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: new Date(),
+      };
+
+      queryClient.setQueryData<InfiniteData<any>>(messageKeys.list(chatId), {
+        pages: [{ messages: [optimisticMessage], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      renderHook(() => useSocketEvents(mockSocket), { wrapper });
+
+      const serverMessage: Message = {
+        ...optimisticMessage,
+        _id: 'msg-1',
+        createdAt: new Date(),
+      };
+
+      eventHandlers['message:new']({ message: serverMessage });
+      eventHandlers['message:ack']({ tempId: clientMessageId, messageId: 'msg-1', message: serverMessage });
+
+      await waitFor(() => {
+        const data = queryClient.getQueryData<InfiniteData<any>>(messageKeys.list(chatId));
+        expect(data?.pages[0].messages).toHaveLength(1);
+        expect(data?.pages[0].messages[0]._id).toBe('msg-1');
+      });
+    });
+
+    it('should keep one message when ack arrives before message:new', async () => {
+      const chatId = 'chat-1';
+      const clientMessageId = 'client-456';
+      const optimisticMessage: Message = {
+        _id: clientMessageId,
+        chatId,
+        senderId: 'user-1',
+        clientMessageId,
+        body: 'Race test',
+        reactions: [],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: new Date(),
+      };
+
+      queryClient.setQueryData<InfiniteData<any>>(messageKeys.list(chatId), {
+        pages: [{ messages: [optimisticMessage], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      renderHook(() => useSocketEvents(mockSocket), { wrapper });
+
+      const serverMessage: Message = {
+        ...optimisticMessage,
+        _id: 'msg-2',
+        createdAt: new Date(),
+      };
+
+      eventHandlers['message:ack']({ tempId: clientMessageId, messageId: 'msg-2', message: serverMessage });
+      eventHandlers['message:new']({ message: serverMessage });
+
+      await waitFor(() => {
+        const data = queryClient.getQueryData<InfiniteData<any>>(messageKeys.list(chatId));
+        expect(data?.pages[0].messages).toHaveLength(1);
+        expect(data?.pages[0].messages[0]._id).toBe('msg-2');
+      });
+    });
   });
 
   describe('message:edit event', () => {
@@ -229,7 +305,7 @@ describe('useSocketEvents', () => {
     });
   });
 
-  describe('message:delete event', () => {
+  describe('message:deleted event', () => {
     it('should remove deleted message from cache', async () => {
       const chatId = 'chat-1';
 
@@ -268,14 +344,87 @@ describe('useSocketEvents', () => {
       // Render hook
       renderHook(() => useSocketEvents(mockSocket), { wrapper });
 
-      // Simulate message:delete event
-      eventHandlers['message:delete']({ messageId: 'msg-1', chatId });
+      // Simulate message:deleted event
+      eventHandlers['message:deleted']({ messageId: 'msg-1', chatId });
 
       // Verify message was removed
       await waitFor(() => {
         const data = queryClient.getQueryData<InfiniteData<any>>(messageKeys.list(chatId));
         expect(data?.pages[0].messages).toHaveLength(1);
         expect(data?.pages[0].messages[0]._id).toBe('msg-2');
+      });
+    });
+  });
+
+  describe('message:reaction event', () => {
+    it('should update reactions from final event payload', async () => {
+      const chatId = 'chat-1';
+      const message: Message = {
+        _id: 'msg-1',
+        chatId,
+        senderId: 'user-1',
+        body: 'React to me',
+        reactions: [],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: new Date(),
+      };
+
+      queryClient.setQueryData<InfiniteData<any>>(messageKeys.list(chatId), {
+        pages: [{ messages: [message], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      renderHook(() => useSocketEvents(mockSocket), { wrapper });
+
+      eventHandlers['message:reaction']({
+        messageId: 'msg-1',
+        chatId,
+        userId: 'user-2',
+        emoji: '👍',
+        operation: 'set',
+        reactions: [{ userId: 'user-2', emoji: '👍', createdAt: new Date().toISOString() }],
+      });
+
+      await waitFor(() => {
+        const data = queryClient.getQueryData<InfiniteData<any>>(messageKeys.list(chatId));
+        expect(data?.pages[0].messages[0].reactions).toHaveLength(1);
+        expect(data?.pages[0].messages[0].reactions[0].emoji).toBe('👍');
+      });
+    });
+
+    it('should remove toggled reaction without leaving duplicates', async () => {
+      const chatId = 'chat-1';
+      const message: Message = {
+        _id: 'msg-1',
+        chatId,
+        senderId: 'user-1',
+        body: 'React to me',
+        reactions: [{ userId: 'user-2', emoji: '👍', createdAt: new Date() }],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: new Date(),
+      };
+
+      queryClient.setQueryData<InfiniteData<any>>(messageKeys.list(chatId), {
+        pages: [{ messages: [message], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      renderHook(() => useSocketEvents(mockSocket), { wrapper });
+
+      eventHandlers['message:reaction']({
+        messageId: 'msg-1',
+        chatId,
+        userId: 'user-2',
+        emoji: '👍',
+        operation: 'remove',
+        reactions: [],
+      });
+
+      await waitFor(() => {
+        const data = queryClient.getQueryData<InfiniteData<any>>(messageKeys.list(chatId));
+        expect(data?.pages[0].messages[0].reactions).toHaveLength(0);
       });
     });
   });
@@ -484,16 +633,18 @@ describe('useSocketEvents', () => {
       const { unmount } = renderHook(() => useSocketEvents(mockSocket), { wrapper });
 
       // Verify listeners were registered
-      expect(mockSocket.on).toHaveBeenCalledTimes(9);
+      expect(mockSocket.on).toHaveBeenCalledTimes(12);
 
       // Unmount
       unmount();
 
       // Verify listeners were removed
-      expect(mockSocket.off).toHaveBeenCalledTimes(9);
+      expect(mockSocket.off).toHaveBeenCalledTimes(12);
       expect(mockSocket.off).toHaveBeenCalledWith('message:new', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('message:edit', expect.any(Function));
-      expect(mockSocket.off).toHaveBeenCalledWith('message:delete', expect.any(Function));
+      expect(mockSocket.off).toHaveBeenCalledWith('message:deleted', expect.any(Function));
+      expect(mockSocket.off).toHaveBeenCalledWith('message:reaction', expect.any(Function));
+      expect(mockSocket.off).toHaveBeenCalledWith('message:read', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('receipt:delivered', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('receipt:read', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('typing:update', expect.any(Function));

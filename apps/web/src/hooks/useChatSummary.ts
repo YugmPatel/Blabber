@@ -32,6 +32,7 @@ export function useChatSummary(chatId: string | undefined) {
     isLoadingSummary: summaryQuery.isLoading,
     isFetchingSummary: summaryQuery.isFetching,
     summaryError: summaryQuery.error,
+    refetchSummary: summaryQuery.refetch,
     generateSummary: generateMutation.mutate,
     isGeneratingSummary: generateMutation.isPending,
     generateError: generateMutation.error,

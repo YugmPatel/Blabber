@@ -5,15 +5,86 @@ import type { Socket } from 'socket.io-client';
 import type { Message, Chat } from '@repo/types';
 import type { ServerToClientEvents, ClientToServerEvents } from '@repo/types';
 import { useAppStore } from '@/store/app-store';
+import { useAuth } from '@/contexts/AuthContext';
 import { messageKeys } from './useMessages';
 import { chatKeys } from './useChats';
 import { userKeys } from './useUsers';
+import { chatActionKeys } from './useChatActions';
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 interface MessagesResponse {
   messages: Message[];
   nextCursor: string | null;
+}
+
+function hydrateMessage(rawMessage: any): Message {
+  return {
+    ...rawMessage,
+    createdAt: new Date(rawMessage.createdAt),
+    editedAt: rawMessage.editedAt ? new Date(rawMessage.editedAt) : undefined,
+    reactions: (rawMessage.reactions ?? []).map((reaction: any) => ({
+      ...reaction,
+      createdAt: reaction.createdAt ? new Date(reaction.createdAt) : new Date(),
+    })),
+  };
+}
+
+function messageMatchesCorrelation(message: Message, serverMessage: Message, tempId?: string) {
+  return (
+    message._id === serverMessage._id ||
+    (serverMessage.clientMessageId && message.clientMessageId === serverMessage.clientMessageId) ||
+    (serverMessage.clientMessageId && message._id === serverMessage.clientMessageId) ||
+    (tempId && (message._id === tempId || message.clientMessageId === tempId))
+  );
+}
+
+function upsertMessageInData(
+  old: InfiniteData<MessagesResponse> | undefined,
+  message: Message,
+  tempId?: string
+) {
+  if (!old) return old;
+
+  let found = false;
+  const pages = old.pages.map((page) => {
+    const messages = page.messages.map((existing) => {
+      if (messageMatchesCorrelation(existing, message, tempId)) {
+        found = true;
+        return message;
+      }
+      return existing;
+    });
+
+    return { ...page, messages };
+  });
+
+  if (found) {
+    return { ...old, pages };
+  }
+
+  return {
+    ...old,
+    pages: pages.map((page, index) =>
+      index === 0 ? { ...page, messages: [message, ...page.messages] } : page
+    ),
+  };
+}
+
+function mediaPreviewText(message: Message) {
+  if (message.media?.type === 'image') return 'Sent an image';
+  if (message.media?.type === 'audio') return 'Sent a voice message';
+  if (message.media?.type === 'document') return 'Sent a document';
+  if (message.type === 'poll') return 'Sent a poll';
+  if (message.type === 'sticker') return 'Sent a sticker';
+  if (message.type === 'event') return 'Shared an event';
+  return 'Sent a message';
+}
+
+function sortChatsByUpdatedAt(a: Chat, b: Chat) {
+  const aTime = new Date(a.updatedAt || a.lastMessageRef?.createdAt || 0).getTime();
+  const bTime = new Date(b.updatedAt || b.lastMessageRef?.createdAt || 0).getTime();
+  return bTime - aTime;
 }
 
 // Track processed message IDs to prevent duplicates from multiple sources
@@ -25,7 +96,8 @@ const processedMessageIds = new Set<string>();
  */
 export const useSocketEvents = (socket: TypedSocket | null) => {
   const queryClient = useQueryClient();
-  const { resolvePendingMessage, setTyping } = useAppStore();
+  const { resolvePendingMessage, setTyping, activeChat } = useAppStore();
+  const { user } = useAuth();
 
   useEffect(() => {
     if (!socket) return;
@@ -39,11 +111,8 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       }
 
       const messageId = data.message._id;
+      const wasAlreadyProcessed = processedMessageIds.has(messageId);
 
-      // Skip if we've already processed this message (prevents duplicates from pubsub + ack)
-      if (processedMessageIds.has(messageId)) {
-        return;
-      }
       processedMessageIds.add(messageId);
 
       // Clean up old entries to prevent memory leak (keep last 100)
@@ -52,71 +121,61 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
         idsArray.slice(0, 50).forEach((id) => processedMessageIds.delete(id));
       }
 
-      const message: Message = {
-        ...data.message,
-        createdAt: new Date(data.message.createdAt),
-        editedAt: data.message.editedAt ? new Date(data.message.editedAt) : undefined,
-      };
+      const message = hydrateMessage(data.message);
+      const isOwnMessage = message.senderId === user?._id;
+      const isActiveVisibleChat =
+        activeChat === message.chatId &&
+        document.visibilityState === 'visible' &&
+        document.hasFocus();
 
       // Update React Query cache for messages
       queryClient.setQueryData<InfiniteData<MessagesResponse>>(
         messageKeys.list(message.chatId),
-        (old) => {
-          if (!old) return old;
-
-          // Check if message already exists in cache (by _id or tempId)
-          const messageExists = old.pages.some((page) =>
-            page.messages.some(
-              (msg) => msg._id === message._id || (data.tempId && msg._id === data.tempId)
-            )
-          );
-
-          if (messageExists) {
-            // Update existing message (replace temp message with real one)
-            return {
-              ...old,
-              pages: old.pages.map((page) => ({
-                ...page,
-                messages: page.messages.map((msg) =>
-                  msg._id === message._id || (data.tempId && msg._id === data.tempId)
-                    ? message
-                    : msg
-                ),
-              })),
-            };
-          }
-
-          // Add new message to the first page
-          return {
-            ...old,
-            pages: old.pages.map((page, index) =>
-              index === 0
-                ? {
-                    ...page,
-                    messages: [message, ...page.messages],
-                  }
-                : page
-            ),
-          };
-        }
+        (old) => upsertMessageInData(old, message, data.tempId || message.clientMessageId)
       );
 
       // Resolve optimistic update if tempId is provided
-      if (data.tempId) {
-        resolvePendingMessage(data.tempId, message._id);
+      if (data.tempId || message.clientMessageId) {
+        resolvePendingMessage(data.tempId || message.clientMessageId!, message._id);
       }
 
-      // Update chat list (lastMessage)
-      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      // Update all loaded chat-list caches immediately, including inactive chats.
+      const chatListQueries = queryClient.getQueryCache().findAll({ queryKey: chatKeys.lists() });
+      chatListQueries.forEach((query) => {
+        queryClient.setQueryData<Chat[]>(query.queryKey, (old) => {
+          if (!old) return old;
+
+          const updated = old.map((chat) => {
+            if (chat._id !== message.chatId) return chat;
+
+            const shouldIncrementUnread =
+              !wasAlreadyProcessed && !isOwnMessage && !isActiveVisibleChat;
+
+            return {
+              ...chat,
+              lastMessageRef: {
+                messageId: message._id,
+                body: message.body || mediaPreviewText(message),
+                senderId: message.senderId,
+                createdAt: message.createdAt,
+              },
+              updatedAt: message.createdAt,
+              unreadCount: shouldIncrementUnread
+                ? (chat.unreadCount || 0) + 1
+                : isActiveVisibleChat
+                  ? 0
+                  : chat.unreadCount || 0,
+            };
+          });
+
+          return [...updated].sort(sortChatsByUpdatedAt);
+        });
+      });
     };
 
     // Handler for message edits
     const handleMessageEdit = (data: { message: any }) => {
-      const message: Message = {
-        ...data.message,
-        createdAt: new Date(data.message.createdAt),
-        editedAt: data.message.editedAt ? new Date(data.message.editedAt) : undefined,
-      };
+      const message = hydrateMessage(data.message);
 
       // Update the message in the cache
       queryClient.setQueryData<InfiniteData<MessagesResponse>>(
@@ -129,6 +188,49 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
             pages: old.pages.map((page) => ({
               ...page,
               messages: page.messages.map((msg) => (msg._id === message._id ? message : msg)),
+            })),
+          };
+        }
+      );
+    };
+
+    const handleMessageReaction = (data: {
+      messageId: string;
+      chatId: string;
+      userId: string;
+      emoji: string;
+      operation?: 'set' | 'remove';
+      reactions?: any[];
+      message?: any;
+    }) => {
+      queryClient.setQueryData<InfiniteData<MessagesResponse>>(
+        messageKeys.list(data.chatId),
+        (old) => {
+          if (!old) return old;
+
+          const finalMessage = data.message ? hydrateMessage(data.message) : null;
+          const finalReactions = data.reactions?.map((reaction) => ({
+            ...reaction,
+            createdAt: reaction.createdAt ? new Date(reaction.createdAt) : new Date(),
+          }));
+
+          return {
+            ...old,
+            pages: old.pages.map((page) => ({
+              ...page,
+              messages: page.messages.map((message) => {
+                if (message._id !== data.messageId) return message;
+                if (finalMessage) return finalMessage;
+                if (finalReactions) return { ...message, reactions: finalReactions };
+
+                const reactions = message.reactions.filter(
+                  (reaction) => reaction.userId !== data.userId
+                );
+                if (data.operation !== 'remove') {
+                  reactions.push({ userId: data.userId, emoji: data.emoji, createdAt: new Date() });
+                }
+                return { ...message, reactions };
+              }),
             })),
           };
         }
@@ -193,7 +295,7 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
     };
 
     // Handler for read receipts
-    const handleReceiptRead = (data: { messageIds: string[]; userId: string }) => {
+    const handleReceiptRead = (data: { chatId?: string; messageIds: string[]; userId: string }) => {
       // Find which chat these messages belong to by checking all message caches
       const queryCache = queryClient.getQueryCache();
       const messageQueries = queryCache.findAll({ queryKey: messageKeys.all });
@@ -223,6 +325,17 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
           });
         }
       });
+
+      if (data.userId === user?._id && data.chatId) {
+        queryClient.getQueryCache().findAll({ queryKey: chatKeys.lists() }).forEach((query) => {
+          queryClient.setQueryData<Chat[]>(query.queryKey, (old) => {
+            if (!old) return old;
+            return old.map((chat) =>
+              chat._id === data.chatId ? { ...chat, unreadCount: 0 } : chat
+            );
+          });
+        });
+      }
     };
 
     // Handler for typing indicators
@@ -257,48 +370,50 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     };
 
+    const handleActionCreated = (data: { chatId: string; action: any }) => {
+      queryClient.setQueryData<{ actions: any[] }>(chatActionKeys.list(data.chatId), (current) => {
+        const actions = current?.actions || [];
+        if (actions.some((action) => action.id === data.action.id)) return current;
+        return { actions: [data.action, ...actions] };
+      });
+    };
+
+    const handleActionUpdated = (data: { chatId: string; action: any }) => {
+      queryClient.setQueryData<{ actions: any[] }>(chatActionKeys.list(data.chatId), (current) => ({
+        actions: (current?.actions || []).map((action) =>
+          action.id === data.action.id ? data.action : action
+        ),
+      }));
+    };
+
     // Handler for presence updates
-    const handlePresenceUpdate = (data: { userId: string; online: boolean; lastSeen: Date }) => {
+    const handlePresenceUpdate = (data: { userId: string; online: boolean; lastSeen: Date | string | null }) => {
       // Update presence cache
       queryClient.setQueryData(userKeys.presence(data.userId), {
         online: data.online,
-        lastSeen: new Date(data.lastSeen),
+        lastSeen: data.lastSeen ? new Date(data.lastSeen) : null,
       });
     };
 
     // Handler for message acknowledgment (sent back to sender)
-    const handleMessageAck = (data: { tempId?: string; messageId: string; message: any }) => {
-      if (!data.tempId || !data.message) {
+    const handleMessageAck = (data: { tempId?: string; clientMessageId?: string; messageId: string; message: any }) => {
+      if ((!data.tempId && !data.clientMessageId) || !data.message) {
         return;
       }
 
       // Mark this message as processed to prevent duplicate from pubsub
       processedMessageIds.add(data.messageId);
 
-      const message: Message = {
-        ...data.message,
-        createdAt: new Date(data.message.createdAt),
-        editedAt: data.message.editedAt ? new Date(data.message.editedAt) : undefined,
-      };
+      const message = hydrateMessage(data.message);
 
       // Replace the optimistic message with the real one
       queryClient.setQueryData<InfiniteData<MessagesResponse>>(
         messageKeys.list(message.chatId),
-        (old) => {
-          if (!old) return old;
-
-          return {
-            ...old,
-            pages: old.pages.map((page) => ({
-              ...page,
-              messages: page.messages.map((msg) => (msg._id === data.tempId ? message : msg)),
-            })),
-          };
-        }
+        (old) => upsertMessageInData(old, message, data.tempId || data.clientMessageId || message.clientMessageId)
       );
 
       // Resolve the pending message
-      resolvePendingMessage(data.tempId, message._id);
+      resolvePendingMessage(data.tempId || data.clientMessageId!, message._id);
     };
 
     // Handler for errors
@@ -312,11 +427,15 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
     socket.on('message:ack', handleMessageAck);
     socket.on('message:new', handleMessageNew);
     socket.on('message:edit', handleMessageEdit);
-    socket.on('message:delete', handleMessageDelete);
+    socket.on('message:deleted', handleMessageDelete);
+    socket.on('message:reaction', handleMessageReaction);
     socket.on('receipt:delivered', handleReceiptDelivered);
     socket.on('receipt:read', handleReceiptRead);
+    socket.on('message:read', handleReceiptRead);
     socket.on('typing:update', handleTypingUpdate);
     socket.on('chat:updated', handleChatUpdated);
+    socket.on('action:created', handleActionCreated);
+    socket.on('action:updated', handleActionUpdated);
     socket.on('presence:update', handlePresenceUpdate);
     socket.on('error', handleError);
 
@@ -325,13 +444,17 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       socket.off('message:ack', handleMessageAck);
       socket.off('message:new', handleMessageNew);
       socket.off('message:edit', handleMessageEdit);
-      socket.off('message:delete', handleMessageDelete);
+      socket.off('message:deleted', handleMessageDelete);
+      socket.off('message:reaction', handleMessageReaction);
       socket.off('receipt:delivered', handleReceiptDelivered);
       socket.off('receipt:read', handleReceiptRead);
+      socket.off('message:read', handleReceiptRead);
       socket.off('typing:update', handleTypingUpdate);
       socket.off('chat:updated', handleChatUpdated);
+      socket.off('action:created', handleActionCreated);
+      socket.off('action:updated', handleActionUpdated);
       socket.off('presence:update', handlePresenceUpdate);
       socket.off('error', handleError);
     };
-  }, [socket, queryClient, resolvePendingMessage, setTyping]);
+  }, [socket, queryClient, resolvePendingMessage, setTyping, activeChat, user?._id]);
 };

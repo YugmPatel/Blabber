@@ -236,6 +236,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
         if (!event.candidate || !latestCall || !socket || !currentUser?._id) return;
         socket.emit('call:ice-candidate', {
           callId: latestCall.callId,
+          chatId: latestCall.chatId,
           fromUserId: currentUser._id,
           toUserId: latestCall.peerUserId,
           candidate: event.candidate.toJSON(),
@@ -335,6 +336,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
         if (!isCurrentCall(call)) return;
         socket.emit('call:offer', {
           callId: call.callId,
+          chatId: call.chatId,
           fromUserId: currentUser._id,
           toUserId: call.peerUserId,
           offer: serializeDescription(offer),
@@ -454,6 +456,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
         if (!isCurrentCall(call)) return;
         socket.emit('call:answer', {
           callId: call.callId,
+          chatId: call.chatId,
           fromUserId: currentUser._id,
           toUserId: call.peerUserId,
           answer: serializeDescription(answer),

@@ -32,7 +32,7 @@ export const requireChatAdmin = async (req: Request, res: Response, next: NextFu
     const collection = getChatsCollection();
 
     // Find chat by ID
-    const chat = await collection.findOne({ _id: chatId });
+    const chat = await collection.findOne({ _id: chatId, deletedAt: { $exists: false } });
 
     if (!chat) {
       return res.status(404).json({
@@ -62,6 +62,53 @@ export const requireChatAdmin = async (req: Request, res: Response, next: NextFu
     // Attach chat to request for use in route handler
     (req as any).chat = chat;
 
+    return next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const requireGroupParticipant = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'User not authenticated',
+      });
+    }
+
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Invalid chat ID',
+      });
+    }
+
+    const chat = await getChatsCollection().findOne({
+      _id: new ObjectId(id),
+      deletedAt: { $exists: false },
+    });
+    if (!chat) {
+      return res.status(404).json({ error: 'Not Found', message: 'Chat not found' });
+    }
+    if (chat.type !== 'group') {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'This operation is only available for group chats',
+      });
+    }
+
+    const isParticipant = chat.participants.some((participantId) => participantId.equals(new ObjectId(userId)));
+    if (!isParticipant) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'You are not a participant in this chat',
+      });
+    }
+
+    (req as any).chat = chat;
     return next();
   } catch (error) {
     next(error);

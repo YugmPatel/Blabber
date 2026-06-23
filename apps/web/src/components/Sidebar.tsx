@@ -1,13 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   MessagesSquare,
+  CircleDashed,
   Users,
-  FileText,
   CheckSquare,
-  GitBranch,
-  Brain,
-  Clock3,
+  Phone,
   LogOut,
   Plus,
   ChevronLeft,
@@ -48,9 +46,10 @@ export default function Sidebar({
   activeChatFilter = 'all',
   onChatFilterChange = noop,
   onNavigateMobile,
-  taskCount = 0,
+  taskCount: _taskCount = 0,
 }: SidebarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -75,19 +74,22 @@ export default function Sidebar({
     navigate('/login', { replace: true });
   };
 
-  // Intelligence items: no real routes yet, navigate to /chats
   const intelligenceItems = [
-    { label: 'Groups', icon: Users },
-    { label: 'Summaries', icon: FileText },
-    { label: 'Tasks', icon: CheckSquare, badge: taskCount > 0 ? taskCount : undefined },
-    { label: 'Decisions', icon: GitBranch },
-    { label: 'Memories', icon: Brain },
-    { label: 'Waiting On', icon: Clock3 },
+    { label: 'Groups', icon: Users, path: '/chats' },
+    { label: 'Calls', icon: Phone, path: '/calls' },
+    { label: 'My Actions', icon: CheckSquare, path: '/actions' },
   ];
 
   const navItemBase =
     'relative flex items-center rounded-xl py-2.5 text-sm font-medium transition-colors';
   const navItemPadding = collapsed ? 'justify-center px-0' : 'gap-2.5 px-2.5';
+  const isChatsRoute = location.pathname === '/chats' || location.pathname.startsWith('/chats/');
+  const isStatusRoute = location.pathname === '/status';
+  const isCallsRoute = location.pathname === '/calls';
+  const isActionsRoute = location.pathname === '/actions';
+  const activeNavClass = 'bg-[#e7f8f4] text-[#0f766e] dark:bg-teal-900/40 dark:text-teal-300';
+  const inactiveNavClass =
+    'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100';
 
   return (
     <aside
@@ -148,19 +150,34 @@ export default function Sidebar({
         <button
           onClick={() => {
             onChatFilterChange('all');
+            navigate('/chats');
             onNavigateMobile?.();
           }}
           aria-label="All Chats"
-          aria-pressed={activeChatFilter === 'all'}
+          aria-pressed={isChatsRoute && activeChatFilter === 'all'}
           title={collapsed ? 'All Chats' : undefined}
           className={`${navItemBase} ${navItemPadding} w-full ${
-            activeChatFilter === 'all'
-              ? 'bg-[#e7f8f4] text-[#0f766e] dark:bg-teal-900/40 dark:text-teal-300'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100'
+            isChatsRoute && activeChatFilter === 'all' ? activeNavClass : inactiveNavClass
           }`}
         >
           <MessagesSquare size={17} className="flex-shrink-0" />
           {!collapsed && <span className="flex-1 truncate text-left">All Chats</span>}
+        </button>
+
+        <button
+          onClick={() => {
+            navigate('/status');
+            onNavigateMobile?.();
+          }}
+          aria-label="Status"
+          aria-pressed={isStatusRoute}
+          title={collapsed ? 'Status' : undefined}
+          className={`${navItemBase} ${navItemPadding} w-full ${
+            isStatusRoute ? activeNavClass : inactiveNavClass
+          }`}
+        >
+          <CircleDashed size={17} className="flex-shrink-0" />
+          {!collapsed && <span className="flex-1 truncate text-left">Status</span>}
         </button>
 
         {/* Intelligence items */}
@@ -170,18 +187,29 @@ export default function Sidebar({
             onClick={() => {
               if (item.label === 'Groups') {
                 onChatFilterChange('groups');
-              } else {
                 navigate('/chats');
+              } else {
+                navigate(item.path || '/chats');
               }
               onNavigateMobile?.();
             }}
             aria-label={item.label}
-            aria-pressed={item.label === 'Groups' ? activeChatFilter === 'groups' : undefined}
+            aria-pressed={
+              item.label === 'Groups'
+                ? activeChatFilter === 'groups'
+                : item.label === 'Calls'
+                  ? isCallsRoute
+                  : item.label === 'My Actions'
+                    ? isActionsRoute
+                    : undefined
+            }
             title={collapsed ? item.label : undefined}
             className={`${navItemBase} ${navItemPadding} w-full ${
-              item.label === 'Groups' && activeChatFilter === 'groups'
-                ? 'bg-[#e7f8f4] text-[#0f766e] dark:bg-teal-900/40 dark:text-teal-300'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100'
+              (item.label === 'Groups' && isChatsRoute && activeChatFilter === 'groups') ||
+              (item.label === 'Calls' && isCallsRoute) ||
+              (item.label === 'My Actions' && isActionsRoute)
+                ? activeNavClass
+                : inactiveNavClass
             }`}
           >
             <item.icon size={17} className="flex-shrink-0" />

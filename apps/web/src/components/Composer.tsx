@@ -5,7 +5,6 @@ import {
   FileText,
   Image,
   Camera,
-  UserCircle,
   BarChart2,
   Calendar,
   Smile as SmileIcon,
@@ -17,7 +16,6 @@ import { useAppStore } from '@/store/app-store';
 import CameraModal from './CameraModal';
 import VoiceRecorder from './VoiceRecorder';
 import PollModal from './PollModal';
-import ContactShareModal from './ContactShareModal';
 
 interface ReplyMessage {
   _id: string;
@@ -124,7 +122,6 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   const [showCamera, setShowCamera] = useState(false);
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [showPollModal, setShowPollModal] = useState(false);
-  const [showContactShare, setShowContactShare] = useState(false);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [showEventComposer, setShowEventComposer] = useState(false);
   const [eventTitle, setEventTitle] = useState('');
@@ -435,21 +432,6 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
     if (onCancelReply) onCancelReply();
   };
 
-  const handleShareContacts = (
-    contacts: { _id: string; displayName: string; phone?: string; email?: string }[]
-  ) => {
-    const contactsText = contacts
-      .map((c) => {
-        let text = `👤 ${c.displayName}`;
-        if (c.phone) text += `\n📱 ${c.phone}`;
-        if (c.email) text += `\n📧 ${c.email}`;
-        return text;
-      })
-      .join('\n\n');
-    sendMessage({ chatId, body: contactsText, replyToId: replyToMessage?._id });
-    if (onCancelReply) onCancelReply();
-  };
-
   // ── Action menu items ─────────────────────────────────────────────────
 
   type ActionItem = {
@@ -468,7 +450,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       action: () => documentInputRef.current?.click(),
     },
     {
-      label: 'Photos & videos',
+      label: 'Photos',
       icon: Image,
       iconBg: 'bg-blue-500',
       action: () => imageInputRef.current?.click(),
@@ -484,12 +466,6 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       icon: Mic,
       iconBg: 'bg-orange-500',
       action: () => setShowVoiceRecorder(true),
-    },
-    {
-      label: 'Contact',
-      icon: UserCircle,
-      iconBg: 'bg-cyan-500',
-      action: () => setShowContactShare(true),
     },
     {
       label: 'Poll',
@@ -583,13 +559,12 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
             />
           </button>
 
-          {/* Floating dark action menu */}
+          {/* Floating action menu */}
           {showActionMenu && (
             <div
               role="menu"
               aria-label="Composer actions"
-              className="absolute bottom-full left-0 z-50 mb-2 w-52 overflow-hidden rounded-[20px] py-1.5 shadow-2xl"
-              style={{ background: '#111' }}
+              className="absolute bottom-full left-0 z-50 mb-2 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1.5 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
             >
               {actionItems.map((item) => (
                 <button
@@ -603,10 +578,10 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
                       setShowActionMenu(false);
                     }
                   }}
-                  className={`flex w-full items-center gap-3 px-3 py-2.5 text-sm text-white transition-colors focus:outline-none focus-visible:bg-white/15 ${
+                  className={`flex w-full items-center gap-3 px-3 py-2.5 text-sm text-slate-800 transition-colors focus:outline-none focus-visible:bg-teal-50 dark:text-slate-100 dark:focus-visible:bg-slate-800 ${
                     item.disabled
                       ? 'cursor-not-allowed opacity-40'
-                      : 'hover:bg-white/10 active:bg-white/15'
+                      : 'hover:bg-slate-50 active:bg-slate-100 dark:hover:bg-slate-800 dark:active:bg-slate-700'
                   }`}
                 >
                   <span
@@ -616,7 +591,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
                   </span>
                   <span className="flex-1 text-left leading-none">{item.label}</span>
                   {item.disabled && (
-                    <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-medium text-white/60">
+                    <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                       soon
                     </span>
                   )}
@@ -632,7 +607,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
           type="file"
           className="hidden"
           onChange={(e) => handleFileSelect(e, 'image')}
-          accept="image/*,video/*"
+          accept="image/*"
         />
         <input
           ref={documentInputRef}
@@ -734,11 +709,6 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         isOpen={showPollModal}
         onClose={() => setShowPollModal(false)}
         onCreatePoll={handleCreatePoll}
-      />
-      <ContactShareModal
-        isOpen={showContactShare}
-        onClose={() => setShowContactShare(false)}
-        onShareContacts={handleShareContacts}
       />
       {showStickerPicker && (
         <div

@@ -109,6 +109,87 @@ export const useRemoveMember = (chatId: string) => {
   });
 };
 
+export const usePromoteMember = (chatId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const response = await apiClient.post<{ chat: Chat }>(`/api/chats/${chatId}/admins`, {
+        userId,
+      });
+      return response.data.chat;
+    },
+    onSuccess: (updatedChat) => {
+      queryClient.setQueryData(chatKeys.detail(chatId), updatedChat);
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useDemoteMember = (chatId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const response = await apiClient.delete<{ chat: Chat }>(`/api/chats/${chatId}/admins`, {
+        data: { userId },
+      });
+      return response.data.chat;
+    },
+    onSuccess: (updatedChat) => {
+      queryClient.setQueryData(chatKeys.detail(chatId), updatedChat);
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useTransferOwnership = (chatId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const response = await apiClient.patch<{ chat: Chat }>(`/api/chats/${chatId}/owner`, {
+        userId,
+      });
+      return response.data.chat;
+    },
+    onSuccess: (updatedChat) => {
+      queryClient.setQueryData(chatKeys.detail(chatId), updatedChat);
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useLeaveGroup = (chatId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      await apiClient.post(`/api/chats/${chatId}/leave`);
+    },
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useDeleteGroup = (chatId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (confirmation: string) => {
+      await apiClient.delete(`/api/chats/${chatId}`, {
+        data: { confirmation },
+      });
+    },
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
 // Pin chat
 export const usePinChat = () => {
   const queryClient = useQueryClient();

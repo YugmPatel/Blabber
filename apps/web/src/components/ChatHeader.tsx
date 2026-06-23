@@ -1,19 +1,34 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
-import { Users, Phone, Video, Search, MoreVertical, X, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Users, Phone, Video, Search, MoreVertical, X, Sparkles, Crown, Shield, UserPlus, Trash2 } from 'lucide-react';
 import type { Chat, User } from '@repo/types';
 import Avatar from './Avatar';
+import GroupCallModal, { createGroupCallId } from './GroupCallModal';
 import { useMessages } from '@/hooks/useMessages';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiClient } from '@/api/client';
 import { useAppStore } from '@/store/app-store';
+import {
+  useAddMember,
+  useDeleteGroup,
+  useDemoteMember,
+  useLeaveGroup,
+  usePromoteMember,
+  useRemoveMember,
+  useTransferOwnership,
+  useUpdateChat,
+} from '@/hooks/useChats';
+import { useSearchUsers } from '@/hooks/useUsers';
 
 interface ChatHeaderProps {
   chat: Chat;
   getChatTitle: (chat: Chat) => string;
   getChatAvatar: (chat: Chat) => string | undefined;
-  onlineStatus?: { online: boolean; lastSeen: Date } | null;
+  onlineStatus?: { online: boolean; lastSeen: Date | null } | null;
   isGroupChat: boolean;
+  onOpenIntelligence?: () => void;
+  intelligenceEnabled?: boolean;
 }
 
 type DisplayUser = Partial<User> & { _id: string };
@@ -84,18 +99,54 @@ function UserProfileModal({
 function GroupInfoModal({
   isOpen,
   onClose,
+  chat,
   title,
   avatarUrl,
   members,
+  currentUserId,
   onSelectMember,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  chat: Chat;
   title: string;
   avatarUrl?: string;
   members: DisplayUser[];
+  currentUserId?: string;
   onSelectMember: (user: DisplayUser) => void;
 }) {
+  const navigate = useNavigate();
+  const ownerId = chat.ownerId || chat.admins?.[0];
+  const adminIds = new Set(chat.admins || []);
+  const isOwner = ownerId === currentUserId;
+  const isAdmin = Boolean(currentUserId && adminIds.has(currentUserId));
+  const canEdit = isOwner || isAdmin;
+  const [editTitle, setEditTitle] = useState(title);
+  const [editDescription, setEditDescription] = useState(chat.description || '');
+  const [editGroupContext, setEditGroupContext] = useState(chat.groupContext || '');
+  const [memberQuery, setMemberQuery] = useState('');
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
+  const updateChat = useUpdateChat(chat._id);
+  const addMember = useAddMember(chat._id);
+  const removeMember = useRemoveMember(chat._id);
+  const promoteMember = usePromoteMember(chat._id);
+  const demoteMember = useDemoteMember(chat._id);
+  const transferOwnership = useTransferOwnership(chat._id);
+  const leaveGroup = useLeaveGroup(chat._id);
+  const deleteGroup = useDeleteGroup(chat._id);
+  const { data: searchUsers = [], isFetching: isSearching } = useSearchUsers(memberQuery.trim());
+  const memberIds = new Set(members.map((member) => member._id));
+  const availableUsers = searchUsers.filter((user) => !memberIds.has(user._id));
+  const selectedUsers = searchUsers.filter((user) => selectedMemberIds.includes(user._id));
+
+  useEffect(() => {
+    setEditTitle(title);
+    setEditDescription(chat.description || '');
+    setEditGroupContext(chat.groupContext || '');
+  }, [title, chat.description, chat.groupContext, isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -105,10 +156,62 @@ function GroupInfoModal({
 
   if (!isOpen) return null;
 
+  const createdAt = chat.createdAt ? new Date(chat.createdAt) : null;
+  const expiresAt = chat.expiresAt ? new Date(chat.expiresAt) : null;
+  const submit = async (action: () => Promise<unknown>, success: string) => {
+    setNotice(null);
+    try {
+      await action();
+      setNotice(success);
+    } catch (error: any) {
+      setNotice(error?.response?.data?.message || error?.message || 'Something went wrong');
+    }
+  };
+
+  const saveDetails = () => submit(
+    async () => {
+      await updateChat.mutateAsync({
+        title: editTitle.trim() || title,
+        description: editDescription.trim(),
+        groupContext: editGroupContext.trim(),
+      });
+    },
+    'Group details updated.'
+  );
+
+  const addSelectedMembers = () => submit(
+    async () => {
+      for (const userId of selectedMemberIds) {
+        await addMember.mutateAsync(userId);
+      }
+      setSelectedMemberIds([]);
+      setMemberQuery('');
+    },
+    'Members added.'
+  );
+
+  const leave = () => submit(
+    async () => {
+      await leaveGroup.mutateAsync();
+      onClose();
+      navigate('/chats');
+    },
+    'You left the group.'
+  );
+
+  const deleteForEveryone = () => submit(
+    async () => {
+      await deleteGroup.mutateAsync(deleteConfirmation);
+      onClose();
+      navigate('/chats');
+    },
+    'Group deleted.'
+  );
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
@@ -133,25 +236,200 @@ function GroupInfoModal({
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {members.length} {members.length === 1 ? 'member' : 'members'}
           </p>
+          <div className="mt-2 flex flex-wrap justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            {createdAt && <span>Created {createdAt.toLocaleDateString()}</span>}
+            {chat.groupKind === 'temporary' && expiresAt && <span>Expires {expiresAt.toLocaleString()}</span>}
+          </div>
         </div>
-        <div className="max-h-72 overflow-y-auto border-t border-slate-200 p-2 dark:border-slate-700">
+        <div className="overflow-y-auto border-t border-slate-200 dark:border-slate-700">
+          {notice && (
+            <div className="mx-5 mt-4 rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {notice}
+            </div>
+          )}
+
+          {!canEdit && chat.groupContext && (
+            <div className="border-b border-slate-200 p-5 text-left dark:border-slate-700">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Group Context
+              </p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-200">
+                {chat.groupContext}
+              </p>
+            </div>
+          )}
+
+          {canEdit && (
+            <div className="space-y-3 border-b border-slate-200 p-5 dark:border-slate-700">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Name
+                  <input
+                    value={editTitle}
+                    onChange={(event) => setEditTitle(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </label>
+                <label className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Description
+                  <input
+                    value={editDescription}
+                    onChange={(event) => setEditDescription(event.target.value)}
+                    placeholder="Add a group description"
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </label>
+              </div>
+              <label className="block text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Group Context
+                <textarea
+                  value={editGroupContext}
+                  onChange={(event) => setEditGroupContext(event.target.value)}
+                  placeholder="Goals, norms, important background, or how Chat Intelligence should understand this group."
+                  maxLength={2000}
+                  className="mt-1 min-h-24 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+              </label>
+              <button
+                onClick={saveDetails}
+                disabled={updateChat.isPending}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-950"
+              >
+                {updateChat.isPending ? 'Saving...' : 'Save details'}
+              </button>
+            </div>
+          )}
+
+          {canEdit && (
+            <div className="space-y-3 border-b border-slate-200 p-5 dark:border-slate-700">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <UserPlus size={16} />
+                Add members
+              </div>
+              <input
+                value={memberQuery}
+                onChange={(event) => setMemberQuery(event.target.value)}
+                placeholder="Search people by name, username, or email"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+              {selectedUsers.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedUsers.map((user) => (
+                    <button
+                      key={user._id}
+                      onClick={() => setSelectedMemberIds((ids) => ids.filter((id) => id !== user._id))}
+                      className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800 dark:bg-teal-500/20 dark:text-teal-100"
+                    >
+                      {getUserTitle(user as DisplayUser)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {memberQuery.trim().length >= 2 && (
+                <div className="max-h-32 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                  {isSearching && <p className="px-3 py-2 text-sm text-slate-500">Searching...</p>}
+                  {!isSearching && availableUsers.length === 0 && <p className="px-3 py-2 text-sm text-slate-500">No available users found.</p>}
+                  {availableUsers.map((user) => (
+                    <button
+                      key={user._id}
+                      onClick={() => setSelectedMemberIds((ids) => ids.includes(user._id) ? ids.filter((id) => id !== user._id) : [...ids, user._id])}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-slate-50 dark:hover:bg-slate-800"
+                    >
+                      <Avatar src={user.avatarUrl} alt={getUserTitle(user as DisplayUser)} size="sm" />
+                      <span className="min-w-0 flex-1 truncate text-slate-800 dark:text-slate-100">{getUserTitle(user as DisplayUser)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={addSelectedMembers}
+                disabled={selectedMemberIds.length === 0 || addMember.isPending}
+                className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60"
+              >
+                {addMember.isPending ? 'Adding...' : 'Add selected'}
+              </button>
+            </div>
+          )}
+
+          <div className="p-2">
           {members.map((member) => (
-            <button
+            <div
               key={member._id}
-              onClick={() => onSelectMember(member)}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
             >
-              <Avatar src={member.avatarUrl} alt={getUserTitle(member)} size="md" />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
-                  {getUserTitle(member, 'Unknown member')}
-                </p>
-                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                  {getUserMeta(member) || member._id}
-                </p>
+              <button onClick={() => onSelectMember(member)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                <Avatar src={member.avatarUrl} alt={getUserTitle(member)} size="md" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                    {getUserTitle(member, 'Unknown member')}
+                  </p>
+                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                    {member._id === ownerId ? 'Owner' : adminIds.has(member._id) ? 'Admin' : getUserMeta(member) || member._id}
+                  </p>
+                </div>
+              </button>
+              <div className="flex flex-shrink-0 items-center gap-1">
+                {member._id === ownerId && <Crown size={15} className="text-amber-500" />}
+                {member._id !== ownerId && adminIds.has(member._id) && <Shield size={15} className="text-teal-500" />}
+                {canEdit && member._id !== currentUserId && member._id !== ownerId && (
+                  <>
+                    <button
+                      onClick={() => submit(() => adminIds.has(member._id) ? demoteMember.mutateAsync(member._id) : promoteMember.mutateAsync(member._id), adminIds.has(member._id) ? 'Member demoted.' : 'Member promoted.')}
+                      className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                    >
+                      {adminIds.has(member._id) ? 'Demote' : 'Promote'}
+                    </button>
+                    {isOwner && (
+                      <button
+                        onClick={() => submit(() => transferOwnership.mutateAsync(member._id), 'Ownership transferred.')}
+                        className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                      >
+                        Transfer
+                      </button>
+                    )}
+                    <button
+                      onClick={() => submit(() => removeMember.mutateAsync(member._id), 'Member removed.')}
+                      className="rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                    >
+                      Remove
+                    </button>
+                  </>
+                )}
               </div>
-            </button>
+            </div>
           ))}
+          </div>
+
+          <div className="space-y-3 border-t border-slate-200 p-5 dark:border-slate-700">
+            <button
+              onClick={leave}
+              disabled={leaveGroup.isPending || isOwner}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              {isOwner ? 'Transfer ownership before leaving' : leaveGroup.isPending ? 'Leaving...' : 'Leave group'}
+            </button>
+            {isOwner && (
+              <div className="rounded-xl border border-rose-200 p-3 dark:border-rose-500/30">
+                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-rose-700 dark:text-rose-300">
+                  <Trash2 size={15} />
+                  Delete group
+                </div>
+                <input
+                  value={deleteConfirmation}
+                  onChange={(event) => setDeleteConfirmation(event.target.value)}
+                  placeholder={`Type "${title}" to delete`}
+                  className="w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 dark:border-rose-500/40 dark:bg-slate-800 dark:text-white"
+                />
+                <button
+                  onClick={deleteForEveryone}
+                  disabled={deleteConfirmation !== title || deleteGroup.isPending}
+                  className="mt-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
+                >
+                  {deleteGroup.isPending ? 'Deleting...' : 'Delete for everyone'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -208,53 +486,6 @@ function ComingSoonModal({
   );
 }
 
-// ── Chat AI panel ─────────────────────────────────────────────────────────────
-
-function ChatAIPanel({ onClose, chatId: _chatId }: { onClose: () => void; chatId: string }) {
-  const suggestions = [
-    { label: 'Summarize this chat', icon: '📋' },
-    { label: 'What did we decide?', icon: '✅' },
-    { label: 'Extract action items', icon: '📌' },
-    { label: 'Who is waiting on me?', icon: '⏳' },
-    { label: 'Find a link or file', icon: '🔗' },
-  ];
-
-  return (
-    <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-teal-50/30 px-4 py-3 dark:border-slate-800 dark:from-slate-900 dark:to-teal-900/10">
-      <div className="mb-2.5 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Sparkles size={14} className="text-teal-500" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-teal-600 dark:text-teal-400">
-            Chat AI
-          </span>
-        </div>
-        <button
-          onClick={onClose}
-          aria-label="Close AI panel"
-          className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-        >
-          <X size={14} />
-        </button>
-      </div>
-      <p className="mb-2.5 text-[11px] text-slate-500 dark:text-slate-400">
-        Ask about this conversation or pick a suggestion:
-      </p>
-      <div className="flex flex-wrap gap-1.5">
-        {suggestions.map((s) => (
-          <button
-            key={s.label}
-            className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-teal-600 dark:hover:bg-teal-900/20 dark:hover:text-teal-300"
-            title="Coming soon — AI query"
-          >
-            <span>{s.icon}</span>
-            {s.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ── Main ChatHeader ───────────────────────────────────────────────────────────
 
 export default function ChatHeader({
@@ -263,15 +494,17 @@ export default function ChatHeader({
   getChatAvatar,
   onlineStatus,
   isGroupChat,
+  onOpenIntelligence,
+  intelligenceEnabled = true,
 }: ChatHeaderProps) {
   const { user: currentUser } = useAuth();
   const setActiveCall = useAppStore((state) => state.setActiveCall);
   const [showMenu, setShowMenu] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
-  const [showAI, setShowAI] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [profileUser, setProfileUser] = useState<DisplayUser | null>(null);
   const [callNotice, setCallNotice] = useState<{ title: string; message: string } | null>(null);
+  const [groupCall, setGroupCall] = useState<{ callId: string; callType: 'audio' | 'video' } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -397,14 +630,20 @@ export default function ChatHeader({
   const btnBase =
     'rounded-full p-2 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white';
 
-  const createCallId = () =>
+  const createDirectCallId = () =>
     globalThis.crypto?.randomUUID?.() || `call-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const startCall = (callType: 'audio' | 'video') => {
     const title = callType === 'video' ? 'Video call' : 'Audio call';
 
-    if (isGroupChat || chat.participants.length !== 2) {
-      setCallNotice({ title, message: 'Group calls are coming soon.' });
+    if (isGroupChat) {
+      setShowSearch(false);
+      setGroupCall({ callId: createGroupCallId(chat._id), callType });
+      return;
+    }
+
+    if (chat.participants.length !== 2) {
+      setCallNotice({ title, message: 'Calls need a valid direct chat participant.' });
       return;
     }
 
@@ -413,10 +652,9 @@ export default function ChatHeader({
       return;
     }
 
-    setShowAI(false);
     setShowSearch(false);
     setActiveCall({
-      callId: createCallId(),
+      callId: createDirectCallId(),
       chatId: chat._id,
       callType,
       direction: 'outgoing',
@@ -467,19 +705,20 @@ export default function ChatHeader({
 
           {/* Right: action buttons */}
           <div className="flex items-center gap-0.5 text-slate-500 dark:text-slate-400">
-            {/* AI button */}
-            <button
-              onClick={() => { setShowAI((v) => !v); setShowSearch(false); }}
-              aria-label="Open Chat AI"
-              aria-pressed={showAI}
-              className={`${btnBase} ${showAI ? 'bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400' : ''}`}
-            >
-              <Sparkles size={18} />
-            </button>
+            {intelligenceEnabled && (
+              <button
+                onClick={() => { onOpenIntelligence?.(); setShowSearch(false); }}
+                aria-label="Open Chat Intelligence"
+                title="Open Chat Intelligence"
+                className={btnBase}
+              >
+                <Sparkles size={18} />
+              </button>
+            )}
 
             {/* Search */}
             <button
-              onClick={() => { setShowSearch((v) => !v); setShowAI(false); }}
+              onClick={() => { setShowSearch((v) => !v); }}
               aria-label="Search in chat"
               aria-pressed={showSearch}
               className={`${btnBase} ${showSearch ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white' : ''}`}
@@ -537,7 +776,7 @@ export default function ChatHeader({
                   <button
                     role="menuitem"
                     className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-                    onClick={() => { setShowMenu(false); setShowSearch(true); setShowAI(false); }}
+                    onClick={() => { setShowMenu(false); setShowSearch(true); }}
                   >
                     Search in chat
                   </button>
@@ -584,9 +823,6 @@ export default function ChatHeader({
         )}
       </div>
 
-      {/* ── AI panel (below header) ── */}
-      {showAI && <ChatAIPanel onClose={() => setShowAI(false)} chatId={chat._id} />}
-
       {/* ── Modals ── */}
       <ComingSoonModal
         isOpen={Boolean(callNotice)}
@@ -598,9 +834,11 @@ export default function ChatHeader({
       <GroupInfoModal
         isOpen={showGroupInfo}
         onClose={() => setShowGroupInfo(false)}
+        chat={chat}
         title={getChatTitle(chat)}
         avatarUrl={getChatAvatar(chat)}
         members={members}
+        currentUserId={currentUser?._id}
         onSelectMember={(member) => setProfileUser(member)}
       />
 
@@ -608,6 +846,16 @@ export default function ChatHeader({
         user={profileUser}
         onClose={() => setProfileUser(null)}
       />
+
+      {groupCall && (
+        <GroupCallModal
+          chat={chat}
+          title={getChatTitle(chat)}
+          callType={groupCall.callType}
+          callId={groupCall.callId}
+          onClose={() => setGroupCall(null)}
+        />
+      )}
     </>
   );
 }

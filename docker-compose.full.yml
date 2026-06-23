@@ -53,6 +53,17 @@ services:
     networks:
       - blabber
 
+  livekit:
+    image: livekit/livekit-server:v1.8
+    container_name: blabber-full-livekit
+    command: ['--dev', '--bind', '0.0.0.0']
+    ports:
+      - '7880:7880'
+      - '7881:7881'
+      - '7882:7882/udp'
+    networks:
+      - blabber
+
   auth:
     build:
       context: .
@@ -67,6 +78,20 @@ services:
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
       JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
       JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+      AUTH_COOKIE_SECURE: 'false'
+      AUTH_COOKIE_SAME_SITE: lax
+      APP_BASE_URL: http://localhost:5173
+      APP_NAME: Blabber
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:3000/api/auth/google/callback}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     ports:
       - '3001:3001'
     depends_on:
@@ -115,16 +140,25 @@ services:
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
       JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
       JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
       OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-}
       OPENROUTER_REFERER: ${OPENROUTER_REFERER:-}
       OPENROUTER_MOCK_FALLBACK: ${OPENROUTER_MOCK_FALLBACK:-false}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
+      LIVEKIT_WS_URL: ${LIVEKIT_WS_URL:-ws://localhost:7880}
     ports:
       - '3003:3003'
     depends_on:
       mongodb:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
     networks:
       - blabber
 
@@ -197,6 +231,9 @@ services:
       MONGO_DB_NAME: blabber_full
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
       JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
     ports:
       - '3006:3006'
     depends_on:
@@ -255,6 +292,7 @@ services:
       args:
         VITE_API_URL: http://localhost:3000
         VITE_SOCKET_URL: http://localhost:3000
+        VITE_LIVEKIT_WS_URL: ws://localhost:7880
     container_name: blabber-full-web
     ports:
       - '5173:80'

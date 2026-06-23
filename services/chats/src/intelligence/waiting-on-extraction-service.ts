@@ -1,5 +1,5 @@
 import type { WaitingOnExtractionResult } from '@repo/types';
-import { logger } from '@repo/utils';
+import { AppError, logger } from '@repo/utils';
 import { createMockWaitingOnProvider } from './providers/mock-waiting-on-provider';
 import { createOpenRouterWaitingOnProvider } from './providers/openrouter-waiting-on-provider';
 
@@ -37,6 +37,18 @@ export class WaitingOnExtractionService {
   }
 }
 
+function createUnavailableProvider(): WaitingOnExtractionProvider {
+  return {
+    async extractWaitingOn(): Promise<WaitingOnExtractionResult> {
+      throw new AppError(
+        503,
+        'AI waiting-on extraction is unavailable because OPENROUTER_API_KEY is not configured',
+        'AI_NOT_CONFIGURED'
+      );
+    },
+  };
+}
+
 function shouldUseMockFallback(): boolean {
   return process.env.OPENROUTER_MOCK_FALLBACK === 'true';
 }
@@ -67,8 +79,12 @@ export function createWaitingOnExtractionService(): WaitingOnExtractionService {
   const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
   const mockProvider = createMockWaitingOnProvider();
 
-  if (!openRouterApiKey) {
+  if (!openRouterApiKey && shouldUseMockFallback()) {
     return new WaitingOnExtractionService(mockProvider);
+  }
+
+  if (!openRouterApiKey) {
+    return new WaitingOnExtractionService(createUnavailableProvider());
   }
 
   const openRouterProvider = createOpenRouterWaitingOnProvider({

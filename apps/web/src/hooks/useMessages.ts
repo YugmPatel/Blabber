@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '../types/react-query';
 import { apiClient } from '../api/client';
+import { chatKeys } from './useChats';
 import type {
   Message,
   CreateMessageDTO,
@@ -143,6 +144,17 @@ export const useSendMessage = (chatId: string) => {
           ),
         };
       });
+
+      queryClient.getQueryCache().findAll({ queryKey: chatKeys.lists() }).forEach((query) => {
+        queryClient.setQueryData(query.queryKey, (old: unknown) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((chat) =>
+            chat && typeof chat === 'object' && '_id' in chat && chat._id === chatId
+              ? { ...chat, unreadCount: 0 }
+              : chat
+          );
+        });
+      });
     },
   });
 };
@@ -265,7 +277,7 @@ export const useMarkMessagesRead = (chatId: string) => {
 
   return useMutation({
     mutationFn: async (messageIds: string[]) => {
-      await apiClient.post(`/api/messages/${messageIds[0]}/read`, { messageIds });
+      await apiClient.post('/api/messages/read', { messageIds });
     },
     onSuccess: (_data, messageIds) => {
       // Update message statuses in the cache

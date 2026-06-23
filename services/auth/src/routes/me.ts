@@ -26,6 +26,7 @@ export const getMe = asyncHandler(async (req: Request, res: Response) => {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
+      avatarSource: user.avatarSource ?? (user.googleId && user.avatarUrl ? 'google' : user.avatarUrl ? 'upload' : 'none'),
       about: user.about,
       role: user.role,
       department: user.department,

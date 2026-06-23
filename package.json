@@ -14,7 +14,10 @@
     "docker:down": "docker-compose -f docker-compose.dev.yml down",
     "docker:full:up": "docker compose -f docker-compose.full.yml up -d --build",
     "docker:full:down": "docker compose -f docker-compose.full.yml down",
-    "docker:full:logs": "docker compose -f docker-compose.full.yml logs -f --tail=100"
+    "docker:full:logs": "docker compose -f docker-compose.full.yml logs -f --tail=100",
+    "docker:full:up:legacy": "docker-compose -f docker-compose.full.yml up -d --build",
+    "docker:full:down:legacy": "docker-compose -f docker-compose.full.yml down",
+    "docker:full:logs:legacy": "docker-compose -f docker-compose.full.yml logs -f --tail=100"
   },
   "devDependencies": {
     "dotenv-cli": "^11.0.0",
@@ -29,5 +32,9 @@
   "packageManager": "pnpm@8.15.0",
   "dependencies": {
     "dotenv": "^17.2.3"
-  }
+  },
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

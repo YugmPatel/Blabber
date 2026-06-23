@@ -1,8 +1,43 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { createAdapter } from 'socket.io-redis-adapter';
-import { createClient } from 'redis';
+import { createClient, type RedisClientType } from 'redis';
 import type { Server as HTTPServer } from 'http';
+import axios from 'axios';
 import { logger } from '@repo/utils';
+import { serviceUrls } from '../config.js';
+
+const PRESENCE_TTL_SECONDS = 300;
+let presenceClient: RedisClientType | null = null;
+
+async function setUserPresence(userId: string, online: boolean) {
+  if (!presenceClient) return;
+
+  const now = new Date().toISOString();
+  try {
+    if (online) {
+      await presenceClient.setEx(
+        `presence:${userId}`,
+        PRESENCE_TTL_SECONDS,
+        JSON.stringify({ online: true, lastSeen: now })
+      );
+    } else {
+      await presenceClient.del(`presence:${userId}`);
+      await presenceClient.set(`presence:lastSeen:${userId}`, now);
+    }
+  } catch (error) {
+    logger.error({ error, userId, online }, 'Failed to update Redis presence');
+  }
+}
+
+async function getPresenceBroadcastSettings(userId: string) {
+  try {
+    const response = await axios.get(`${serviceUrls.users}/settings/${userId}/public`);
+    return response.data.settings as { presenceVisible: boolean; lastSeenVisible: boolean };
+  } catch (error) {
+    logger.error({ error, userId }, 'Failed to load public user settings for presence');
+    return { presenceVisible: true, lastSeenVisible: true };
+  }
+}
 
 export async function setupSocketIO(httpServer: HTTPServer) {
   // Create Socket.io server
@@ -33,6 +68,7 @@ export async function setupSocketIO(httpServer: HTTPServer) {
     await Promise.all([pubClient.connect(), subClient.connect()]);
 
     io.adapter(createAdapter(pubClient, subClient));
+    presenceClient = pubClient as RedisClientType;
 
     logger.info('Redis adapter connected for Socket.io');
   } catch (error) {
@@ -66,10 +102,14 @@ export async function setupSocketIO(httpServer: HTTPServer) {
     // Broadcast user online status
     const userId = socket.data.userId;
     if (userId) {
-      io.emit('presence:update', {
-        userId,
-        online: true,
-        lastSeen: new Date(),
+      void setUserPresence(userId, true);
+      void getPresenceBroadcastSettings(userId).then((settings) => {
+        if (!settings.presenceVisible) return;
+        io.emit('presence:update', {
+          userId,
+          online: true,
+          lastSeen: settings.lastSeenVisible ? new Date() : null,
+        });
       });
       logger.info(`User ${userId} is now online`);
     }
@@ -85,10 +125,14 @@ export async function setupSocketIO(httpServer: HTTPServer) {
 
         // Only mark as offline if no other sockets are connected
         if (!socketsInRoom || socketsInRoom.size === 0) {
-          io.emit('presence:update', {
-            userId,
-            online: false,
-            lastSeen: new Date(),
+          void setUserPresence(userId, false);
+          void getPresenceBroadcastSettings(userId).then((settings) => {
+            if (!settings.presenceVisible) return;
+            io.emit('presence:update', {
+              userId,
+              online: false,
+              lastSeen: settings.lastSeenVisible ? new Date() : null,
+            });
           });
           logger.info(`User ${userId} is now offline`);
         }

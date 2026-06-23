@@ -8,12 +8,14 @@ import {
   findPushSubscriptionsByUserId,
   deletePushSubscriptionById,
 } from '../models/push-subscription';
+import { getNotificationPreferences } from '../models/notification-preferences';
 
 // Zod schema for send notification
 const sendNotificationSchema = z.object({
   userId: z.string().refine((val) => ObjectId.isValid(val), {
     message: 'Invalid userId format',
   }),
+  kind: z.enum(['message', 'call']).default('message'),
   title: z.string().min(1),
   body: z.string().min(1),
   data: z.record(z.any()).optional(),
@@ -53,15 +55,34 @@ export async function send(req: Request, res: Response) {
       });
     }
 
-    const { userId, title, body, data } = validation.data;
+    const { userId, kind, title, body, data } = validation.data;
+    const userObjectId = new ObjectId(userId);
+
+    const preferences = await getNotificationPreferences(userObjectId);
+    const enabled =
+      kind === 'call'
+        ? preferences.callNotificationsEnabled
+        : preferences.messageNotificationsEnabled;
+
+    if (!enabled) {
+      logger.info({ userId, kind }, 'Push notification skipped by user preference');
+      return res.status(200).json({
+        success: true,
+        message: 'Notifications disabled by user preference',
+        sent: 0,
+      });
+    }
 
     // Configure VAPID if not already done
     configureVAPID();
 
     // Find all push subscriptions for the user
-    const subscriptions = await findPushSubscriptionsByUserId(new ObjectId(userId));
+    const subscriptions = await findPushSubscriptionsByUserId(userObjectId);
+    const uniqueSubscriptions = Array.from(
+      new Map(subscriptions.map((subscription) => [subscription.endpoint, subscription])).values()
+    );
 
-    if (subscriptions.length === 0) {
+    if (uniqueSubscriptions.length === 0) {
       logger.info({ userId }, 'No push subscriptions found for user');
       return res.status(200).json({
         success: true,
@@ -71,15 +92,20 @@ export async function send(req: Request, res: Response) {
     }
 
     // Prepare notification payload
+    const notificationBody =
+      kind === 'message' && !preferences.notificationPreviewsEnabled && typeof data?.noPreviewBody === 'string'
+        ? data.noPreviewBody
+        : body;
+
     const payload = JSON.stringify({
       title,
-      body,
+      body: notificationBody,
       data: data || {},
     });
 
     // Send notifications to all subscriptions with retry logic
     const results = await Promise.allSettled(
-      subscriptions.map(async (subscription) => {
+      uniqueSubscriptions.map(async (subscription) => {
         const pushSubscription = {
           endpoint: subscription.endpoint,
           keys: subscription.keys,
@@ -106,8 +132,8 @@ export async function send(req: Request, res: Response) {
             'Failed to send push notification'
           );
 
-          // Clean up expired subscriptions (410 Gone)
-          if (error.statusCode === 410) {
+          // Clean up expired/invalid subscriptions.
+          if (error.statusCode === 404 || error.statusCode === 410) {
             logger.info(
               {
                 subscriptionId: subscription._id,
@@ -130,7 +156,7 @@ export async function send(req: Request, res: Response) {
     logger.info(
       {
         userId,
-        total: subscriptions.length,
+        total: uniqueSubscriptions.length,
         success: successCount,
         failed: failureCount,
       },
@@ -141,7 +167,7 @@ export async function send(req: Request, res: Response) {
       success: true,
       sent: successCount,
       failed: failureCount,
-      total: subscriptions.length,
+      total: uniqueSubscriptions.length,
     });
   } catch (error: any) {
     logger.error({ error: error.message }, 'Failed to send push notifications');

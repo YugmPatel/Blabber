@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { getRedisClient } from '../redis';
 import { findUserById } from '../models/user';
+import { getOrCreateUserSettings } from '../models/user-settings';
 import { logger } from '@repo/utils';
 
 const PRESENCE_TTL = 300; // 5 minutes in seconds
@@ -29,6 +30,15 @@ export async function getPresence(req: Request, res: Response, next: NextFunctio
       return;
     }
 
+    const settings = await getOrCreateUserSettings(new ObjectId(id));
+    if (!settings.presenceVisible) {
+      res.status(200).json({
+        online: false,
+        lastSeen: settings.lastSeenVisible ? user.lastSeen.toISOString() : null,
+      });
+      return;
+    }
+
     // Get presence from Redis
     const redis = getRedisClient();
     const presenceKey = `presence:${id}`;
@@ -39,13 +49,14 @@ export async function getPresence(req: Request, res: Response, next: NextFunctio
       const presence = JSON.parse(presenceData);
       res.status(200).json({
         online: true,
-        lastSeen: presence.lastSeen || new Date().toISOString(),
+        lastSeen: settings.lastSeenVisible ? presence.lastSeen || new Date().toISOString() : null,
       });
     } else {
+      const redisLastSeen = await redis.get(`presence:lastSeen:${id}`);
       // User is offline, return lastSeen from database
       res.status(200).json({
         online: false,
-        lastSeen: user.lastSeen.toISOString(),
+        lastSeen: settings.lastSeenVisible ? redisLastSeen || user.lastSeen.toISOString() : null,
       });
     }
   } catch (error) {
@@ -70,6 +81,7 @@ export async function updatePresence(userId: string, online: boolean): Promise<v
     } else {
       // Remove presence key
       await redis.del(presenceKey);
+      await redis.set(`presence:lastSeen:${userId}`, new Date().toISOString());
     }
   } catch (error) {
     logger.error({ error, userId }, 'Error updating presence');

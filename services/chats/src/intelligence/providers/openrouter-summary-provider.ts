@@ -24,11 +24,13 @@ interface OpenRouterChatCompletionResponse {
   };
 }
 
-const SYSTEM_PROMPT = `You are Blabber's Catch-Me-Up AI.
+const SYSTEM_PROMPT = `You are Blabber's Summary AI.
 Summarize only the provided chat messages.
-Extract decisions, tasks, questions for the current user, important links, waiting-on items, and noise.
+Extract a unified briefing with overview, confirmed decisions, questions for the current user, important links, task suggestions, waiting-on context, and safe-to-skip material.
 Preserve sourceMessageIds from the provided messages.
 Do not invent facts, people, assignments, links, dates, or decisions.
+Only mark a decision when the messages show agreement or confirmation.
+Only include actual links that appear in messages.
 If a field has no items, return [].
 Return valid JSON only.
 Do not include markdown, code fences, comments, or prose.
@@ -36,6 +38,7 @@ Do not include markdown, code fences, comments, or prose.
 Return exactly this JSON shape:
 {
   "summary": "string",
+  "overview": "string",
   "decisions": [
     {
       "title": "string",
@@ -88,6 +91,9 @@ function buildUserPrompt(context: AISummaryContext): string {
   return JSON.stringify(
     {
       chatId: context.chatId,
+      chatTitle: context.chatTitle ?? null,
+      chatDescription: context.chatDescription ?? null,
+      groupContext: context.groupContext ?? null,
       currentUserId: context.currentUserId,
       currentUserName: context.currentUserName ?? null,
       recentMessages: context.messages.map((message) => ({
@@ -134,6 +140,7 @@ function normalizeSummary(candidate: unknown, context: AISummaryContext): unknow
   const value = candidate as Partial<ChatIntelligenceSummary>;
   return {
     ...value,
+    overview: value.overview ?? value.summary ?? '',
     decisions: value.decisions ?? [],
     tasks: value.tasks ?? [],
     questionsForMe: value.questionsForMe ?? [],

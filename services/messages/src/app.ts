@@ -63,6 +63,7 @@ import { markMessagesAsRead } from './routes/mark-read';
 import { votePoll } from './routes/vote-poll';
 // Note: Specific routes must come before parameterized routes
 app.post('/read', authMiddleware, markMessagesAsRead);
+app.post('/:messageId/read', authMiddleware, markMessagesAsRead);
 app.get('/:chatId', authMiddleware, getMessages);
 app.post('/:chatId', authMiddleware, sendMessage);
 app.patch('/:messageId', authMiddleware, editMessage);

@@ -77,6 +77,7 @@ export async function updateProfile(
         username: updatedUser.username,
         name: updatedUser.name,
         avatarUrl: updatedUser.avatarUrl,
+        avatarSource: updatedUser.avatarSource ?? (updatedUser.avatarUrl ? 'upload' : 'none'),
         about: updatedUser.about,
         role: updatedUser.role,
         department: updatedUser.department,

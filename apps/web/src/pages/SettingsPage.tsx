@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   User,
   Bell,
@@ -13,7 +14,6 @@ import {
   Check,
   Image,
   Trash2,
-  ChevronRight,
   ArrowLeft,
   Sun,
   ExternalLink,
@@ -57,6 +57,46 @@ interface AvatarPresignResponse {
   url?: string;
   uploadAuthRequired?: boolean;
   storage?: 's3' | 'local';
+}
+
+type ThemePreference = 'light' | 'dark' | 'system';
+
+interface UserSettings {
+  readReceiptsEnabled: boolean;
+  presenceVisible: boolean;
+  lastSeenVisible: boolean;
+  incomingCallsEnabled: boolean;
+  themePreference: ThemePreference;
+  chatIntelligenceEnabled: boolean;
+  updatedAt?: string;
+}
+
+const settingsKey = ['user-settings'] as const;
+
+function useUserSettings() {
+  return useQuery({
+    queryKey: settingsKey,
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ settings: UserSettings }>('/api/users/settings/me');
+      return data.settings;
+    },
+  });
+}
+
+function useUpdateUserSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<UserSettings>) => {
+      const { data } = await apiClient.patch<{ settings: UserSettings }>(
+        '/api/users/settings/me',
+        patch
+      );
+      return data.settings;
+    },
+    onSuccess: (settings) => {
+      queryClient.setQueryData(settingsKey, settings);
+    },
+  });
 }
 
 // ── Toggle component ─────────────────────────────────────────────────────────
@@ -114,6 +154,14 @@ function ProfileSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const displayedAvatar = normalizeMediaUrl(localPreview || savedAvatarUrl);
+
+  useEffect(() => {
+    setName(user?.name || '');
+    setAbout(profileUser?.about || '');
+    setRole(profileUser?.role || '');
+    setDepartment(profileUser?.department || '');
+    setSavedAvatarUrl(persistedAvatarUrl);
+  }, [user?._id, user?.name, profileUser?.about, profileUser?.role, profileUser?.department, persistedAvatarUrl]);
 
   const uploadAvatar = async (
     file: File
@@ -193,6 +241,19 @@ function ProfileSection() {
     if (uploadResult.mediaUrl) {
       setSavedAvatarUrl(uploadResult.mediaUrl);
       setLocalPreview(''); // clear preview once real URL is set
+      try {
+        await updateProfile.mutateAsync({
+          name,
+          about,
+          role,
+          department,
+          avatarUrl: uploadResult.mediaUrl,
+        });
+        if (refreshUser) refreshUser();
+      } catch (err) {
+        console.error('Failed to save avatar URL:', err);
+        setUploadError('Avatar uploaded, but saving it to your profile failed. Try saving again.');
+      }
     } else {
       // Upload failed — keep the local preview for display but warn the user
       setUploadError(
@@ -418,13 +479,38 @@ function ProfileSection() {
 // ── Section: Privacy ─────────────────────────────────────────────────────────
 
 function PrivacySection() {
-  const rows = [
-    { label: 'Last seen & online', desc: 'Who can see when you were last online' },
-    { label: 'Profile photo', desc: 'Who can see your profile photo' },
-    { label: 'About', desc: 'Who can see your about info' },
-    { label: 'Read receipts', desc: 'Let others know when you\'ve read messages' },
-    { label: 'Groups', desc: 'Who can add you to groups' },
-  ];
+  const settingsQuery = useUserSettings();
+  const updateSettings = useUpdateUserSettings();
+  const settings = settingsQuery.data;
+  const rows = settings
+    ? [
+        {
+          key: 'readReceiptsEnabled' as const,
+          label: 'Read receipts',
+          desc: 'Let others know when you have read their messages.',
+          value: settings.readReceiptsEnabled,
+        },
+        {
+          key: 'presenceVisible' as const,
+          label: 'Online presence',
+          desc: 'Allow others to see when you are online.',
+          value: settings.presenceVisible,
+        },
+        {
+          key: 'lastSeenVisible' as const,
+          label: 'Last seen',
+          desc: 'Allow others to see your last active time.',
+          value: settings.lastSeenVisible,
+        },
+        {
+          key: 'incomingCallsEnabled' as const,
+          label: 'Incoming calls',
+          desc: 'Allow direct voice and video call invites to reach you.',
+          value: settings.incomingCallsEnabled,
+        },
+      ]
+    : [];
+
   return (
     <div className="space-y-5">
       <div>
@@ -434,41 +520,199 @@ function PrivacySection() {
         </p>
       </div>
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        {rows.map((row, i) => (
-          <div
-            key={row.label}
-            className={`flex cursor-pointer items-center justify-between px-5 py-3.5 transition hover:bg-slate-50 dark:hover:bg-slate-700/40 ${
-              i < rows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-            }`}
-          >
-            <div>
-              <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
+        {settingsQuery.isLoading ? (
+          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading privacy settings...</p>
+        ) : settingsQuery.isError ? (
+          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
+            Unable to load privacy settings.
+          </p>
+        ) : (
+          rows.map((row, i) => (
+            <div
+              key={row.key}
+              className={`flex items-center justify-between gap-4 px-5 py-3.5 ${
+                i < rows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
+              }`}
+            >
+              <div>
+                <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
+              </div>
+              <Toggle
+                checked={row.value}
+                onChange={() => updateSettings.mutate({ [row.key]: !row.value })}
+                label={row.label}
+              />
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              Everyone <ChevronRight size={14} />
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </section>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Turning off read receipts does not affect message delivery or unread counts.
+      </p>
     </div>
   );
 }
 
 // ── Section: Notifications ───────────────────────────────────────────────────
 
-function NotificationsSection() {
-  const [push, setPush] = useState(true);
-  const [sounds, setSounds] = useState(true);
-  const [mentions, setMentions] = useState(true);
-  const [previews, setPreviews] = useState(false);
+interface NotificationPreferences {
+  userId: string;
+  messageNotificationsEnabled: boolean;
+  callNotificationsEnabled: boolean;
+  notificationPreviewsEnabled: boolean;
+  updatedAt: string;
+}
 
-  const rows: { label: string; desc: string; value: boolean; toggle: () => void }[] = [
-    { label: 'Push notifications', desc: 'Receive alerts when the app is closed', value: push, toggle: () => setPush(v => !v) },
-    { label: 'Message sounds', desc: 'Play a sound for new messages', value: sounds, toggle: () => setSounds(v => !v) },
-    { label: 'Mentions', desc: 'Notify when someone @mentions you', value: mentions, toggle: () => setMentions(v => !v) },
-    { label: 'Message preview', desc: 'Show message content in notifications', value: previews, toggle: () => setPreviews(v => !v) },
-  ];
+function getBrowserPermission(): NotificationPermission | 'unsupported' {
+  if (!('Notification' in window)) return 'unsupported';
+  return Notification.permission;
+}
+
+function permissionLabel(permission: NotificationPermission | 'unsupported') {
+  if (permission === 'granted') return 'Allowed';
+  if (permission === 'denied') return 'Denied';
+  if (permission === 'unsupported') return 'Unsupported';
+  return 'Not asked';
+}
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+
+  return outputArray;
+}
+
+async function ensurePushSubscription(userId: string) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('Push notifications are not supported in this browser.');
+  }
+
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    throw new Error('Browser notification permission was not granted.');
+  }
+
+  const { data: keyData } = await apiClient.get<{ publicKey: string }>('/api/notifications/push/vapid-public-key');
+  if (!keyData.publicKey) {
+    throw new Error('Web push is not configured on this server.');
+  }
+
+  const registration = await navigator.serviceWorker.register('/sw.js');
+  const readyRegistration = await navigator.serviceWorker.ready;
+  const existingSubscription = await readyRegistration.pushManager.getSubscription();
+  const subscription =
+    existingSubscription ||
+    (await readyRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(keyData.publicKey),
+    }));
+
+  await apiClient.post('/api/notifications/push/subscribe', {
+    userId,
+    subscription: subscription.toJSON(),
+  });
+
+  return registration;
+}
+
+function NotificationsSection() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [browserPermission, setBrowserPermission] = useState(() => getBrowserPermission());
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    setBrowserPermission(getBrowserPermission());
+  }, []);
+
+  const preferencesQuery = useQuery({
+    queryKey: ['notification-preferences', user?._id],
+    enabled: Boolean(user?._id),
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ preferences: NotificationPreferences }>(
+        `/api/notifications/preferences/${user!._id}`
+      );
+      return data.preferences;
+    },
+  });
+
+  const updatePreferences = useMutation({
+    mutationFn: async (patch: Partial<NotificationPreferences>) => {
+      const { data } = await apiClient.patch<{ preferences: NotificationPreferences }>(
+        `/api/notifications/preferences/${user!._id}`,
+        patch
+      );
+      return data.preferences;
+    },
+    onSuccess: (preferences) => {
+      queryClient.setQueryData(['notification-preferences', user?._id], preferences);
+    },
+  });
+
+  const preferences = preferencesQuery.data;
+
+  const togglePreference = async (
+    key:
+      | 'messageNotificationsEnabled'
+      | 'callNotificationsEnabled'
+      | 'notificationPreviewsEnabled'
+  ) => {
+    if (!user?._id || !preferences) return;
+    setErrorMessage('');
+
+    const nextValue = !preferences[key];
+
+    try {
+      if (
+        nextValue &&
+        (key === 'messageNotificationsEnabled' || key === 'callNotificationsEnabled')
+      ) {
+        await ensurePushSubscription(user._id);
+        setBrowserPermission(getBrowserPermission());
+      }
+
+      await updatePreferences.mutateAsync({ [key]: nextValue });
+    } catch (error) {
+      setBrowserPermission(getBrowserPermission());
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to update notification settings.');
+    }
+  };
+
+  const rows: {
+    label: string;
+    desc: string;
+    value: boolean;
+    disabled?: boolean;
+    toggle: () => void;
+  }[] = preferences
+    ? [
+        {
+          label: 'Message alerts',
+          desc: 'Browser alerts for new messages when you are not focused on that chat',
+          value: preferences.messageNotificationsEnabled,
+          toggle: () => void togglePreference('messageNotificationsEnabled'),
+        },
+        {
+          label: 'Call alerts',
+          desc: 'Browser alerts for incoming calls',
+          value: preferences.callNotificationsEnabled,
+          toggle: () => void togglePreference('callNotificationsEnabled'),
+        },
+        {
+          label: 'Show message previews',
+          desc: 'Include message text in browser alerts',
+          value: preferences.notificationPreviewsEnabled,
+          toggle: () => void togglePreference('notificationPreviewsEnabled'),
+        },
+      ]
+    : [];
 
   return (
     <div className="space-y-5">
@@ -478,30 +722,92 @@ function NotificationsSection() {
           Control how and when you receive notifications.
         </p>
       </div>
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        {rows.map((row, i) => (
-          <div
-            key={row.label}
-            className={`flex items-center justify-between px-5 py-3.5 ${
-              i < rows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-            }`}
-          >
-            <div>
-              <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
-            </div>
-            <Toggle checked={row.value} onChange={row.toggle} label={row.label} />
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Browser permission</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Browser permission controls whether this browser may show desktop alerts.
+            </p>
           </div>
-        ))}
+          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+            {permissionLabel(browserPermission)}
+          </span>
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+        {preferencesQuery.isLoading ? (
+          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading notification settings...</p>
+        ) : preferencesQuery.isError ? (
+          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
+            Unable to load notification settings.
+          </p>
+        ) : (
+          <>
+            {rows.map((row, i) => (
+              <div
+                key={row.label}
+                className={`flex items-center justify-between gap-4 px-5 py-3.5 ${
+                  i < rows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
+                } ${row.disabled ? 'opacity-60' : ''}`}
+              >
+                <div>
+                  <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
+                </div>
+                <Toggle
+                  checked={row.value}
+                  onChange={row.disabled || updatePreferences.isPending ? noop : row.toggle}
+                  label={row.label}
+                />
+              </div>
+            ))}
+          </>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          Turning off alerts does not stop you from receiving messages in Blabber.
+        </p>
+        {errorMessage && (
+          <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+            {errorMessage}
+          </p>
+        )}
       </section>
     </div>
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-function
+function noop() {}
+
 // ── Section: Appearance ──────────────────────────────────────────────────────
 
 function AppearanceSection() {
-  const { theme, toggleTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
+  const settingsQuery = useUserSettings();
+  const updateSettings = useUpdateUserSettings();
+
+  useEffect(() => {
+    if (settingsQuery.data?.themePreference && settingsQuery.data.themePreference !== theme) {
+      setTheme(settingsQuery.data.themePreference);
+    }
+  }, [setTheme, settingsQuery.data?.themePreference, theme]);
+
+  const options: Array<{ value: ThemePreference; label: string; desc: string }> = [
+    { value: 'system', label: 'System', desc: 'Match this device automatically' },
+    { value: 'light', label: 'Light', desc: 'Use Blabber in light mode' },
+    { value: 'dark', label: 'Dark', desc: 'Use Blabber in dark mode' },
+  ];
+
+  const chooseTheme = (value: ThemePreference) => {
+    setTheme(value);
+    updateSettings.mutate({ themePreference: value });
+  };
 
   return (
     <div className="space-y-5">
@@ -512,27 +818,33 @@ function AppearanceSection() {
         </p>
       </div>
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex items-center justify-between px-5 py-4">
-          <div className="flex items-center gap-3">
-            {theme === 'dark' ? (
-              <Moon size={18} className="text-slate-500 dark:text-slate-400" />
-            ) : (
-              <Sun size={18} className="text-slate-500" />
-            )}
-            <div>
-              <p className="text-[14px] font-medium text-slate-900 dark:text-white">Dark mode</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Currently {theme === 'dark' ? 'on' : 'off'}
-              </p>
+        {options.map((option, i) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => chooseTheme(option.value)}
+            className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-700/40 ${
+              i < options.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              {option.value === 'dark' ? (
+                <Moon size={18} className="text-slate-500 dark:text-slate-400" />
+              ) : (
+                <Sun size={18} className="text-slate-500 dark:text-slate-400" />
+              )}
+              <div>
+                <p className="text-[14px] font-medium text-slate-900 dark:text-white">{option.label}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{option.desc}</p>
+              </div>
             </div>
-          </div>
-          <Toggle
-            checked={theme === 'dark'}
-            onChange={toggleTheme}
-            label="Toggle dark mode"
-          />
-        </div>
+            {theme === option.value && <Check size={18} className="text-teal-600 dark:text-teal-300" />}
+          </button>
+        ))}
       </section>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Current resolved theme: {resolvedTheme}.
+      </p>
     </div>
   );
 }
@@ -540,18 +852,28 @@ function AppearanceSection() {
 // ── Section: AI Engine ───────────────────────────────────────────────────────
 
 function AISection() {
-  const rows = [
-    { label: 'Smart Summaries', desc: 'Auto-summarize long chat threads' },
-    { label: 'Task Extraction', desc: 'Detect and surface action items' },
-    { label: 'Shared Memory', desc: 'Remember decisions across chats' },
-    { label: 'Waiting On', desc: 'Track who you\'re waiting on for responses' },
-  ];
-  const [enabled, setEnabled] = useState<Record<string, boolean>>({
-    'Smart Summaries': true,
-    'Task Extraction': true,
-    'Shared Memory': false,
-    'Waiting On': false,
+  const settingsQuery = useUserSettings();
+  const updateSettings = useUpdateUserSettings();
+  const availabilityQuery = useQuery({
+    queryKey: ['intelligence-availability'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ status: 'available' | 'not_configured' | 'temporarily_unavailable' }>(
+        '/api/intelligence/availability'
+      );
+      return data.status;
+    },
   });
+
+  const enabled = settingsQuery.data?.chatIntelligenceEnabled ?? true;
+  const availabilityLabel =
+    availabilityQuery.data === 'available'
+      ? 'Available'
+      : availabilityQuery.data === 'not_configured'
+        ? 'Not configured'
+        : availabilityQuery.isError
+          ? 'Temporarily unavailable'
+          : 'Checking...';
+
   return (
     <div className="space-y-5">
       <div>
@@ -561,27 +883,33 @@ function AISection() {
         </p>
       </div>
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        {rows.map((row, i) => (
-          <div
-            key={row.label}
-            className={`flex items-center justify-between px-5 py-3.5 ${
-              i < rows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-            }`}
-          >
-            <div>
-              <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
-            </div>
-            <Toggle
-              checked={enabled[row.label] ?? false}
-              onChange={() => setEnabled((p) => ({ ...p, [row.label]: !p[row.label] }))}
-              label={row.label}
-            />
+        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+          <div>
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">AI availability</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Server-side provider status for Chat Intelligence.
+            </p>
           </div>
-        ))}
+          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+            {availabilityLabel}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-4 px-5 py-4">
+          <div>
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Chat Intelligence</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Show the intelligence drawer and allow your AI requests.
+            </p>
+          </div>
+          <Toggle
+            checked={enabled}
+            onChange={() => updateSettings.mutate({ chatIntelligenceEnabled: !enabled })}
+            label="Chat Intelligence"
+          />
+        </div>
       </section>
       <p className="text-xs text-slate-400 dark:text-slate-500">
-        AI features are processed securely and do not share your data externally.
+        AI analysis runs only when you manually request it from a chat.
       </p>
     </div>
   );
@@ -590,12 +918,35 @@ function AISection() {
 // ── Section: Help ────────────────────────────────────────────────────────────
 
 function HelpSection() {
-  const links = [
-    { label: 'Help Center', desc: 'FAQs and guides' },
-    { label: 'Contact Support', desc: 'Reach out to our team' },
-    { label: 'Privacy Policy', desc: 'How we handle your data' },
-    { label: 'Terms of Service', desc: 'Usage terms and conditions' },
-    { label: 'About Blabber', desc: 'Version 0.1.0 — Early Access' },
+  const topics = [
+    {
+      label: 'Direct and group chats',
+      desc: 'Use New Chat for one-to-one conversations, or create a group and add workspace members.',
+    },
+    {
+      label: 'Chat Intelligence',
+      desc: 'Open Intelligence from a chat when you want summaries, actions, decisions, waiting-on items, or group memory.',
+    },
+    {
+      label: 'Status',
+      desc: 'Share short-lived workspace updates from the Status item in the main navigation.',
+    },
+    {
+      label: 'Voice and video calls',
+      desc: 'Start calls from a direct chat. If someone disabled incoming calls, Blabber will tell you cleanly.',
+    },
+    {
+      label: 'Notifications',
+      desc: 'Browser alerts are controlled in Notifications. Turning them off never stops messages or unread counts.',
+    },
+    {
+      label: 'Password reset',
+      desc: 'Use Forgot Password on the sign-in page to request a reset email when SMTP is configured.',
+    },
+    {
+      label: 'Privacy controls',
+      desc: 'Use Privacy settings to control read receipts, presence, last-seen visibility, and incoming calls.',
+    },
   ];
   return (
     <div className="space-y-5">
@@ -606,21 +957,27 @@ function HelpSection() {
         </p>
       </div>
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        {links.map((link, i) => (
-          <button
-            key={link.label}
-            className={`flex w-full items-center justify-between px-5 py-3.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-700/40 ${
-              i < links.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
+        {topics.map((topic, i) => (
+          <div
+            key={topic.label}
+            className={`px-5 py-3.5 ${
+              i < topics.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
             }`}
           >
             <div>
-              <p className="text-[14px] font-medium text-slate-900 dark:text-white">{link.label}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{link.desc}</p>
+              <p className="text-[14px] font-medium text-slate-900 dark:text-white">{topic.label}</p>
+              <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">{topic.desc}</p>
             </div>
-            <ExternalLink size={14} className="text-slate-400" />
-          </button>
+          </div>
         ))}
       </section>
+      <a
+        href="mailto:support@example.com?subject=Blabber%20support"
+        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/60"
+      >
+        <ExternalLink size={15} />
+        Report an issue
+      </a>
     </div>
   );
 }

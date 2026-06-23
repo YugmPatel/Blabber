@@ -59,10 +59,18 @@ import { searchUsers } from './routes/search';
 import { updateProfile } from './routes/update-profile';
 import { blockUser, unblockUser } from './routes/block';
 import { getPresence } from './routes/presence';
+import { createStatus, deleteStatus, listStatuses } from './routes/status';
+import { getMySettings, getPublicSettings, updateMySettings } from './routes/settings';
 
 // Specific routes must come before parameterized routes
 app.get('/search', searchUsers);
+app.get('/settings/me', authMiddleware, getMySettings);
+app.patch('/settings/me', authMiddleware, updateMySettings);
+app.get('/settings/:id/public', getPublicSettings);
 app.get('/presence/:id', getPresence);
+app.get('/statuses', authMiddleware, listStatuses);
+app.post('/statuses', authMiddleware, createStatus);
+app.delete('/statuses/:id', authMiddleware, deleteStatus);
 app.patch('/me', authMiddleware, updateProfile);
 app.post('/block', authMiddleware, blockUser);
 app.post('/unblock', authMiddleware, unblockUser);

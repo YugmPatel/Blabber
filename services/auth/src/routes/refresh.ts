@@ -10,6 +10,7 @@ import {
   verifyRefreshToken,
   getRefreshTokenTTL,
 } from '../utils/jwt';
+import { getRefreshCookieOptions } from '../utils/cookies';
 
 export const refresh = asyncHandler(async (req: Request, res: Response) => {
   // Read refresh token from cookie
@@ -91,13 +92,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
   });
 
   // Set new httpOnly cookie
-  res.cookie('refreshToken', newRefreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: refreshTTL,
-  });
+  res.cookie('refreshToken', newRefreshToken, getRefreshCookieOptions(refreshTTL));
 
   // Return new access token
   res.status(200).json({

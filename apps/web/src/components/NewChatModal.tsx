@@ -59,17 +59,6 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
     return () => document.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
 
-  // Initial user list (empty-query search to get all users)
-  const { data: allUsersData, isLoading: isLoadingAll } = useQuery({
-    queryKey: ['users', 'list'],
-    queryFn: async () => {
-      const response = await apiClient.get('/api/users/search?q=a');
-      return response.data;
-    },
-    enabled: isOpen,
-    staleTime: 30_000,
-  });
-
   // Search results
   const { data: searchResults, isLoading: isSearching } = useQuery({
     queryKey: ['users', 'search', searchQuery],
@@ -80,11 +69,9 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
     enabled: isOpen && searchQuery.trim().length > 0,
   });
 
-  const displayedUsers: User[] = searchQuery.trim()
-    ? (searchResults?.users ?? [])
-    : (allUsersData?.users ?? []);
+  const displayedUsers: User[] = searchQuery.trim() ? (searchResults?.users ?? []) : [];
 
-  const isLoading = searchQuery.trim() ? isSearching : isLoadingAll;
+  const isLoading = searchQuery.trim() ? isSearching : false;
 
   // Filter out current user from list
   const filteredUsers = displayedUsers.filter((u) => u._id !== currentUser?._id);
@@ -204,12 +191,12 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Search size={32} className="mb-3 text-slate-300 dark:text-slate-600" />
               <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                {searchQuery.trim() ? 'No users found' : 'No other users yet'}
+                {searchQuery.trim() ? 'No users found' : 'Search for a teammate'}
               </p>
               <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
                 {searchQuery.trim()
                   ? 'Try a different name or email'
-                  : 'Invite teammates to get started'}
+                  : 'Type a name, username, or email to start a chat'}
               </p>
             </div>
           ) : (

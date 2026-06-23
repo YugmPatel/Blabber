@@ -70,6 +70,9 @@ function buildUserPrompt(context: ActionExtractionContext): string {
   return JSON.stringify(
     {
       chatId: context.chatId,
+      chatTitle: context.chatTitle ?? null,
+      chatDescription: context.chatDescription ?? null,
+      groupContext: context.groupContext ?? null,
       currentUserId: context.currentUserId,
       currentUserName: context.currentUserName ?? null,
       participants: context.participants,

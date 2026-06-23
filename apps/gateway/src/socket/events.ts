@@ -21,7 +21,58 @@ function hasUserRoom(io: SocketIOServer, userId: string) {
   return Boolean(io.sockets.adapter.rooms.get(`user:${userId}`)?.size);
 }
 
-function forwardCallControl(
+async function getAuthorizedChat(socket: Socket, chatId: string) {
+  const token = socket.data.token;
+  const response = await axios.get(`${serviceUrls.chats}/${chatId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return response.data.chat as { participants: string[] };
+}
+
+async function validateCallTarget(socket: Socket, chatId: string, toUserId: string) {
+  const fromUserId = socket.data.userId;
+  const chat = await getAuthorizedChat(socket, chatId);
+
+  if (!chat.participants.includes(toUserId) || toUserId === fromUserId) {
+    throw new Error('Invalid call participant');
+  }
+}
+
+async function getPublicUserSettings(userId: string) {
+  const response = await axios.get(`${serviceUrls.users}/settings/${userId}/public`);
+  return response.data.settings as {
+    incomingCallsEnabled: boolean;
+    presenceVisible: boolean;
+    lastSeenVisible: boolean;
+  };
+}
+
+async function recordCallEvent(
+  socket: Socket,
+  payload: {
+    callId: string;
+    chatId: string;
+    callType?: 'audio' | 'video';
+    targetUserId?: string;
+    event: 'invite' | 'accept' | 'decline' | 'cancel' | 'end';
+  }
+) {
+  try {
+    await axios.post(`${serviceUrls.chats}/calls/events`, payload, {
+      headers: { Authorization: `Bearer ${socket.data.token}` },
+    });
+  } catch (error: any) {
+    logger.warn(
+      { error: error.response?.data || error.message, callId: payload.callId, event: payload.event },
+      'Failed to record call history event'
+    );
+  }
+}
+
+async function forwardCallControl(
   socket: Socket,
   io: SocketIOServer,
   event: 'call:accept' | 'call:decline' | 'call:cancel' | 'call:end',
@@ -33,21 +84,43 @@ function forwardCallControl(
     return;
   }
 
+  try {
+    await validateCallTarget(socket, data.chatId, data.toUserId);
+  } catch (error) {
+    emitCallError(socket, data.callId, 'Call participant is not authorized for this chat');
+    return;
+  }
+
   io.to(`user:${data.toUserId}`).emit(event, {
     ...data,
     fromUserId,
   });
+
+  const eventName = event.replace('call:', '') as 'accept' | 'decline' | 'cancel' | 'end';
+  await recordCallEvent(socket, {
+    callId: data.callId,
+    chatId: data.chatId,
+    targetUserId: data.toUserId,
+    event: eventName,
+  });
 }
 
-function forwardCallSignal<T extends CallOfferPayload | CallAnswerPayload | CallIceCandidatePayload>(
+async function forwardCallSignal<T extends CallOfferPayload | CallAnswerPayload | CallIceCandidatePayload>(
   socket: Socket,
   io: SocketIOServer,
   event: 'call:offer' | 'call:answer' | 'call:ice-candidate',
   data: T
 ) {
   const fromUserId = socket.data.userId;
-  if (!data?.callId || !data?.toUserId || !fromUserId) {
+  if (!data?.callId || !data?.chatId || !data?.toUserId || !fromUserId) {
     emitCallError(socket, data?.callId, 'Invalid call signal payload');
+    return;
+  }
+
+  try {
+    await validateCallTarget(socket, data.chatId, data.toUserId);
+  } catch (error) {
+    emitCallError(socket, data.callId, 'Call participant is not authorized for this chat');
     return;
   }
 
@@ -69,6 +142,18 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
       timestamp: new Date().toISOString(),
     });
   });
+
+  socket.on(
+    'client:activity',
+    (data: { activeChatId?: string | null; visible: boolean; focused: boolean }) => {
+      socket.data.activity = {
+        activeChatId: data.activeChatId ?? null,
+        visible: Boolean(data.visible),
+        focused: Boolean(data.focused),
+        updatedAt: Date.now(),
+      };
+    }
+  );
 
   // message:send - Send a new message
   socket.on(
@@ -95,12 +180,14 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
         description?: string;
       };
       replyToId?: string;
+      clientMessageId?: string;
       tempId?: string;
     }) => {
       try {
-        const { chatId, body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, tempId } = data;
+        const { chatId, body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, tempId, clientMessageId } = data;
         const userId = socket.data.userId;
         const token = socket.data.token;
+        const stableClientMessageId = clientMessageId || tempId;
 
         if (!chatId || !body) {
           socket.emit('error', { message: 'chatId and body are required' });
@@ -119,6 +206,7 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
             sticker,
             event,
             replyToId,
+            clientMessageId: stableClientMessageId,
             tempId,
           },
           {
@@ -134,6 +222,7 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
         // This allows the sender to replace their optimistic message with the real one
         socket.emit('message:ack', {
           tempId,
+          clientMessageId: stableClientMessageId,
           messageId: message._id,
           message,
         });
@@ -155,8 +244,7 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
   );
 
   // call:* - Minimal one-to-one WebRTC signaling.
-  // TODO: Validate chat membership against the chats service before routing calls.
-  socket.on('call:invite', (data: CallInvitePayload) => {
+  socket.on('call:invite', async (data: CallInvitePayload) => {
     const fromUserId = socket.data.userId;
     if (
       !data?.callId ||
@@ -170,6 +258,18 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
       return;
     }
 
+    try {
+      await validateCallTarget(socket, data.chatId, data.toUserId);
+      const targetSettings = await getPublicUserSettings(data.toUserId);
+      if (!targetSettings.incomingCallsEnabled) {
+        emitCallError(socket, data.callId, 'User is not accepting calls right now');
+        return;
+      }
+    } catch (error) {
+      emitCallError(socket, data.callId, 'Call participant is not authorized for this chat');
+      return;
+    }
+
     if (!hasUserRoom(io, data.toUserId)) {
       emitCallError(socket, data.callId, 'User unavailable');
       return;
@@ -179,34 +279,41 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
       ...data,
       fromUserId,
     });
+    await recordCallEvent(socket, {
+      callId: data.callId,
+      chatId: data.chatId,
+      callType: data.callType,
+      targetUserId: data.toUserId,
+      event: 'invite',
+    });
   });
 
-  socket.on('call:accept', (data: CallControlPayload) => {
-    forwardCallControl(socket, io, 'call:accept', data);
+  socket.on('call:accept', async (data: CallControlPayload) => {
+    await forwardCallControl(socket, io, 'call:accept', data);
   });
 
-  socket.on('call:decline', (data: CallControlPayload) => {
-    forwardCallControl(socket, io, 'call:decline', data);
+  socket.on('call:decline', async (data: CallControlPayload) => {
+    await forwardCallControl(socket, io, 'call:decline', data);
   });
 
-  socket.on('call:cancel', (data: CallControlPayload) => {
-    forwardCallControl(socket, io, 'call:cancel', data);
+  socket.on('call:cancel', async (data: CallControlPayload) => {
+    await forwardCallControl(socket, io, 'call:cancel', data);
   });
 
-  socket.on('call:end', (data: CallControlPayload) => {
-    forwardCallControl(socket, io, 'call:end', data);
+  socket.on('call:end', async (data: CallControlPayload) => {
+    await forwardCallControl(socket, io, 'call:end', data);
   });
 
-  socket.on('call:offer', (data: CallOfferPayload) => {
-    forwardCallSignal(socket, io, 'call:offer', data);
+  socket.on('call:offer', async (data: CallOfferPayload) => {
+    await forwardCallSignal(socket, io, 'call:offer', data);
   });
 
-  socket.on('call:answer', (data: CallAnswerPayload) => {
-    forwardCallSignal(socket, io, 'call:answer', data);
+  socket.on('call:answer', async (data: CallAnswerPayload) => {
+    await forwardCallSignal(socket, io, 'call:answer', data);
   });
 
-  socket.on('call:ice-candidate', (data: CallIceCandidatePayload) => {
-    forwardCallSignal(socket, io, 'call:ice-candidate', data);
+  socket.on('call:ice-candidate', async (data: CallIceCandidatePayload) => {
+    await forwardCallSignal(socket, io, 'call:ice-candidate', data);
   });
 
   // message:read - Mark messages as read
@@ -214,6 +321,7 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
     try {
       const { messageIds } = data;
       const userId = socket.data.userId;
+      const token = socket.data.token;
 
       if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
         socket.emit('error', { message: 'messageIds array is required' });
@@ -222,11 +330,11 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
 
       // Call messages service to mark as read (batch)
       await axios.post(
-        `${serviceUrls.messages}/${messageIds[0]}/read`,
+        `${serviceUrls.messages}/read`,
         { messageIds },
         {
           headers: {
-            'x-user-id': userId,
+            Authorization: `Bearer ${token}`,
           },
         }
       );
@@ -316,6 +424,7 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
     try {
       const { messageId, emoji } = data;
       const userId = socket.data.userId;
+      const token = socket.data.token;
 
       if (!messageId || !emoji) {
         socket.emit('error', { message: 'messageId and emoji are required' });
@@ -328,16 +437,14 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
         { emoji },
         {
           headers: {
-            'x-user-id': userId,
+            Authorization: `Bearer ${token}`,
           },
         }
       );
 
-      const message = response.data.message;
+      const message = response.data;
 
-      // Broadcast updated message to chat room
-      // Note: We'd need the chatId from the message
-      io.emit('message:edit', message);
+      socket.emit('message:edit', { message });
 
       logger.info(`Reaction set on message ${messageId} by user ${userId}`);
     } catch (error: any) {
@@ -357,10 +464,15 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
       participantIds: string[];
       title?: string;
       avatarUrl?: string;
+      description?: string;
+      groupContext?: string;
+      groupKind?: 'standard' | 'temporary';
+      expiresAt?: string;
     }) => {
       try {
-        const { type, participantIds, title, avatarUrl } = data;
+        const { type, participantIds, title, avatarUrl, description, groupContext, groupKind, expiresAt } = data;
         const userId = socket.data.userId;
+        const token = socket.data.token;
 
         if (!type || !participantIds || !Array.isArray(participantIds)) {
           socket.emit('error', { message: 'type and participantIds are required' });
@@ -375,10 +487,14 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
             participantIds,
             title,
             avatarUrl,
+            description,
+            groupContext,
+            groupKind,
+            expiresAt,
           },
           {
             headers: {
-              'x-user-id': userId,
+              Authorization: `Bearer ${token}`,
             },
           }
         );

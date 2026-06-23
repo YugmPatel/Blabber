@@ -7,8 +7,15 @@ export interface Chat {
   type: 'direct' | 'group';
   participants: ObjectId[];
   admins: ObjectId[];
+  ownerId?: ObjectId;
   title?: string;
+  description?: string;
+  groupContext?: string;
   avatarUrl?: string;
+  groupKind?: 'standard' | 'temporary';
+  expiresAt?: Date;
+  endedAt?: Date;
+  deletedAt?: Date;
   lastMessageRef?: {
     messageId: ObjectId;
     body: string;
@@ -33,6 +40,8 @@ export async function createChatIndexes(): Promise<void> {
 
     // Index on updatedAt for sorting chat list
     await collection.createIndex({ updatedAt: -1 });
+    await collection.createIndex({ expiresAt: 1 }, { sparse: true });
+    await collection.createIndex({ deletedAt: 1 }, { sparse: true });
 
     logger.info('Chat indexes created successfully');
   } catch (error) {

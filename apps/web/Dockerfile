@@ -30,8 +30,10 @@ COPY apps/web/ ./apps/web/
 # Browser must reach the gateway on the host (baked in at build time for static nginx)
 ARG VITE_API_URL=http://localhost:3000
 ARG VITE_SOCKET_URL=http://localhost:3000
+ARG VITE_LIVEKIT_WS_URL=ws://localhost:7880
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_SOCKET_URL=$VITE_SOCKET_URL
+ENV VITE_LIVEKIT_WS_URL=$VITE_LIVEKIT_WS_URL
 
 WORKDIR /app/apps/web
 # Production bundle (skip tsc -b: project references include tests; vite transpiles for runtime)
