@@ -1,22 +1,7 @@
 import { useState, useCallback } from 'react';
 import axios from 'axios';
 import type { AxiosError } from 'axios';
-import { apiClient, getAccessToken } from '@/api/client';
-
-interface PresignResponse {
-  uploadUrl: string;
-  mediaId: string;
-  mediaUrl?: string;
-  publicUrl?: string;
-  storageKey?: string;
-  fileName?: string;
-  mimeType?: string;
-  size?: number;
-  expiresIn?: number;
-  uploadMethod?: 'PUT';
-  uploadAuthRequired?: boolean;
-  storage?: 's3' | 'local';
-}
+import { API_URL, getAccessToken } from '@/api/client';
 
 export interface UploadResult {
   mediaId: string;
@@ -68,28 +53,21 @@ export const useFileUpload = (): UseFileUploadResult => {
     setUploadProgress(null);
 
     try {
-      // 1. Request presigned URL from media service
-      const { data: presignData } = await apiClient.post<PresignResponse>('/api/media/presign', {
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-      });
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      formData.append('fileName', file.name);
+      formData.append('fileType', file.type);
+      formData.append('fileSize', String(file.size));
 
-      // 2. Upload file directly to the returned media target.
-      const headers: Record<string, string> = {
-        'Content-Type': file.type,
-      };
-
-      if (presignData.uploadAuthRequired) {
-        const token = getAccessToken();
-        if (!token) {
-          throw new Error('Authentication is required to upload this file');
-        }
+      const headers: Record<string, string> = {};
+      const token = getAccessToken();
+      if (token) {
         headers.Authorization = `Bearer ${token}`;
       }
 
-      const uploadResponse = await axios.put<Partial<UploadResult>>(presignData.uploadUrl, file, {
+      const uploadResponse = await axios.post<UploadResult>(`${API_URL}/api/media/upload`, formData, {
         headers,
+        withCredentials: true,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentage = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -106,17 +84,13 @@ export const useFileUpload = (): UseFileUploadResult => {
       setUploadProgress(null);
 
       return {
-        mediaId: uploadResponse.data.mediaId || presignData.mediaId,
-        mediaUrl:
-          uploadResponse.data.mediaUrl ||
-          uploadResponse.data.publicUrl ||
-          presignData.mediaUrl ||
-          presignData.publicUrl,
-        publicUrl: uploadResponse.data.publicUrl || presignData.publicUrl,
-        storageKey: uploadResponse.data.storageKey || presignData.storageKey,
-        fileName: uploadResponse.data.fileName || presignData.fileName || file.name,
-        mimeType: uploadResponse.data.mimeType || presignData.mimeType || file.type,
-        size: uploadResponse.data.size || presignData.size || file.size,
+        mediaId: uploadResponse.data.mediaId,
+        mediaUrl: uploadResponse.data.mediaUrl || uploadResponse.data.publicUrl,
+        publicUrl: uploadResponse.data.publicUrl,
+        storageKey: uploadResponse.data.storageKey,
+        fileName: uploadResponse.data.fileName || file.name,
+        mimeType: uploadResponse.data.mimeType || file.type,
+        size: uploadResponse.data.size || file.size,
       };
     } catch (err) {
       const errorMessage = getUploadErrorMessage(err);

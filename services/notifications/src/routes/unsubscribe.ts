@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { logger } from '@repo/utils';
 import { deletePushSubscriptionByEndpoint } from '../models/push-subscription';
 
@@ -7,6 +8,10 @@ import { deletePushSubscriptionByEndpoint } from '../models/push-subscription';
 const unsubscribeSchema = z.object({
   endpoint: z.string().url(),
 });
+
+function endpointHash(endpoint: string) {
+  return createHash('sha256').update(endpoint).digest('hex').slice(0, 16);
+}
 
 export async function unsubscribe(req: Request, res: Response) {
   try {
@@ -27,7 +32,7 @@ export async function unsubscribe(req: Request, res: Response) {
     const deleted = await deletePushSubscriptionByEndpoint(endpoint);
 
     if (!deleted) {
-      logger.warn({ endpoint }, 'Push subscription not found');
+      logger.warn({ endpointHash: endpointHash(endpoint) }, 'Push subscription not found');
 
       return res.status(404).json({
         error: 'Not Found',
@@ -35,7 +40,7 @@ export async function unsubscribe(req: Request, res: Response) {
       });
     }
 
-    logger.info({ endpoint }, 'Push subscription deleted');
+    logger.info({ endpointHash: endpointHash(endpoint) }, 'Push subscription deleted');
 
     return res.status(200).json({
       success: true,

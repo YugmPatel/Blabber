@@ -13,6 +13,18 @@ import type { ServerToClientEvents, ClientToServerEvents } from '@repo/types';
 
 // Mock socket.io-client
 vi.mock('socket.io-client');
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: { _id: 'user-1', username: 'testuser', email: 'test@example.com', name: 'Test User' },
+    accessToken: 'test-token',
+    isLoading: false,
+    isAuthenticated: true,
+    login: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: vi.fn(),
+  }),
+}));
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -633,13 +645,13 @@ describe('useSocketEvents', () => {
       const { unmount } = renderHook(() => useSocketEvents(mockSocket), { wrapper });
 
       // Verify listeners were registered
-      expect(mockSocket.on).toHaveBeenCalledTimes(12);
+      expect(mockSocket.on).toHaveBeenCalledTimes(20);
 
       // Unmount
       unmount();
 
       // Verify listeners were removed
-      expect(mockSocket.off).toHaveBeenCalledTimes(12);
+      expect(mockSocket.off).toHaveBeenCalledTimes(20);
       expect(mockSocket.off).toHaveBeenCalledWith('message:new', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('message:edit', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('message:deleted', expect.any(Function));

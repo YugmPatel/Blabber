@@ -4,6 +4,7 @@ import { ObjectId } from 'mongodb';
 import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
 import { getMessagesCollection } from '../models/message';
+import { seedMessageTestChat } from '../test-fixtures';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_ACCESS_SECRET!;
@@ -27,6 +28,8 @@ describe('DELETE /:messageId - Delete Message', () => {
   beforeEach(async () => {
     const db = getDatabase();
     await db.collection('messages').deleteMany({});
+    await db.collection('chats').deleteMany({});
+    await seedMessageTestChat(TEST_CHAT_ID, [TEST_USER_ID, OTHER_USER_ID]);
   });
 
   it('should soft delete a message successfully', async () => {
@@ -58,7 +61,7 @@ describe('DELETE /:messageId - Delete Message', () => {
     expect(message?.deletedFor[0].toString()).toBe(TEST_USER_ID.toString());
   });
 
-  it('should allow multiple users to delete the same message', async () => {
+  it('should reject deletion by non-senders', async () => {
     const collection = getMessagesCollection();
 
     const insertResult = await collection.insertOne({
@@ -80,17 +83,17 @@ describe('DELETE /:messageId - Delete Message', () => {
 
     expect(response1.status).toBe(200);
 
-    // Second user deletes
+    // Second participant cannot delete a message they did not send
     const token2 = generateToken(OTHER_USER_ID.toString());
     const response2 = await request(app)
       .delete(`/${insertResult.insertedId.toString()}`)
       .set('Authorization', `Bearer ${token2}`);
 
-    expect(response2.status).toBe(200);
+    expect(response2.status).toBe(403);
 
-    // Verify both users are in deletedFor array
+    // Verify only the sender is in deletedFor array
     const message = await collection.findOne({ _id: insertResult.insertedId });
-    expect(message?.deletedFor).toHaveLength(2);
+    expect(message?.deletedFor).toHaveLength(1);
   });
 
   it('should return success if message already deleted for user', async () => {

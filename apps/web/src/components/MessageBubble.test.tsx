@@ -22,7 +22,7 @@ describe('MessageBubble', () => {
 
   it('renders with blue background when sent by me', () => {
     const { container } = render(<MessageBubble message={mockMessage} isSentByMe={true} />);
-    const bubble = container.querySelector('.bg-blue-500');
+    const bubble = container.querySelector('.bg-slate-900');
     expect(bubble).toBeInTheDocument();
   });
 
@@ -52,7 +52,7 @@ describe('MessageBubble', () => {
       />
     );
     // Check that avatar container is rendered
-    const avatar = container.querySelector('.relative.inline-block');
+    const avatar = container.querySelector('.relative.inline-flex');
     expect(avatar).toBeInTheDocument();
   });
 
@@ -128,7 +128,7 @@ describe('MessageBubble', () => {
       },
     };
     render(<MessageBubble message={messageWithDoc} isSentByMe={false} />);
-    expect(screen.getByText('Document')).toBeInTheDocument();
+    expect(screen.getAllByText('Document')).not.toHaveLength(0);
   });
 
   it('renders formatted time', () => {

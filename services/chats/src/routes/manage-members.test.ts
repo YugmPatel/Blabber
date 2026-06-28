@@ -3,6 +3,7 @@ import request from 'supertest';
 import { ObjectId } from 'mongodb';
 import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
+import { seedChatUsers } from '../test-fixtures';
 
 const mockUserId = new ObjectId();
 
@@ -23,6 +24,8 @@ describe('Group Member Management', () => {
     await connectToDatabase();
     const db = getDatabase();
     await db.collection('chats').deleteMany({});
+    await db.collection('users').deleteMany({});
+    await seedChatUsers([mockUserId]);
   });
 
   afterEach(async () => {
@@ -34,6 +37,7 @@ describe('Group Member Management', () => {
       const db = getDatabase();
       const user2 = new ObjectId();
       const newUser = new ObjectId();
+      await seedChatUsers([user2, newUser]);
 
       const result = await db.collection('chats').insertOne({
         type: 'group',
@@ -107,6 +111,7 @@ describe('Group Member Management', () => {
     it('should reject adding member who is already a participant', async () => {
       const db = getDatabase();
       const user2 = new ObjectId();
+      await seedChatUsers([user2]);
 
       const result = await db.collection('chats').insertOne({
         type: 'group',
@@ -236,7 +241,7 @@ describe('Group Member Management', () => {
 
       expect(response.status).toBe(400);
       expect(response.body.error).toBe('Bad Request');
-      expect(response.body.message).toBe('Cannot remove the last admin from the group');
+      expect(response.body.message).toBe('The group owner cannot be removed');
     });
 
     it('should reject removing member if user is not admin', async () => {

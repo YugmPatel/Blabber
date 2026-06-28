@@ -5,6 +5,7 @@ import webpush from 'web-push';
 import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
 import { createPushSubscription, createPushSubscriptionIndexes } from '../models/push-subscription';
+import { updateNotificationPreferences } from '../models/notification-preferences';
 
 // Mock web-push
 vi.mock('web-push', () => ({
@@ -40,6 +41,7 @@ describe('POST /send', () => {
 
   it('should send push notification to all user subscriptions', async () => {
     const userId = new ObjectId();
+    await updateNotificationPreferences(userId, { messageNotificationsEnabled: true });
 
     // Create multiple subscriptions for the user
     await createPushSubscription({
@@ -93,6 +95,7 @@ describe('POST /send', () => {
 
   it('should return 200 when user has no subscriptions', async () => {
     const userId = new ObjectId();
+    await updateNotificationPreferences(userId, { messageNotificationsEnabled: true });
 
     const notificationData = {
       userId: userId.toString(),
@@ -114,6 +117,7 @@ describe('POST /send', () => {
 
   it('should clean up expired subscriptions on 410 Gone', async () => {
     const userId = new ObjectId();
+    await updateNotificationPreferences(userId, { messageNotificationsEnabled: true });
 
     const subscription = await createPushSubscription({
       userId,
@@ -152,6 +156,7 @@ describe('POST /send', () => {
 
   it('should handle partial failures gracefully', async () => {
     const userId = new ObjectId();
+    await updateNotificationPreferences(userId, { messageNotificationsEnabled: true });
 
     await createPushSubscription({
       userId,

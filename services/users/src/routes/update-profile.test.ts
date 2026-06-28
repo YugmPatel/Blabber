@@ -1,10 +1,22 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { ObjectId } from 'mongodb';
-import jwt from 'jsonwebtoken';
+import { createHmac } from 'crypto';
 import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
 import { User } from '../models/user';
+
+function signTestToken(userId: string) {
+  const encodedHeader = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const encodedPayload = Buffer.from(JSON.stringify({
+    userId,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 15 * 60,
+  })).toString('base64url');
+  const data = `${encodedHeader}.${encodedPayload}`;
+  const signature = createHmac('sha256', process.env.JWT_ACCESS_SECRET!).update(data).digest('base64url');
+  return `${data}.${signature}`;
+}
 
 describe('PATCH /me - Update Profile', () => {
   let testUserId: ObjectId;
@@ -44,9 +56,7 @@ describe('PATCH /me - Update Profile', () => {
     testUserId = result.insertedId;
 
     // Generate auth token
-    authToken = jwt.sign({ userId: testUserId.toString() }, process.env.JWT_ACCESS_SECRET!, {
-      expiresIn: '15m',
-    });
+    authToken = signTestToken(testUserId.toString());
   });
 
   it('should update user name', async () => {
@@ -150,7 +160,7 @@ describe('PATCH /me - Update Profile', () => {
       .send({ about: '' });
 
     expect(response.status).toBe(200);
-    expect(response.body.user.about).toBeUndefined();
+    expect(response.body.user.about).toBeNull();
   });
 
   it('should not expose sensitive information', async () => {

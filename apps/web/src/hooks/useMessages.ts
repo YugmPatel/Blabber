@@ -1,6 +1,7 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '../types/react-query';
-import { apiClient } from '../api/client';
+import { apiClient, cancelEvent, closePoll, downloadEventIcs, forwardMessage as forwardMessageRequest, fetchMessagePins, fetchSavedMessages, fetchSharedContent, pinMessage, rsvpEvent, saveMessage, unpinMessage, unsaveMessage, updateEvent } from '../api/client';
+import type { SharedContentResponse, SharedContentType } from '../api/client';
 import { chatKeys } from './useChats';
 import type {
   Message,
@@ -8,6 +9,7 @@ import type {
   UpdateMessageDTO,
   AddReactionDTO,
   PollVoteDTO,
+  UpdateEventDTO,
 } from '@repo/types';
 
 // Query keys
@@ -15,6 +17,9 @@ export const messageKeys = {
   all: ['messages'] as const,
   lists: () => [...messageKeys.all, 'list'] as const,
   list: (chatId: string) => [...messageKeys.lists(), chatId] as const,
+  pins: (chatId: string) => [...messageKeys.all, 'pins', chatId] as const,
+  saved: () => [...messageKeys.all, 'saved'] as const,
+  shared: (chatId: string, type: SharedContentType) => [...messageKeys.all, 'shared', chatId, type] as const,
 };
 
 // Response type for paginated messages
@@ -88,6 +93,10 @@ export const useSendMessage = (chatId: string) => {
                       votes: [],
                     })),
                     allowMultiple: newMessage.poll.allowMultiple ?? false,
+                    allowVoteChanges: newMessage.poll.allowVoteChanges ?? true,
+                    showVoters: newMessage.poll.showVoters ?? false,
+                    closesAt: newMessage.poll.closesAt,
+                    currentUserVote: [],
                     closed: false,
                   }
                 : undefined,
@@ -156,6 +165,138 @@ export const useSendMessage = (chatId: string) => {
         });
       });
     },
+  });
+};
+
+function replaceMessageInCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  chatId: string,
+  updatedMessage: Message
+) {
+  queryClient.setQueryData<InfiniteData<MessagesResponse>>(messageKeys.list(chatId), (old) => {
+    if (!old) return old;
+
+    return {
+      ...old,
+      pages: old.pages.map((page) => ({
+        ...page,
+        messages: page.messages.map((msg) =>
+          msg._id === updatedMessage._id ? updatedMessage : msg
+        ),
+      })),
+    };
+  });
+}
+
+export const useForwardMessage = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      messageId,
+      destinationChatIds,
+    }: {
+      messageId: string;
+      destinationChatIds: string[];
+    }) => forwardMessageRequest(messageId, destinationChatIds),
+    onSuccess: (data) => {
+      data.messages.forEach((message) => {
+        queryClient.setQueryData<InfiniteData<MessagesResponse>>(
+          messageKeys.list(message.chatId),
+          (old) => {
+            if (!old) return old;
+            return {
+              ...old,
+              pages: old.pages.map((page, index) =>
+                index === 0
+                  ? {
+                      ...page,
+                      messages: page.messages.some((existing) => existing._id === message._id)
+                        ? page.messages
+                        : [message, ...page.messages],
+                    }
+                  : page
+              ),
+            };
+          }
+        );
+      });
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useMessagePins = (chatId: string | undefined) => {
+  return useQuery({
+    queryKey: messageKeys.pins(chatId || ''),
+    queryFn: () => fetchMessagePins(chatId!),
+    enabled: Boolean(chatId),
+  });
+};
+
+export const usePinMessage = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: pinMessage,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: messageKeys.pins(chatId) });
+      queryClient.invalidateQueries({ queryKey: messageKeys.list(chatId) });
+    },
+  });
+};
+
+export const useUnpinMessage = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: unpinMessage,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: messageKeys.pins(chatId) });
+      queryClient.invalidateQueries({ queryKey: messageKeys.list(chatId) });
+    },
+  });
+};
+
+export const useSavedMessages = () => {
+  return useQuery({
+    queryKey: messageKeys.saved(),
+    queryFn: fetchSavedMessages,
+  });
+};
+
+export const useSharedContent = (
+  chatId: string | undefined,
+  type: SharedContentType,
+  limit = 30
+) => {
+  return useInfiniteQuery<
+    SharedContentResponse,
+    Error,
+    InfiniteData<SharedContentResponse>,
+    ReturnType<typeof messageKeys.shared>,
+    string | undefined
+  >({
+    queryKey: messageKeys.shared(chatId || '', type),
+    queryFn: ({ pageParam }) =>
+      fetchSharedContent({ chatId: chatId!, type, cursor: pageParam, limit }),
+    initialPageParam: undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: Boolean(chatId),
+  });
+};
+
+export const useSaveMessage = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: saveMessage,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: messageKeys.saved() }),
+  });
+};
+
+export const useUnsaveMessage = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: unsaveMessage,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: messageKeys.saved() }),
   });
 };
 
@@ -254,20 +395,48 @@ export const useVotePoll = (chatId: string) => {
       return response.data;
     },
     onSuccess: (updatedMessage) => {
-      queryClient.setQueryData<InfiniteData<MessagesResponse>>(messageKeys.list(chatId), (old) => {
-        if (!old) return old;
-
-        return {
-          ...old,
-          pages: old.pages.map((page) => ({
-            ...page,
-            messages: page.messages.map((msg) =>
-              msg._id === updatedMessage._id ? updatedMessage : msg
-            ),
-          })),
-        };
-      });
+      replaceMessageInCache(queryClient, chatId, updatedMessage);
     },
+  });
+};
+
+export const useClosePoll = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (messageId: string) => closePoll(messageId),
+    onSuccess: (updatedMessage) => replaceMessageInCache(queryClient, chatId, updatedMessage),
+  });
+};
+
+export const useRsvpEvent = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ messageId, status }: { messageId: string; status: 'going' | 'maybe' | 'declined' }) =>
+      rsvpEvent(messageId, status),
+    onSuccess: (updatedMessage) => replaceMessageInCache(queryClient, chatId, updatedMessage),
+  });
+};
+
+export const useCancelEvent = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (messageId: string) => cancelEvent(messageId),
+    onSuccess: (updatedMessage) => replaceMessageInCache(queryClient, chatId, updatedMessage),
+  });
+};
+
+export const useUpdateEvent = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ messageId, data }: { messageId: string; data: UpdateEventDTO }) =>
+      updateEvent(messageId, data),
+    onSuccess: (updatedMessage) => replaceMessageInCache(queryClient, chatId, updatedMessage),
+  });
+};
+
+export const useDownloadEventIcs = () => {
+  return useMutation({
+    mutationFn: async (messageId: string) => downloadEventIcs(messageId),
   });
 };
 

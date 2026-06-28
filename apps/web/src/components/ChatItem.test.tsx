@@ -88,7 +88,7 @@ describe('ChatItem', () => {
     );
 
     const chatItem = screen.getByRole('button');
-    expect(chatItem).toHaveClass('bg-gray-200');
+    expect(chatItem).toHaveClass('bg-teal-50');
   });
 
   it('shows pin icon when isPinned is true', () => {
@@ -185,7 +185,7 @@ describe('ChatItem', () => {
     );
 
     // Check for presence badge (green dot)
-    const presenceBadge = container.querySelector('.bg-green-500');
+    const presenceBadge = container.querySelector('.bg-emerald-500');
     expect(presenceBadge).toBeInTheDocument();
   });
 });

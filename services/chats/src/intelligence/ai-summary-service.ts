@@ -19,6 +19,7 @@ export interface AISummaryContext {
   chatTitle?: string | null;
   chatDescription?: string | null;
   groupContext?: string | null;
+  participants?: Array<{ userId: string; name?: string | null }>;
   messages: SummaryInputMessage[];
 }
 

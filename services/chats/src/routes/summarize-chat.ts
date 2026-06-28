@@ -10,6 +10,8 @@ import {
   createAISummaryService,
   type SummaryInputMessage,
 } from '../intelligence/ai-summary-service';
+import { materializeSummarySources } from '../intelligence-source-materializer';
+import { personalizeSummary } from '../summary-personalization';
 
 interface MessageDocument {
   _id: ObjectId;
@@ -26,6 +28,82 @@ interface UserDocument {
   username?: string;
   email?: string;
   name?: string;
+}
+
+function displayName(user: UserDocument): string {
+  return user.name || user.username || user._id.toString();
+}
+
+function normalizeName(value?: string | null) {
+  return (value || '').trim().toLowerCase().replace(/^@/, '').replace(/\s+/g, ' ');
+}
+
+function dateInputValue(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function resolveSummaryDueDate(value: string | null | undefined, sourceCreatedAt?: string): string | null {
+  const raw = (value || '').trim();
+  if (!raw) return null;
+  const base = sourceCreatedAt ? new Date(sourceCreatedAt) : new Date();
+  if (Number.isNaN(base.getTime())) return null;
+  const lower = raw.toLowerCase();
+  const next = new Date(base);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (lower === 'today' || lower.includes('end of day') || lower === 'eod') return dateInputValue(base);
+  if (lower === 'tomorrow') {
+    next.setDate(base.getDate() + 1);
+    return dateInputValue(next);
+  }
+
+  const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const weekdayIndex = weekdays.findIndex((day) => lower.includes(day));
+  if (weekdayIndex >= 0) {
+    const delta = (weekdayIndex - base.getDay() + 7) % 7;
+    next.setDate(base.getDate() + delta);
+    return dateInputValue(next);
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime()) && /\b(\d{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)/i.test(raw)) {
+    return dateInputValue(parsed);
+  }
+
+  return null;
+}
+
+function resolveTaskOwner({
+  assignedTo,
+  assignedToUserId,
+  sourceMessageId,
+  participantById,
+  participantByName,
+  messageById,
+}: {
+  assignedTo?: string | null;
+  assignedToUserId?: string | null;
+  sourceMessageId: string;
+  participantById: Map<string, UserDocument>;
+  participantByName: Map<string, UserDocument>;
+  messageById: Map<string, SummaryInputMessage>;
+}) {
+  if (assignedToUserId && participantById.has(assignedToUserId)) {
+    const user = participantById.get(assignedToUserId)!;
+    return { assignedTo: displayName(user), assignedToUserId: user._id.toString() };
+  }
+
+  const normalized = normalizeName(assignedTo);
+  const sourceMessage = messageById.get(sourceMessageId);
+  if (sourceMessage && ['i', 'me', 'myself'].includes(normalized)) {
+    const user = participantById.get(sourceMessage.senderId);
+    return user ? { assignedTo: displayName(user), assignedToUserId: user._id.toString() } : { assignedTo: null, assignedToUserId: null };
+  }
+
+  const byName = participantByName.get(normalized);
+  if (byName) return { assignedTo: displayName(byName), assignedToUserId: byName._id.toString() };
+
+  return { assignedTo: assignedTo || null, assignedToUserId: null };
 }
 
 export const summarizeChat = asyncHandler(async (req: Request, res: Response) => {
@@ -95,6 +173,7 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     ? await messagesCollection.countDocuments({
         chatId: chatObjectId,
         deletedFor: { $ne: userObjectId },
+        'momentReply.isMomentReply': { $ne: true },
         senderId: { $ne: userObjectId },
         createdAt: { $gt: lastReadAt },
       })
@@ -103,6 +182,7 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
   const baseQuery: Record<string, unknown> = {
     chatId: chatObjectId,
     deletedFor: { $ne: userObjectId },
+    'momentReply.isMomentReply': { $ne: true },
   };
   if (unreadCount > 0 && lastReadAt) {
     baseQuery.createdAt = { $gt: lastReadAt };
@@ -114,8 +194,9 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     .limit(messageLimit)
     .toArray();
 
+  const participantIds = chat.participants.map((participantId) => participantId.toString());
   const senderIds = Array.from(
-    new Set([userId, ...rawMessages.map((message) => message.senderId.toString())])
+    new Set([userId, ...participantIds, ...rawMessages.map((message) => message.senderId.toString())])
   ).map((id) => new ObjectId(id));
   const userDocs = await db
     .collection<UserDocument>('users')
@@ -125,9 +206,21 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
   const userNamesById = new Map(
     userDocs.map((user) => [
       user._id.toString(),
-      user.name || user.username || user.email || user._id.toString(),
+      displayName(user),
     ])
   );
+  const participantById = new Map(
+    userDocs
+      .filter((user) => participantIds.includes(user._id.toString()))
+      .map((user) => [user._id.toString(), user])
+  );
+  const participantByName = new Map<string, UserDocument>();
+  for (const user of participantById.values()) {
+    const name = normalizeName(user.name);
+    const username = normalizeName(user.username);
+    if (name) participantByName.set(name, user);
+    if (username) participantByName.set(username, user);
+  }
 
   const contextMessages: SummaryInputMessage[] = rawMessages
     .slice()
@@ -140,6 +233,7 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
       type: message.type ?? 'text',
       createdAt: message.createdAt.toISOString(),
     }));
+  const messageById = new Map(contextMessages.map((message) => [message._id, message]));
 
   const summaryService = createAISummaryService();
   const summary = await summaryService.generateSummary({
@@ -147,8 +241,12 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     currentUserId: userId,
     currentUserName: userNamesById.get(userId) ?? null,
     chatTitle: chat.title ?? null,
-    chatDescription: chat.description ?? null,
-    groupContext: chat.groupContext ?? null,
+    chatDescription: chat.description || chat.groupContext || null,
+    groupContext: chat.description || chat.groupContext || null,
+    participants: Array.from(participantById.values()).map((user) => ({
+      userId: user._id.toString(),
+      name: displayName(user),
+    })),
     messages: contextMessages,
   });
 
@@ -165,9 +263,26 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
   }
 
   const now = new Date();
-  const scopedSummary = {
+  const viewer = userDocs.find((user) => user._id.equals(userObjectId));
+  const scopedSummary = personalizeSummary({
+    summary: {
     ...parsedSummary.data,
     overview: parsedSummary.data.overview || parsedSummary.data.summary,
+    tasks: parsedSummary.data.tasks.map((task) => {
+      const owner = resolveTaskOwner({
+        assignedTo: task.assignedTo,
+        assignedToUserId: task.assignedToUserId,
+        sourceMessageId: task.sourceMessageId,
+        participantById,
+        participantByName,
+        messageById,
+      });
+      return {
+        ...task,
+        ...owner,
+        dueDate: resolveSummaryDueDate(task.dueDate, messageById.get(task.sourceMessageId)?.createdAt),
+      };
+    }),
     scope: {
       label:
         unreadCount > 0
@@ -177,7 +292,15 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
       since: unreadCount > 0 && lastReadAt ? lastReadAt.toISOString() : undefined,
       mode: unreadCount > 0 ? 'unread' as const : 'recent' as const,
     },
-  };
+    },
+    messages: rawMessages,
+    viewer: viewer || { _id: userObjectId, name: userNamesById.get(userId) },
+  });
+  const sourcedSummary = await materializeSummarySources({
+    summary: scopedSummary,
+    chatId: chatObjectId,
+    userId: userObjectId,
+  });
   await getChatSummariesCollection().insertOne({
     _id: new ObjectId(),
     chatId: chatObjectId,
@@ -191,11 +314,11 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     {
       chatId,
       userId,
-      sourceMessages: scopedSummary.sourceMessageIds.length,
+      sourceMessages: sourcedSummary.sourceMessageIds.length,
       messageLimit,
     },
     'Chat summary generated'
   );
 
-  return res.status(200).json({ summary: scopedSummary });
+  return res.status(200).json({ summary: sourcedSummary });
 });

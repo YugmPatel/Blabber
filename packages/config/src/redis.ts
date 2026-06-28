@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isProduction, requireSafeParse, throwConfigError } from './safe';
 
 const RedisConfigSchema = z.object({
   REDIS_HOST: z.string().min(1, 'REDIS_HOST is required'),
@@ -9,12 +10,16 @@ const RedisConfigSchema = z.object({
 export type RedisConfig = z.infer<typeof RedisConfigSchema>;
 
 export function loadRedisConfig(): RedisConfig {
-  const result = RedisConfigSchema.safeParse(process.env);
-  
-  if (!result.success) {
-    console.error('❌ Invalid Redis configuration:', result.error.format());
-    throw new Error('Invalid Redis configuration');
+  const config = requireSafeParse('redis', RedisConfigSchema, process.env) as RedisConfig;
+
+  if (isProduction() && ['localhost', '127.0.0.1'].includes(config.REDIS_HOST)) {
+    throwConfigError('redis', [
+      {
+        path: 'REDIS_HOST',
+        message: 'Production Redis host cannot be localhost',
+      },
+    ]);
   }
-  
-  return result.data;
+
+  return config;
 }

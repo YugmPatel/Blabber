@@ -185,7 +185,7 @@ describe('PATCH /:id - Update Chat', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('Validation Error');
-    expect(response.body.message).toBe('At least one field (title or avatarUrl) must be provided');
+    expect(response.body.message).toBe('At least one field must be provided');
   });
 
   it('should reject invalid avatarUrl', async () => {

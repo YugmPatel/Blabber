@@ -6,6 +6,7 @@ import { getMessagesCollection } from '../models/message';
 import { getPubSub } from '../pubsub';
 import { serializeMessage } from '../serialize-message';
 import { assertChatMembership } from '../chat-access';
+import { getPollVoteRecords, isPollClosed } from '../poll-utils';
 
 export async function votePoll(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -44,33 +45,53 @@ export async function votePoll(req: Request, res: Response, next: NextFunction):
 
     await assertChatMembership(message.chatId, voterObjectId);
 
-    if (message.poll.closed) {
+    if (isPollClosed(message.poll)) {
       res.status(400).json({ error: 'Bad Request', message: 'Poll is closed' });
       return;
     }
 
-    const targetOption = message.poll.options.find((option) => option.id === bodyResult.data.optionId);
-    if (!targetOption) {
+    const requestedOptionIds = bodyResult.data.optionIds || (bodyResult.data.optionId ? [bodyResult.data.optionId] : []);
+    const optionIds = Array.from(new Set(requestedOptionIds));
+    if (!message.poll.allowMultiple && optionIds.length > 1) {
+      res.status(400).json({ error: 'Bad Request', message: 'Poll allows only one option' });
+      return;
+    }
+
+    const validOptionIds = new Set(message.poll.options.map((option) => option.id));
+    if (optionIds.some((optionId) => !validOptionIds.has(optionId))) {
       res.status(400).json({ error: 'Bad Request', message: 'Poll option not found' });
       return;
     }
 
+    const existingVotes = getPollVoteRecords(message.poll);
+    const existingVote = existingVotes.find((vote) => vote.userId.equals(voterObjectId));
+    if (existingVote && message.poll.allowVoteChanges === false) {
+      res.status(400).json({ error: 'Bad Request', message: 'Poll vote changes are disabled' });
+      return;
+    }
+
+    const now = new Date();
+    const votes = [
+      ...existingVotes.filter((vote) => !vote.userId.equals(voterObjectId)),
+      {
+        userId: voterObjectId,
+        optionIds,
+        votedAt: existingVote?.votedAt && existingVote.votedAt.getTime() > 0 ? existingVote.votedAt : now,
+        updatedAt: now,
+      },
+    ];
     const options = message.poll.options.map((option) => ({
       ...option,
-      votes: message.poll?.allowMultiple
-        ? option.votes
-        : option.votes.filter((vote) => !vote.equals(voterObjectId)),
+      votes: votes.filter((vote) => vote.optionIds.includes(option.id)).map((vote) => vote.userId),
+      voteCount: votes.filter((vote) => vote.optionIds.includes(option.id)).length,
     }));
-    const optionToUpdate = options.find((option) => option.id === bodyResult.data.optionId);
-    if (optionToUpdate && !optionToUpdate.votes.some((vote) => vote.equals(voterObjectId))) {
-      optionToUpdate.votes.push(voterObjectId);
-    }
 
     const updated = await collection.findOneAndUpdate(
       { _id: messageObjectId },
       {
         $set: {
           'poll.options': options,
+          'poll.votes': votes,
           editedAt: new Date(),
         },
       },
@@ -82,7 +103,7 @@ export async function votePoll(req: Request, res: Response, next: NextFunction):
       return;
     }
 
-    const apiMessage = serializeMessage(updated);
+    const apiMessage = serializeMessage(updated, undefined, voterObjectId);
 
     try {
       const pubsub = getPubSub();

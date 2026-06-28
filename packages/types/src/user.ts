@@ -8,6 +8,12 @@ export interface User {
   name: string;
   avatarUrl?: string;
   about?: string;
+  profileHandle?: string;
+  profileBio?: string;
+  profileWebsite?: string;
+  profileVisibility?: 'private' | 'public';
+  profileHandleChangedAt?: Date;
+  profileUpdatedAt?: Date;
   role?: string;
   department?: string;
   contacts: string[];
@@ -25,6 +31,12 @@ export const UserSchema = z.object({
   name: z.string().min(1).max(100),
   avatarUrl: z.string().url().optional(),
   about: z.string().max(500).optional(),
+  profileHandle: z.string().min(3).max(30).optional(),
+  profileBio: z.string().max(160).optional(),
+  profileWebsite: z.string().url().optional(),
+  profileVisibility: z.enum(['private', 'public']).optional(),
+  profileHandleChangedAt: z.date().optional(),
+  profileUpdatedAt: z.date().optional(),
   role: z.string().max(120).optional(),
   department: z.string().max(120).optional(),
   contacts: z.array(z.string()),
@@ -71,6 +83,10 @@ export interface UserResponseDTO {
   name: string;
   avatarUrl?: string;
   about?: string;
+  profileHandle?: string;
+  profileBio?: string;
+  profileWebsite?: string;
+  profileVisibility?: 'private' | 'public';
   role?: string;
   department?: string;
   lastSeen: Date;

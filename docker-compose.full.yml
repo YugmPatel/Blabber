@@ -56,11 +56,13 @@ services:
   livekit:
     image: livekit/livekit-server:v1.8
     container_name: blabber-full-livekit
-    command: ['--dev', '--bind', '0.0.0.0']
+    command: ['--config', '/etc/livekit.yaml']
     ports:
       - '7880:7880'
       - '7881:7881'
       - '7882:7882/udp'
+    volumes:
+      - ./livekit.full.yml:/etc/livekit.yaml:ro
     networks:
       - blabber
 
@@ -76,8 +78,8 @@ services:
       MONGO_URI: mongodb://mongodb:27017
       MONGO_DB_NAME: blabber_full
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
-      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
-      JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+      JWT_ACCESS_SECRET: blabber-compose-access-alpha-2026-key-material-48chars
+      JWT_REFRESH_SECRET: blabber-compose-refresh-beta-2026-key-material-48chars
       AUTH_COOKIE_SECURE: 'false'
       AUTH_COOKIE_SAME_SITE: lax
       APP_BASE_URL: http://localhost:5173
@@ -92,6 +94,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      ACCOUNT_MAIL_CAPTURE: 'true'
+      ACCOUNT_WORKER_HTTP_ENABLED: 'true'
     ports:
       - '3001:3001'
     depends_on:
@@ -113,11 +117,18 @@ services:
       MONGO_DB_NAME: blabber_full
       REDIS_HOST: redis
       REDIS_PORT: '6379'
+      NOTIFICATIONS_SERVICE_URL: http://notifications:3006
+      MEDIA_SERVICE_URL: http://media:3005
+      LOCAL_MEDIA_DIR: /data/blabber-media
+      MOMENT_WORKER_HTTP_ENABLED: 'true'
+      MOMENT_INTERNAL_MEDIA_TOKEN: blabber-compose-moment-media-internal-token
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
-      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
-      JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+      JWT_ACCESS_SECRET: blabber-compose-access-alpha-2026-key-material-48chars
+      JWT_REFRESH_SECRET: blabber-compose-refresh-beta-2026-key-material-48chars
     ports:
       - '3002:3002'
+    volumes:
+      - local_media_files:/data/blabber-media
     depends_on:
       mongodb:
         condition: service_healthy
@@ -138,17 +149,18 @@ services:
       MONGO_URI: mongodb://mongodb:27017
       MONGO_DB_NAME: blabber_full
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
-      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
-      JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+      JWT_ACCESS_SECRET: blabber-compose-access-alpha-2026-key-material-48chars
+      JWT_REFRESH_SECRET: blabber-compose-refresh-beta-2026-key-material-48chars
       REDIS_HOST: redis
       REDIS_PORT: '6379'
+      NOTIFICATIONS_SERVICE_URL: http://notifications:3006
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
       OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-}
       OPENROUTER_REFERER: ${OPENROUTER_REFERER:-}
       OPENROUTER_MOCK_FALLBACK: ${OPENROUTER_MOCK_FALLBACK:-false}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-blabber-livekit-dev-secret-32chars-minimum}
       LIVEKIT_WS_URL: ${LIVEKIT_WS_URL:-ws://localhost:7880}
     ports:
       - '3003:3003'
@@ -175,9 +187,10 @@ services:
       MONGO_DB_NAME: blabber_full
       REDIS_HOST: redis
       REDIS_PORT: '6379'
+      NOTIFICATIONS_SERVICE_URL: http://notifications:3006
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
-      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
-      JWT_REFRESH_SECRET: blabber-docker-jwt-refresh-secret-32chars-minimum
+      JWT_ACCESS_SECRET: blabber-compose-access-alpha-2026-key-material-48chars
+      JWT_REFRESH_SECRET: blabber-compose-refresh-beta-2026-key-material-48chars
     ports:
       - '3004:3004'
     depends_on:
@@ -204,8 +217,12 @@ services:
       LOCAL_MEDIA_DIR: /data/blabber-media
       LOCAL_MEDIA_UPLOAD_BASE_URL: http://localhost:3000/api/media
       PUBLIC_MEDIA_BASE_URL: http://localhost:3000/api/media
+      MOMENT_INTERNAL_MEDIA_TOKEN: blabber-compose-moment-media-internal-token
+      MEDIA_SCANNER_MODE: ${MEDIA_SCANNER_MODE:-mock}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: '3310'
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
-      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      JWT_ACCESS_SECRET: blabber-compose-access-alpha-2026-key-material-48chars
     ports:
       - '3005:3005'
     volumes:
@@ -230,15 +247,31 @@ services:
       MONGO_URI: mongodb://mongodb:27017
       MONGO_DB_NAME: blabber_full
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
-      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      JWT_ACCESS_SECRET: blabber-compose-access-alpha-2026-key-material-48chars
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      PUSH_NOTIFICATIONS_ENABLED: ${PUSH_NOTIFICATIONS_ENABLED:-false}
+      OPS_DIAGNOSTIC_TOKEN: blabber-local-ops-diagnostic-token
     ports:
       - '3006:3006'
     depends_on:
       mongodb:
         condition: service_healthy
+    networks:
+      - blabber
+
+  clamav:
+    image: clamav/clamav:stable
+    platform: linux/amd64
+    container_name: blabber-full-clamav
+    ports:
+      - '3310:3310'
+    healthcheck:
+      test: ['CMD-SHELL', "echo PING | nc -w 5 localhost 3310 | grep -q PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
     networks:
       - blabber
 
@@ -255,7 +288,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: '6379'
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
-      JWT_ACCESS_SECRET: blabber-docker-jwt-access-secret-32chars-minimum
+      JWT_ACCESS_SECRET: blabber-compose-access-alpha-2026-key-material-48chars
       AUTH_SERVICE_URL: http://auth:3001
       USERS_SERVICE_URL: http://users:3002
       CHATS_SERVICE_URL: http://chats:3003

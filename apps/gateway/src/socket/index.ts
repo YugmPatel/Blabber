@@ -9,6 +9,14 @@ import { serviceUrls } from '../config.js';
 const PRESENCE_TTL_SECONDS = 300;
 let presenceClient: RedisClientType | null = null;
 
+function safeError(error: unknown) {
+  const candidate = error as { message?: string; response?: { status?: number } };
+  return {
+    message: candidate?.message || 'Unknown error',
+    status: candidate?.response?.status,
+  };
+}
+
 async function setUserPresence(userId: string, online: boolean) {
   if (!presenceClient) return;
 
@@ -25,7 +33,7 @@ async function setUserPresence(userId: string, online: boolean) {
       await presenceClient.set(`presence:lastSeen:${userId}`, now);
     }
   } catch (error) {
-    logger.error({ error, userId, online }, 'Failed to update Redis presence');
+    logger.error({ error: safeError(error), userId, online }, 'Failed to update Redis presence');
   }
 }
 
@@ -34,9 +42,37 @@ async function getPresenceBroadcastSettings(userId: string) {
     const response = await axios.get(`${serviceUrls.users}/settings/${userId}/public`);
     return response.data.settings as { presenceVisible: boolean; lastSeenVisible: boolean };
   } catch (error) {
-    logger.error({ error, userId }, 'Failed to load public user settings for presence');
+    logger.error({ error: safeError(error), userId }, 'Failed to load public user settings for presence');
     return { presenceVisible: true, lastSeenVisible: true };
   }
+}
+
+async function getPresenceExcludedRooms(token: string | undefined) {
+  if (!token) return [];
+  try {
+    const response = await axios.get(`${serviceUrls.users}/blocks/visibility-exclusions`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return (response.data.userIds || []).map((userId: string) => `user:${userId}`);
+  } catch (error) {
+    logger.error({ error: safeError(error) }, 'Failed to load block visibility exclusions');
+    return [];
+  }
+}
+
+async function broadcastPresence(
+  io: SocketIOServer,
+  userId: string,
+  token: string | undefined,
+  online: boolean,
+  lastSeen: Date | null
+) {
+  const excludedRooms = await getPresenceExcludedRooms(token);
+  io.except(excludedRooms).emit('presence:update', {
+    userId,
+    online,
+    lastSeen,
+  });
 }
 
 export async function setupSocketIO(httpServer: HTTPServer) {
@@ -72,7 +108,7 @@ export async function setupSocketIO(httpServer: HTTPServer) {
 
     logger.info('Redis adapter connected for Socket.io');
   } catch (error) {
-    logger.error('Failed to connect Redis adapter, running without it:', error);
+    logger.error({ error: safeError(error) }, 'Failed to connect Redis adapter, running without it');
     // Continue without Redis adapter for local development
   }
 
@@ -105,11 +141,7 @@ export async function setupSocketIO(httpServer: HTTPServer) {
       void setUserPresence(userId, true);
       void getPresenceBroadcastSettings(userId).then((settings) => {
         if (!settings.presenceVisible) return;
-        io.emit('presence:update', {
-          userId,
-          online: true,
-          lastSeen: settings.lastSeenVisible ? new Date() : null,
-        });
+        void broadcastPresence(io, userId, socket.data.token, true, settings.lastSeenVisible ? new Date() : null);
       });
       logger.info(`User ${userId} is now online`);
     }
@@ -128,11 +160,7 @@ export async function setupSocketIO(httpServer: HTTPServer) {
           void setUserPresence(userId, false);
           void getPresenceBroadcastSettings(userId).then((settings) => {
             if (!settings.presenceVisible) return;
-            io.emit('presence:update', {
-              userId,
-              online: false,
-              lastSeen: settings.lastSeenVisible ? new Date() : null,
-            });
+            void broadcastPresence(io, userId, socket.data.token, false, settings.lastSeenVisible ? new Date() : null);
           });
           logger.info(`User ${userId} is now offline`);
         }

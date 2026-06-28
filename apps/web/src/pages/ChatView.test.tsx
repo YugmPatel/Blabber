@@ -8,6 +8,8 @@ import { createTestQueryClient } from '@/test/query-test-utils';
 import * as useChatsModule from '@/hooks/useChats';
 import * as useMessagesModule from '@/hooks/useMessages';
 import * as useChatSummaryModule from '@/hooks/useChatSummary';
+import * as useChatActionsModule from '@/hooks/useChatActions';
+import * as useGroupBrainModule from '@/hooks/useGroupBrain';
 import * as useUsersModule from '@/hooks/useUsers';
 import type { Chat, Message } from '@repo/types';
 
@@ -15,7 +17,53 @@ import type { Chat, Message } from '@repo/types';
 vi.mock('@/hooks/useChats');
 vi.mock('@/hooks/useMessages');
 vi.mock('@/hooks/useChatSummary');
+vi.mock('@/hooks/useChatActions');
+vi.mock('@/hooks/useGroupBrain');
 vi.mock('@/hooks/useUsers');
+vi.mock('@/contexts/AuthContext', () => ({
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useAuth: () => ({
+    user: { _id: 'user1', username: 'current', email: 'current@example.com', name: 'Current User' },
+    accessToken: 'test-token',
+    isLoading: false,
+    isAuthenticated: true,
+    login: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: vi.fn(),
+  }),
+}));
+vi.mock('@/api/client', () => ({
+  apiClient: {
+    get: vi.fn((url: string) => {
+      if (url.includes('/settings')) {
+        return Promise.resolve({ data: { settings: { chatIntelligenceEnabled: true } } });
+      }
+      if (url.includes('/calls/active')) {
+        return Promise.resolve({ data: { activeCall: null } });
+      }
+      if (url.includes('/api/users/')) {
+        const userId = url.split('/').pop() || 'user';
+        return Promise.resolve({
+          data: {
+            user: {
+              _id: userId,
+              username: userId,
+              email: `${userId}@example.com`,
+              name: userId === 'user2' ? 'Alice' : userId,
+            },
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    }),
+    post: vi.fn(),
+    patch: vi.fn(),
+    delete: vi.fn(),
+  },
+  fetchMessageWindow: vi.fn(),
+  normalizeMediaUrl: (url?: string | null) => url ?? null,
+}));
 
 const mockUseChatSummary = () => {
   vi.spyOn(useChatSummaryModule, 'useChatSummary').mockReturnValue({
@@ -28,6 +76,13 @@ const mockUseChatSummary = () => {
     generateError: null,
   } as any);
 };
+
+const mockMutation = () => ({
+  mutate: vi.fn(),
+  mutateAsync: vi.fn(),
+  isPending: false,
+  isLoading: false,
+});
 
 const mockChat: Chat = {
   _id: 'chat1',
@@ -93,6 +148,56 @@ describe('ChatView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseChatSummary();
+    vi.spyOn(useChatsModule, 'useChats').mockReturnValue({ data: [], isLoading: false } as any);
+    vi.spyOn(useChatsModule, 'useArchiveChat').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useChatsModule, 'useUnarchiveChat').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useChatsModule, 'useInviteLinkSettings').mockReturnValue({
+      data: null,
+      isLoading: false,
+    } as any);
+    vi.spyOn(useChatsModule, 'useRegenerateInviteLink').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useChatsModule, 'useRevokeInviteLink').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useDeleteMessage').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useAddReaction').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useVotePoll').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useClosePoll').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useRsvpEvent').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useCancelEvent').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useDownloadEventIcs').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useMarkMessagesRead').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useForwardMessage').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useMessagePins').mockReturnValue({ data: { pins: [] } } as any);
+    vi.spyOn(useMessagesModule, 'usePinMessage').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useUnpinMessage').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useSaveMessage').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useUnsaveMessage').mockReturnValue(mockMutation() as any);
+    vi.spyOn(useMessagesModule, 'useSharedContent').mockReturnValue({
+      data: { pages: [{ items: [], nextCursor: null }] },
+      isLoading: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as any);
+    vi.spyOn(useUsersModule, 'useSearchUsers').mockReturnValue({
+      data: [],
+      isFetching: false,
+    } as any);
+    vi.spyOn(useChatActionsModule, 'useChatActions').mockReturnValue({
+      actions: [],
+      isLoadingActions: false,
+      createAction: vi.fn(),
+      updateAction: vi.fn(),
+      deleteAction: vi.fn(),
+      isCreatingAction: false,
+    } as any);
+    vi.spyOn(useGroupBrainModule, 'useGroupBrain').mockReturnValue({
+      answers: [],
+      isLoadingAnswers: false,
+      createAnswer: vi.fn(),
+      updateAnswer: vi.fn(),
+      deleteAnswer: vi.fn(),
+      isCreatingAnswer: false,
+    } as any);
   });
 
   it('shows loading state initially', () => {
@@ -148,7 +253,7 @@ describe('ChatView', () => {
     renderChatView();
 
     await waitFor(() => {
-      expect(screen.getByText('Chat not found')).toBeInTheDocument();
+      expect(screen.getByText('Chat not available')).toBeInTheDocument();
     });
   });
 
@@ -248,7 +353,7 @@ describe('ChatView', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Team Chat')).toBeInTheDocument();
-      expect(screen.getByText('3 participants')).toBeInTheDocument();
+      expect(screen.getByText(/members/i)).toBeInTheDocument();
     });
   });
 
@@ -277,7 +382,7 @@ describe('ChatView', () => {
     renderChatView();
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Type a message...')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument();
     });
   });
 
@@ -306,7 +411,7 @@ describe('ChatView', () => {
     renderChatView();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Catch Me Up' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open Chat Intelligence' })).toBeInTheDocument();
     });
   });
 });

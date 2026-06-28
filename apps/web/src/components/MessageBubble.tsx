@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Message } from '@repo/types';
-import { normalizeMediaUrl } from '@/api/client';
+import { createReport, normalizeMediaUrl } from '@/api/client';
 import Avatar from './Avatar';
 import ReadReceipts from './ReadReceipts';
 
@@ -12,14 +12,38 @@ interface MessageBubbleProps {
   senderName?: string;
   senderAvatarUrl?: string;
   onReply?: (message: Message) => void;
+  onForward?: (message: Message) => void;
+  onPin?: (message: Message) => void;
+  onUnpin?: (message: Message) => void;
+  onSave?: (message: Message) => void;
+  onUnsave?: (message: Message) => void;
+  onJumpToMessage?: (messageId: string, chatId?: string) => void;
   onReact?: (messageId: string, emoji: string) => void;
   onDelete?: (messageId: string) => void;
-  onPollVote?: (messageId: string, optionId: string) => void;
+  onPollVote?: (messageId: string, optionIds: string[]) => void;
+  onClosePoll?: (messageId: string) => void;
+  onEventRsvp?: (messageId: string, status: 'going' | 'maybe' | 'declined') => void;
+  onEventCancel?: (messageId: string) => void;
+  onEventIcs?: (messageId: string) => void;
+  highlighted?: boolean;
 }
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const URL_REGEX = /(https?:\/\/[^\s<>"']+)/gi;
 const TRAILING_URL_PUNCTUATION = /[),.!?:;]+$/;
+
+function formatFileSize(size?: number) {
+  if (!size || size <= 0) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function documentTypeLabel(mimeType?: string) {
+  if (!mimeType) return 'Document';
+  const subtype = mimeType.split('/')[1]?.split(';')[0];
+  return subtype ? subtype.toUpperCase() : 'Document';
+}
 
 function splitTrailingPunctuation(url: string) {
   const punctuation = url.match(TRAILING_URL_PUNCTUATION)?.[0] || '';
@@ -72,6 +96,39 @@ function LinkifiedText({ text, isSentByMe }: { text: string; isSentByMe: boolean
   );
 }
 
+function MentionedText({ message, isSentByMe }: { message: Message; isSentByMe: boolean }) {
+  const mentions = [...(message.mentions || [])].sort((a, b) => a.start - b.start);
+  if (mentions.length === 0) return <LinkifiedText text={message.body} isSentByMe={isSentByMe} />;
+  const parts: Array<{ text: string; mention?: boolean; key: string }> = [];
+  let cursor = 0;
+  mentions.forEach((mention, index) => {
+    if (mention.start < cursor || mention.start + mention.length > message.body.length) return;
+    if (mention.start > cursor) {
+      parts.push({ text: message.body.slice(cursor, mention.start), key: `text-${index}` });
+    }
+    parts.push({ text: message.body.slice(mention.start, mention.start + mention.length), mention: true, key: `mention-${mention.userId}-${index}` });
+    cursor = mention.start + mention.length;
+  });
+  if (cursor < message.body.length) parts.push({ text: message.body.slice(cursor), key: 'tail' });
+
+  return (
+    <p className="whitespace-pre-wrap break-words text-sm">
+      {parts.map((part) => part.mention ? (
+        <span
+          key={part.key}
+          className={`rounded px-1 font-semibold ${
+            isSentByMe ? 'bg-white/10 text-white' : 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200'
+          }`}
+        >
+          {part.text}
+        </span>
+      ) : (
+        <span key={part.key}>{part.text}</span>
+      ))}
+    </p>
+  );
+}
+
 export default function MessageBubble({
   message,
   isSentByMe,
@@ -80,9 +137,20 @@ export default function MessageBubble({
   senderName,
   senderAvatarUrl,
   onReply,
+  onForward,
+  onPin,
+  onUnpin,
+  onSave,
+  onUnsave,
+  onJumpToMessage,
   onReact,
   onDelete,
   onPollVote,
+  onClosePoll,
+  onEventRsvp,
+  onEventCancel,
+  onEventIcs,
+  highlighted = false,
 }: MessageBubbleProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
@@ -126,7 +194,7 @@ export default function MessageBubble({
     }
 
     const menuWidth = 160;
-    const menuHeight = 132;
+    const menuHeight = 168;
     const gutter = 8;
     const top =
       window.innerHeight - rect.bottom >= menuHeight + gutter
@@ -144,7 +212,7 @@ export default function MessageBubble({
   const renderMedia = () => {
     if (!message.media) return null;
 
-    const { type, url, thumbnailUrl, duration, fileName, mimeType } = message.media;
+    const { type, url, thumbnailUrl, duration, fileName, mimeType, size } = message.media;
     const mediaUrl = normalizeMediaUrl(url);
     const previewUrl = normalizeMediaUrl(thumbnailUrl) || mediaUrl;
 
@@ -179,27 +247,59 @@ export default function MessageBubble({
     }
 
     if (type === 'document') {
+      const fileSize = formatFileSize(size);
+      const typeLabel = documentTypeLabel(mimeType);
+      const metadata = [typeLabel, fileSize].filter(Boolean).join(' · ');
+
       return (
         <a
           href={mediaUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mb-1 flex items-center gap-2 rounded-lg bg-gray-100 p-2 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600"
+          className={`mb-1 flex w-full max-w-[min(20rem,calc(100vw-7rem))] items-center gap-3 rounded-xl border p-3 text-left transition ${
+            isSentByMe
+              ? 'border-slate-600 bg-slate-800 text-slate-50 hover:bg-slate-700 dark:border-teal-400/30 dark:bg-teal-700 dark:text-white dark:hover:bg-teal-500'
+              : 'border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:bg-slate-900'
+          }`}
         >
-          <svg
-            className="h-6 w-6 text-gray-600 dark:text-slate-300"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+          <span
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+              isSentByMe
+                ? 'bg-white/10 text-white'
+                : 'bg-white text-slate-700 shadow-sm dark:bg-slate-800 dark:text-slate-200'
+            }`}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-            />
-          </svg>
-          <span className="text-sm">{fileName || 'Document'}</span>
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M7 21h10a2 2 0 002-2V9.5L12.5 5H7a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5v5h5" />
+            </svg>
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold leading-5">
+              {fileName || 'Document'}
+            </span>
+            <span
+              className={`mt-0.5 block truncate text-xs ${
+                isSentByMe ? 'text-slate-300 dark:text-teal-50/80' : 'text-slate-500 dark:text-slate-400'
+              }`}
+            >
+              {metadata || 'Open document'}
+            </span>
+          </span>
+          <span
+            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+              isSentByMe
+                ? 'bg-white/10 text-white'
+                : 'bg-white text-teal-700 shadow-sm dark:bg-slate-800 dark:text-teal-300'
+            }`}
+          >
+            Open
+          </span>
         </a>
       );
     }
@@ -210,25 +310,50 @@ export default function MessageBubble({
   const renderPoll = () => {
     if (!message.poll) return null;
 
-    const totalVotes = message.poll.options.reduce(
-      (total, option) => total + option.votes.length,
-      0
-    );
+    const currentVote = message.poll.currentUserVote || [];
+    const totalVotes = message.poll.options.reduce((total, option) => total + (option.voteCount ?? option.votes.length), 0);
+    const closed = Boolean(message.poll.closed);
+
+    const nextVote = (optionId: string) => {
+      if (message.poll?.allowMultiple) {
+        return currentVote.includes(optionId)
+          ? currentVote.filter((id) => id !== optionId)
+          : [...currentVote, optionId];
+      }
+      return [optionId];
+    };
 
     return (
       <div className="mb-1 min-w-[220px] space-y-2">
-        <p className="text-sm font-semibold">Poll: {message.poll.question}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">Poll: {message.poll.question}</p>
+            <p className="text-[11px] opacity-70">
+              {closed ? 'Closed' : message.poll.allowMultiple ? 'Multiple choice' : 'Single choice'}
+            </p>
+          </div>
+          {isSentByMe && !closed && onClosePoll && (
+            <button
+              type="button"
+              onClick={() => onClosePoll(message._id)}
+              className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold opacity-80 hover:opacity-100 dark:border-slate-600"
+            >
+              Close
+            </button>
+          )}
+        </div>
         <div className="space-y-1.5">
           {message.poll.options.map((option) => {
-            const selected = option.votes.includes(currentUserId);
-            const percent = totalVotes ? Math.round((option.votes.length / totalVotes) * 100) : 0;
+            const selected = currentVote.includes(option.id) || option.votes.includes(currentUserId || '');
+            const count = option.voteCount ?? option.votes.length;
+            const percent = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
 
             return (
               <button
                 key={option.id}
                 type="button"
-                onClick={() => onPollVote?.(message._id, option.id)}
-                disabled={!onPollVote || message.poll?.closed}
+                onClick={() => onPollVote?.(message._id, nextVote(option.id))}
+                disabled={!onPollVote || closed || (!message.poll?.allowVoteChanges && currentVote.length > 0)}
                 className={`relative w-full overflow-hidden rounded-xl border px-3 py-2 text-left text-sm transition ${
                   selected
                     ? 'border-teal-200 bg-teal-50 text-teal-900 dark:border-teal-500/50 dark:bg-teal-500/20 dark:text-white'
@@ -242,13 +367,18 @@ export default function MessageBubble({
                 <span className="relative flex items-center justify-between gap-3">
                   <span>{option.text}</span>
                   <span className="text-xs opacity-75">
-                    {option.votes.length} vote{option.votes.length === 1 ? '' : 's'}
+                    {count} vote{count === 1 ? '' : 's'}
                   </span>
                 </span>
               </button>
             );
           })}
         </div>
+        {message.poll.closesAt && !closed && (
+          <p className="text-[11px] opacity-70">
+            Closes {new Date(message.poll.closesAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+          </p>
+        )}
       </div>
     );
   };
@@ -271,11 +401,31 @@ export default function MessageBubble({
   const renderEvent = () => {
     if (!message.event) return null;
 
-    const startsAt = new Date(message.event.startsAt);
+    const startsAt = new Date(message.event.startAt || message.event.startsAt);
+    const endAt = message.event.endAt ? new Date(message.event.endAt) : null;
+    const cancelled = Boolean(message.event.cancelledAt);
+    const rsvpCounts = (message.event.rsvps || []).reduce<Record<string, number>>((counts, rsvp) => {
+      counts[rsvp.status] = (counts[rsvp.status] || 0) + 1;
+      return counts;
+    }, {});
 
     return (
       <div className="mb-1 min-w-[220px] rounded-xl border border-slate-200 bg-white/80 p-3 text-sm dark:border-slate-600 dark:bg-slate-900/50">
-        <p className="font-semibold">{message.event.title}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-semibold">{message.event.title}</p>
+            {cancelled && <p className="mt-0.5 text-xs font-semibold text-rose-500">Cancelled</p>}
+          </div>
+          {isSentByMe && !cancelled && onEventCancel && (
+            <button
+              type="button"
+              onClick={() => onEventCancel(message._id)}
+              className="rounded-lg border border-rose-200 px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
         <p className="mt-1 text-xs opacity-80">
           {Number.isNaN(startsAt.getTime())
             ? message.event.startsAt
@@ -283,6 +433,9 @@ export default function MessageBubble({
                 dateStyle: 'medium',
                 timeStyle: 'short',
               })}
+          {endAt && !Number.isNaN(endAt.getTime())
+            ? ` - ${endAt.toLocaleTimeString([], { timeStyle: 'short' })}`
+            : ''}
         </p>
         {message.event.location && (
           <p className="mt-1 text-xs opacity-80">{message.event.location}</p>
@@ -292,6 +445,42 @@ export default function MessageBubble({
             {message.event.description}
           </p>
         )}
+        {message.event.meetingUrl && (
+          <a
+            href={message.event.meetingUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 block break-all text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+          >
+            {message.event.meetingUrl}
+          </a>
+        )}
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {(['going', 'maybe', 'declined'] as const).map((status) => (
+            <button
+              key={status}
+              type="button"
+              disabled={cancelled || !onEventRsvp}
+              onClick={() => onEventRsvp?.(message._id, status)}
+              className={`rounded-lg border px-2 py-1 text-[11px] font-semibold capitalize ${
+                message.event?.currentUserRsvp === status
+                  ? 'border-teal-300 bg-teal-50 text-teal-700 dark:border-teal-500 dark:bg-teal-500/20 dark:text-teal-200'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
+              }`}
+            >
+              {status} {rsvpCounts[status] || 0}
+            </button>
+          ))}
+          {onEventIcs && (
+            <button
+              type="button"
+              onClick={() => onEventIcs(message._id)}
+              className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Calendar
+            </button>
+          )}
+        </div>
       </div>
     );
   };
@@ -299,10 +488,28 @@ export default function MessageBubble({
   const renderReplyPreview = () => {
     if (!message.replyTo) return null;
 
-    return (
+    const preview = (
+      <>
+        <p className="text-xs font-semibold text-gray-600 dark:text-slate-300">
+          {message.replyTo.senderDisplayName || 'Replying to'}
+        </p>
+        <p className="truncate text-sm text-gray-700 dark:text-slate-200">
+          {message.replyTo.snippet || message.replyTo.body || message.replyTo.attachmentLabel || 'Message'}
+        </p>
+      </>
+    );
+
+    return onJumpToMessage && !message.replyTo.unavailable ? (
+      <button
+        type="button"
+        onClick={() => onJumpToMessage(message.replyTo!.messageId, message.chatId)}
+        className="mb-2 w-full rounded border-l-4 border-gray-400 bg-gray-100 py-1 pl-2 pr-2 text-left transition hover:bg-gray-200 dark:border-slate-500 dark:bg-slate-700/70 dark:hover:bg-slate-700"
+      >
+        {preview}
+      </button>
+    ) : (
       <div className="mb-2 rounded border-l-4 border-gray-400 bg-gray-100 py-1 pl-2 dark:border-slate-500 dark:bg-slate-700/70">
-        <p className="text-xs font-semibold text-gray-600 dark:text-slate-300">Replying to</p>
-        <p className="truncate text-sm text-gray-700 dark:text-slate-200">{message.replyTo.body}</p>
+        {preview}
       </div>
     );
   };
@@ -338,7 +545,12 @@ export default function MessageBubble({
   };
 
   return (
-    <div className={`flex gap-2 mb-4 ${isSentByMe ? 'flex-row-reverse' : 'flex-row'}`}>
+    <div
+      data-message-id={message._id}
+      className={`mb-4 flex gap-2 rounded-xl transition-colors ${
+        isSentByMe ? 'flex-row-reverse' : 'flex-row'
+      } ${highlighted ? 'bg-amber-100/75 px-2 py-2 dark:bg-amber-400/20' : ''}`}
+    >
       {/* Avatar */}
       {showAvatar && !isSentByMe && (
         <div className="flex-shrink-0">
@@ -445,6 +657,44 @@ export default function MessageBubble({
                     Reply
                   </button>
                 )}
+                {onForward && (
+                  <button
+                    onClick={() => {
+                      onForward(message);
+                      setShowMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M14 5v4C7 10 4 15 3 20c2.5-3.5 6-5.1 11-5.1V19l7-7-7-7z" />
+                    </svg>
+                    Forward
+                  </button>
+                )}
+                {(onPin || onUnpin) && (
+                  <button
+                    onClick={() => {
+                      if ((message as any).isPinned) onUnpin?.(message);
+                      else onPin?.(message);
+                      setShowMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    {(message as any).isPinned ? 'Unpin message' : 'Pin message'}
+                  </button>
+                )}
+                {(onSave || onUnsave) && (
+                  <button
+                    onClick={() => {
+                      if ((message as any).isSaved) onUnsave?.(message);
+                      else onSave?.(message);
+                      setShowMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    {(message as any).isSaved ? 'Remove from Saved' : 'Save message'}
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(message.body);
@@ -456,6 +706,15 @@ export default function MessageBubble({
                     <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
                   </svg>
                   Copy
+                </button>
+                <button
+                  onClick={() => {
+                    void createReport({ targetType: 'message', targetId: message._id, reason: 'Message report' });
+                    setShowMenu(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-gray-100 dark:text-rose-400 dark:hover:bg-slate-700"
+                >
+                  Report message
                 </button>
                 {isSentByMe && onDelete && (
                   <button
@@ -483,12 +742,26 @@ export default function MessageBubble({
             }`}
           >
             {renderReplyPreview()}
+            {message.forwarded?.isForwarded && (
+              <p className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${
+                isSentByMe ? 'text-slate-300 dark:text-teal-50/80' : 'text-slate-500 dark:text-slate-400'
+              }`}>
+                Forwarded
+              </p>
+            )}
+            {message.momentReply?.isMomentReply && (
+              <p className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${
+                isSentByMe ? 'text-slate-300 dark:text-teal-50/80' : 'text-slate-500 dark:text-slate-400'
+              }`}>
+                {message.momentReply.label || 'Replied to a Moment'}
+              </p>
+            )}
             {renderMedia()}
             {renderPoll()}
             {renderSticker()}
             {renderEvent()}
             {message.body && !message.poll && !message.sticker && !message.event && (
-              <LinkifiedText text={message.body} isSentByMe={isSentByMe} />
+              <MentionedText message={message} isSentByMe={isSentByMe} />
             )}
 
             {/* Time and status */}

@@ -1,8 +1,10 @@
 import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
-import { asyncHandler } from '@repo/utils';
+import { asyncHandler, createEvent } from '@repo/utils';
+import { EventType, ChatArchiveEvent } from '@repo/types';
 import { getChatsCollection } from '../models/chat';
 import { getUserChatPreferencesCollection } from '../models/user-chat-preferences';
+import { getPubSub } from '../pubsub';
 
 /**
  * Pin a chat for the authenticated user
@@ -32,7 +34,7 @@ export const pinChat = asyncHandler(async (req: Request, res: Response) => {
 
   // Verify chat exists and user is a participant
   const chatsCollection = getChatsCollection();
-  const chat = await chatsCollection.findOne({ _id: chatId });
+  const chat = await chatsCollection.findOne({ _id: chatId, deletedAt: { $exists: false } });
 
   if (!chat) {
     return res.status(404).json({
@@ -105,6 +107,25 @@ export const unpinChat = asyncHandler(async (req: Request, res: Response) => {
   const chatId = new ObjectId(id);
   const userObjectId = new ObjectId(userId);
 
+  const chatsCollection = getChatsCollection();
+  const chat = await chatsCollection.findOne({ _id: chatId, deletedAt: { $exists: false } });
+  if (!chat) {
+    return res.status(404).json({
+      error: 'Not Found',
+      message: 'Chat not found',
+    });
+  }
+
+  const isParticipant = chat.participants.some((participantId) =>
+    participantId.equals(userObjectId)
+  );
+  if (!isParticipant) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'You are not a participant in this chat',
+    });
+  }
+
   // Update user chat preferences
   const preferencesCollection = getUserChatPreferencesCollection();
   await preferencesCollection.updateOne(
@@ -151,7 +172,7 @@ export const archiveChat = asyncHandler(async (req: Request, res: Response) => {
 
   // Verify chat exists and user is a participant
   const chatsCollection = getChatsCollection();
-  const chat = await chatsCollection.findOne({ _id: chatId });
+  const chat = await chatsCollection.findOne({ _id: chatId, deletedAt: { $exists: false } });
 
   if (!chat) {
     return res.status(404).json({
@@ -171,6 +192,13 @@ export const archiveChat = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
+  if (chat.endedAt || (chat.expiresAt && chat.expiresAt <= new Date())) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'This chat can no longer be archived',
+    });
+  }
+
   // Update or create user chat preferences
   const preferencesCollection = getUserChatPreferencesCollection();
   const now = new Date();
@@ -180,6 +208,7 @@ export const archiveChat = asyncHandler(async (req: Request, res: Response) => {
     {
       $set: {
         archived: true,
+        archivedAt: now,
         updatedAt: now,
       },
       $setOnInsert: {
@@ -191,6 +220,14 @@ export const archiveChat = asyncHandler(async (req: Request, res: Response) => {
     },
     { upsert: true }
   );
+  try {
+    await getPubSub().publish(createEvent<ChatArchiveEvent>(EventType.CHAT_ARCHIVED, {
+      chatId: chatId.toString(),
+      userId,
+      archived: true,
+      archivedAt: now.toISOString(),
+    }));
+  } catch {}
 
   return res.status(200).json({
     success: true,
@@ -224,6 +261,32 @@ export const unarchiveChat = asyncHandler(async (req: Request, res: Response) =>
   const chatId = new ObjectId(id);
   const userObjectId = new ObjectId(userId);
 
+  const chatsCollection = getChatsCollection();
+  const chat = await chatsCollection.findOne({ _id: chatId, deletedAt: { $exists: false } });
+  if (!chat) {
+    return res.status(404).json({
+      error: 'Not Found',
+      message: 'Chat not found',
+    });
+  }
+
+  const isParticipant = chat.participants.some((participantId) =>
+    participantId.equals(userObjectId)
+  );
+  if (!isParticipant) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'You are not a participant in this chat',
+    });
+  }
+
+  if (chat.endedAt || (chat.expiresAt && chat.expiresAt <= new Date())) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'This chat can no longer be unarchived',
+    });
+  }
+
   // Update user chat preferences
   const preferencesCollection = getUserChatPreferencesCollection();
   await preferencesCollection.updateOne(
@@ -233,8 +296,16 @@ export const unarchiveChat = asyncHandler(async (req: Request, res: Response) =>
         archived: false,
         updatedAt: new Date(),
       },
+      $unset: { archivedAt: '' },
     }
   );
+  try {
+    await getPubSub().publish(createEvent<ChatArchiveEvent>(EventType.CHAT_UNARCHIVED, {
+      chatId: chatId.toString(),
+      userId,
+      archived: false,
+    }));
+  } catch {}
 
   return res.status(200).json({
     success: true,

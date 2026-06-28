@@ -110,7 +110,7 @@ export async function reactToMessage(
       return;
     }
 
-    const apiMessage = serializeMessage(result);
+    const apiMessage = serializeMessage(result, undefined, userObjectId);
 
     try {
       const pubsub = getPubSub();

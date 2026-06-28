@@ -58,7 +58,8 @@ describe('MessageList', () => {
         isGroupChat={false}
       />
     );
-    expect(screen.getByText('No messages yet. Start the conversation!')).toBeInTheDocument();
+    expect(screen.getByText('No messages yet')).toBeInTheDocument();
+    expect(screen.getByText('Start the conversation to see insights appear.')).toBeInTheDocument();
   });
 
   it('renders messages', () => {

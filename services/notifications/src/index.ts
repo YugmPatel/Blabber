@@ -4,6 +4,7 @@ import app from './app';
 import { connectToDatabase, closeDatabase } from './db';
 import { createPushSubscriptionIndexes } from './models/push-subscription';
 import { createNotificationPreferenceIndexes } from './models/notification-preferences';
+import { validatePushStartupConfig } from './push-ops';
 
 const config = loadCommonConfig();
 
@@ -11,6 +12,7 @@ async function startServer() {
   try {
     // Connect to database
     await connectToDatabase();
+    validatePushStartupConfig();
 
     // Create indexes
     await createPushSubscriptionIndexes();

@@ -42,10 +42,11 @@ export async function createPushSubscription(
 
 export async function upsertPushSubscription(
   subscription: Omit<PushSubscription, '_id' | 'createdAt' | 'updatedAt'>
-): Promise<PushSubscription> {
+): Promise<PushSubscription & { wasCreated: boolean }> {
   const db = getDatabase();
   const collection = db.collection<PushSubscription>('pushSubscriptions');
   const now = new Date();
+  const existing = await collection.findOne({ endpoint: subscription.endpoint });
 
   const result = await collection.findOneAndUpdate(
     { endpoint: subscription.endpoint },
@@ -68,7 +69,7 @@ export async function upsertPushSubscription(
     throw new Error('Failed to upsert push subscription');
   }
 
-  return result;
+  return { ...result, wasCreated: !existing };
 }
 
 export async function findPushSubscriptionsByUserId(userId: ObjectId): Promise<PushSubscription[]> {

@@ -7,6 +7,8 @@ vi.mock('axios');
 
 // Mock apiClient - must be defined inline to avoid hoisting issues
 vi.mock('@/api/client', () => ({
+  API_URL: 'http://localhost:3000',
+  getAccessToken: vi.fn(() => 'test-token'),
   apiClient: {
     post: vi.fn(),
     get: vi.fn(),
@@ -16,8 +18,6 @@ vi.mock('@/api/client', () => ({
   },
 }));
 
-// Import after mocking
-import { apiClient } from '@/api/client';
 import { useFileUpload } from './useFileUpload';
 
 describe('useFileUpload', () => {
@@ -26,16 +26,17 @@ describe('useFileUpload', () => {
   });
 
   it('uploads file successfully', async () => {
-    const mockPresignResponse = {
+    const mockUploadResponse = {
       data: {
-        uploadUrl: 'https://s3.amazonaws.com/bucket/key?signature=xyz',
         mediaId: 'media-123',
-        expiresIn: 300,
+        publicUrl: 'https://cdn.example.com/test.png',
+        fileName: 'test.png',
+        mimeType: 'image/png',
+        size: 12,
       },
     };
 
-    vi.mocked(apiClient.post).mockResolvedValue(mockPresignResponse);
-    vi.mocked(axios.put).mockResolvedValue({ data: {} });
+    vi.mocked(axios.post).mockResolvedValue(mockUploadResponse);
 
     const { result } = renderHook(() => useFileUpload());
 
@@ -45,38 +46,25 @@ describe('useFileUpload', () => {
     // Should return media ID
     expect(mediaId).toBe('media-123');
 
-    // Should request presigned URL
-    expect(apiClient.post).toHaveBeenCalledWith('/api/media/presign', {
-      fileName: 'test.png',
-      fileType: 'image/png',
-      fileSize: file.size,
-    });
-
-    // Should upload to S3
-    expect(axios.put).toHaveBeenCalledWith(
-      'https://s3.amazonaws.com/bucket/key?signature=xyz',
-      file,
+    expect(axios.post).toHaveBeenCalledWith(
+      'http://localhost:3000/api/media/upload',
+      expect.any(FormData),
       expect.objectContaining({
-        headers: {
-          'Content-Type': 'image/png',
-        },
+        headers: { Authorization: 'Bearer test-token' },
+        withCredentials: true,
+        onUploadProgress: expect.any(Function),
       })
     );
   });
 
   it('calls onUploadProgress callback', async () => {
-    const mockPresignResponse = {
+    const mockUploadResponse = {
       data: {
-        uploadUrl: 'https://s3.amazonaws.com/bucket/key',
         mediaId: 'media-123',
-        expiresIn: 300,
       },
     };
 
-    vi.mocked(apiClient.post).mockResolvedValue(mockPresignResponse);
-
-    // Mock axios.put to simulate progress
-    vi.mocked(axios.put).mockImplementation((_url, _data, config) => {
+    vi.mocked(axios.post).mockImplementation((_url, _data, config) => {
       // Simulate progress callback
       if (config?.onUploadProgress) {
         config.onUploadProgress({
@@ -84,7 +72,7 @@ describe('useFileUpload', () => {
           total: 100,
         } as any);
       }
-      return Promise.resolve({ data: {} });
+      return Promise.resolve(mockUploadResponse);
     });
 
     const { result } = renderHook(() => useFileUpload());
@@ -92,10 +80,9 @@ describe('useFileUpload', () => {
     const file = new File(['test content'], 'test.png', { type: 'image/png' });
     await result.current.uploadFile(file);
 
-    // Verify axios.put was called with onUploadProgress
-    expect(axios.put).toHaveBeenCalledWith(
+    expect(axios.post).toHaveBeenCalledWith(
       expect.any(String),
-      expect.any(File),
+      expect.any(FormData),
       expect.objectContaining({
         onUploadProgress: expect.any(Function),
       })
@@ -104,7 +91,7 @@ describe('useFileUpload', () => {
 
   it('handles presign request error', async () => {
     const mockError = new Error('Failed to get presigned URL');
-    vi.mocked(apiClient.post).mockRejectedValue(mockError);
+    vi.mocked(axios.post).mockRejectedValue(mockError);
 
     const { result } = renderHook(() => useFileUpload());
 
@@ -115,17 +102,8 @@ describe('useFileUpload', () => {
     expect(mediaId).toBeNull();
   });
 
-  it('handles S3 upload error', async () => {
-    const mockPresignResponse = {
-      data: {
-        uploadUrl: 'https://s3.amazonaws.com/bucket/key',
-        mediaId: 'media-123',
-        expiresIn: 300,
-      },
-    };
-
-    vi.mocked(apiClient.post).mockResolvedValue(mockPresignResponse);
-    vi.mocked(axios.put).mockRejectedValue(new Error('S3 upload failed'));
+  it('handles upload error', async () => {
+    vi.mocked(axios.post).mockRejectedValue(new Error('Upload failed'));
 
     const { result } = renderHook(() => useFileUpload());
 
@@ -137,16 +115,13 @@ describe('useFileUpload', () => {
   });
 
   it('resets state when reset is called', async () => {
-    const mockPresignResponse = {
+    const mockUploadResponse = {
       data: {
-        uploadUrl: 'https://s3.amazonaws.com/bucket/key',
         mediaId: 'media-123',
-        expiresIn: 300,
       },
     };
 
-    vi.mocked(apiClient.post).mockResolvedValue(mockPresignResponse);
-    vi.mocked(axios.put).mockResolvedValue({ data: {} });
+    vi.mocked(axios.post).mockResolvedValue(mockUploadResponse);
 
     const { result } = renderHook(() => useFileUpload());
 
@@ -162,7 +137,7 @@ describe('useFileUpload', () => {
   });
 
   it('handles non-Error exceptions', async () => {
-    vi.mocked(apiClient.post).mockRejectedValue('String error');
+    vi.mocked(axios.post).mockRejectedValue('String error');
 
     const { result } = renderHook(() => useFileUpload());
 
@@ -173,23 +148,20 @@ describe('useFileUpload', () => {
   });
 
   it('completes upload successfully', async () => {
-    const mockPresignResponse = {
+    const mockUploadResponse = {
       data: {
-        uploadUrl: 'https://s3.amazonaws.com/bucket/key',
         mediaId: 'media-123',
-        expiresIn: 300,
       },
     };
 
-    vi.mocked(apiClient.post).mockResolvedValue(mockPresignResponse);
-    vi.mocked(axios.put).mockImplementation((_url, _data, config) => {
+    vi.mocked(axios.post).mockImplementation((_url, _data, config) => {
       if (config?.onUploadProgress) {
         config.onUploadProgress({
           loaded: 100,
           total: 100,
         } as any);
       }
-      return Promise.resolve({ data: {} });
+      return Promise.resolve(mockUploadResponse);
     });
 
     const { result } = renderHook(() => useFileUpload());
@@ -201,16 +173,13 @@ describe('useFileUpload', () => {
   });
 
   it('uploads different file types', async () => {
-    const mockPresignResponse = {
+    const mockUploadResponse = {
       data: {
-        uploadUrl: 'https://s3.amazonaws.com/bucket/key',
         mediaId: 'media-123',
-        expiresIn: 300,
       },
     };
 
-    vi.mocked(apiClient.post).mockResolvedValue(mockPresignResponse);
-    vi.mocked(axios.put).mockResolvedValue({ data: {} });
+    vi.mocked(axios.post).mockResolvedValue(mockUploadResponse);
 
     const { result } = renderHook(() => useFileUpload());
 
@@ -220,22 +189,14 @@ describe('useFileUpload', () => {
     });
     await result.current.uploadFile(pdfFile);
 
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/api/media/presign',
-      expect.objectContaining({
-        fileType: 'application/pdf',
-      })
-    );
+    let formData = vi.mocked(axios.post).mock.calls[0][1] as FormData;
+    expect(formData.get('fileType')).toBe('application/pdf');
 
     // Test audio upload
     const audioFile = new File(['audio content'], 'audio.mp3', { type: 'audio/mpeg' });
     await result.current.uploadFile(audioFile);
 
-    expect(apiClient.post).toHaveBeenCalledWith(
-      '/api/media/presign',
-      expect.objectContaining({
-        fileType: 'audio/mpeg',
-      })
-    );
+    formData = vi.mocked(axios.post).mock.calls[1][1] as FormData;
+    expect(formData.get('fileType')).toBe('audio/mpeg');
   });
 });

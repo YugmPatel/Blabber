@@ -5,12 +5,21 @@ export interface Media {
   _id?: ObjectId;
   userId: ObjectId;
   fileName: string;
+  originalFileName?: string;
   fileType: string;
+  detectedFileType?: string;
   fileSize: number;
   s3Key: string;
   url: string;
   storage?: 's3' | 'local';
   localPath?: string;
+  status?: 'pending' | 'scanning' | 'approved' | 'rejected' | 'quarantined' | 'deleted';
+  scanMode?: 'clamav' | 'mock' | 'disabled';
+  scanResult?: 'clean' | 'infected' | 'error' | 'skipped';
+  scanErrorCategory?: string;
+  approvedAt?: Date;
+  rejectedAt?: Date;
+  quarantinedAt?: Date;
   createdAt: Date;
   uploadedAt?: Date;
 }
@@ -25,4 +34,6 @@ export async function createMediaIndexes(): Promise<void> {
 
   await collection.createIndex({ userId: 1 });
   await collection.createIndex({ createdAt: -1 });
+  await collection.createIndex({ status: 1, createdAt: 1 });
+  await collection.createIndex({ approvedAt: -1 }, { sparse: true });
 }

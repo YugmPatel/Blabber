@@ -12,6 +12,8 @@ export interface UserSettings {
   incomingCallsEnabled: boolean;
   themePreference: ThemePreference;
   chatIntelligenceEnabled: boolean;
+  momentArchiveEnabled: boolean;
+  timezone?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,6 +25,8 @@ export const DEFAULT_USER_SETTINGS = {
   incomingCallsEnabled: true,
   themePreference: 'system' as ThemePreference,
   chatIntelligenceEnabled: true,
+  momentArchiveEnabled: true,
+  timezone: 'UTC',
 };
 
 export function getUserSettingsCollection(): Collection<UserSettings> {

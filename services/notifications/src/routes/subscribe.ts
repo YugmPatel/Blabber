@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { ObjectId } from 'mongodb';
+import { createHash } from 'crypto';
 import { logger } from '@repo/utils';
 import { upsertPushSubscription } from '../models/push-subscription';
 
@@ -17,6 +18,10 @@ const subscribeSchema = z.object({
     }),
   }),
 });
+
+function endpointHash(endpoint: string) {
+  return createHash('sha256').update(endpoint).digest('hex').slice(0, 16);
+}
 
 export async function subscribe(req: Request, res: Response) {
   try {
@@ -43,14 +48,15 @@ export async function subscribe(req: Request, res: Response) {
     logger.info(
       {
         userId,
-        endpoint: subscription.endpoint,
+        endpointHash: endpointHash(subscription.endpoint),
       },
       'Push subscription upserted'
     );
 
-    return res.status(201).json({
+    return res.status(pushSubscription.wasCreated ? 201 : 200).json({
       success: true,
       subscriptionId: pushSubscription._id,
+      message: pushSubscription.wasCreated ? 'Subscription created' : 'Subscription already exists',
     });
   } catch (error: any) {
     logger.error({ error: error.message }, 'Failed to create push subscription');

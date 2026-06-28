@@ -3,6 +3,9 @@ import request from 'supertest';
 import { ObjectId } from 'mongodb';
 import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
+import { seedChatUsers } from '../test-fixtures';
+
+const mockUserId = new ObjectId();
 
 // Mock auth middleware
 vi.mock('@repo/utils', async () => {
@@ -10,7 +13,7 @@ vi.mock('@repo/utils', async () => {
   return {
     ...actual,
     createAuthMiddleware: () => (req: any, _res: any, next: any) => {
-      req.user = { userId: new ObjectId().toString() };
+      req.user = { userId: mockUserId.toString() };
       next();
     },
   };
@@ -21,6 +24,8 @@ describe('POST / - Create Chat', () => {
     await connectToDatabase();
     const db = getDatabase();
     await db.collection('chats').deleteMany({});
+    await db.collection('users').deleteMany({});
+    await seedChatUsers([mockUserId]);
   });
 
   afterEach(async () => {
@@ -29,14 +34,14 @@ describe('POST / - Create Chat', () => {
 
   describe('Direct Chat Creation', () => {
     it('should create a direct chat with exactly 2 participants', async () => {
-      const userId1 = new ObjectId().toString();
-      const userId2 = new ObjectId().toString();
+      const userId2 = new ObjectId();
+      await seedChatUsers([userId2]);
 
       const response = await request(app)
         .post('/')
         .send({
           type: 'direct',
-          participantIds: [userId1, userId2],
+          participantIds: [mockUserId.toString(), userId2.toString()],
         });
 
       expect(response.status).toBe(201);
@@ -82,14 +87,15 @@ describe('POST / - Create Chat', () => {
 
   describe('Group Chat Creation', () => {
     it('should create a group chat with title and set creator as admin', async () => {
-      const userId1 = new ObjectId().toString();
-      const userId2 = new ObjectId().toString();
+      const userId1 = new ObjectId();
+      const userId2 = new ObjectId();
+      await seedChatUsers([userId1, userId2]);
 
       const response = await request(app)
         .post('/')
         .send({
           type: 'group',
-          participantIds: [userId1, userId2],
+          participantIds: [userId1.toString(), userId2.toString()],
           title: 'Test Group',
         });
 
@@ -104,14 +110,15 @@ describe('POST / - Create Chat', () => {
     });
 
     it('should create a group chat with avatarUrl', async () => {
-      const userId1 = new ObjectId().toString();
-      const userId2 = new ObjectId().toString();
+      const userId1 = new ObjectId();
+      const userId2 = new ObjectId();
+      await seedChatUsers([userId1, userId2]);
 
       const response = await request(app)
         .post('/')
         .send({
           type: 'group',
-          participantIds: [userId1, userId2],
+          participantIds: [userId1.toString(), userId2.toString()],
           title: 'Test Group',
           avatarUrl: 'https://example.com/avatar.jpg',
         });

@@ -12,6 +12,10 @@ interface User {
   about?: string;
   role?: string;
   department?: string;
+  authProvider?: 'password' | 'google' | 'both';
+  emailVerified?: boolean;
+  deactivatedAt?: string;
+  deletionScheduledAt?: string;
 }
 
 interface AuthContextType {

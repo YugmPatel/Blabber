@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import bcrypt from 'bcrypt';
 import { ObjectId } from 'mongodb';
 import { asyncHandler, UnauthorizedError } from '@repo/utils';
-import { getDeviceSessionsCollection } from '../models/device-session';
+import { compareRefreshToken, getDeviceSessionsCollection } from '../models/device-session';
 import { verifyRefreshToken } from '../utils/jwt';
 import { getRefreshCookieOptions } from '../utils/cookies';
 
@@ -26,7 +25,7 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
 
   // Find matching DeviceSession
   const deviceSessionsCollection = getDeviceSessionsCollection();
-  const sessions = await deviceSessionsCollection.find({ userId }).toArray();
+  const sessions = await deviceSessionsCollection.find({ userId, revokedAt: { $exists: false } } as any).toArray();
 
   if (sessions.length === 0) {
     throw new UnauthorizedError('Invalid refresh token');
@@ -35,7 +34,7 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
   // Find the session that matches the refresh token
   let matchingSession = null;
   for (const session of sessions) {
-    const isMatch = await bcrypt.compare(refreshToken, session.refreshTokenHash);
+    const isMatch = await compareRefreshToken(refreshToken, session.refreshTokenHash);
     if (isMatch) {
       matchingSession = session;
       break;

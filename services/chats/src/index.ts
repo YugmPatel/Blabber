@@ -10,7 +10,11 @@ import { createWaitingOnIndexes } from './models/chat-waiting-on';
 import { createUserChatPreferencesIndexes } from './models/user-chat-preferences';
 import { createChatReadStateIndexes } from './models/chat-read-state';
 import { createCallHistoryIndexes } from './models/call-history';
+import { createActionReminderDeliveryIndexes } from './models/action-reminder-delivery';
+import { createGroupInviteLinkIndexes } from './models/group-invite-link';
+import { createGroupModerationActivityIndexes } from './models/group-moderation-activity';
 import { initPubSub, closePubSub } from './pubsub';
+import { startActionReminderProcessor, stopActionReminderProcessor } from './action-reminders';
 
 const config = loadCommonConfig();
 
@@ -28,7 +32,11 @@ async function startServer() {
     await createUserChatPreferencesIndexes();
     await createChatReadStateIndexes();
     await createCallHistoryIndexes();
+    await createActionReminderDeliveryIndexes();
+    await createGroupInviteLinkIndexes();
+    await createGroupModerationActivityIndexes();
     initPubSub();
+    startActionReminderProcessor();
     logger.info('Database indexes created');
 
     // Start Express server
@@ -48,6 +56,7 @@ async function startServer() {
 
       server.close(async () => {
         logger.info('HTTP server closed');
+        stopActionReminderProcessor();
         await closePubSub();
         await closeDatabase();
         process.exit(0);

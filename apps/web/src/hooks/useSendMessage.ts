@@ -27,6 +27,9 @@ interface SendMessageParams {
     question: string;
     options: string[];
     allowMultiple?: boolean;
+    allowVoteChanges?: boolean;
+    showVoters?: boolean;
+    closesAt?: string;
   };
   sticker?: {
     emoji: string;
@@ -35,10 +38,16 @@ interface SendMessageParams {
   event?: {
     title: string;
     startsAt: string;
+    startAt?: string;
+    endAt?: string;
+    timezone?: string;
     location?: string;
+    meetingUrl?: string;
     description?: string;
+    reminderEnabled?: boolean;
   };
   replyToId?: string;
+  mentions?: Array<{ userId: string; start: number; length: number; displayName?: string }>;
 }
 
 export const useSendMessage = () => {
@@ -63,6 +72,7 @@ export const useSendMessage = () => {
       sticker,
       event,
       replyToId,
+      mentions,
     }: SendMessageParams) => {
       if (!socket || !user) {
         console.error('Socket not connected or user not authenticated');
@@ -100,6 +110,10 @@ export const useSendMessage = () => {
                 votes: [],
               })),
               allowMultiple: poll.allowMultiple ?? false,
+              allowVoteChanges: poll.allowVoteChanges ?? true,
+              showVoters: poll.showVoters ?? false,
+              closesAt: poll.closesAt,
+              currentUserVote: [],
               closed: false,
             }
           : undefined,
@@ -113,6 +127,12 @@ export const useSendMessage = () => {
             }
           : undefined,
         reactions: [],
+        mentions: mentions?.map((mention) => ({
+          userId: mention.userId,
+          start: mention.start,
+          length: mention.length,
+          displayName: mention.displayName || '',
+        })),
         status: 'sent',
         deletedFor: [],
         createdAt: new Date(),
@@ -149,6 +169,7 @@ export const useSendMessage = () => {
         sticker,
         event,
         replyToId,
+        mentions: mentions?.map(({ userId, start, length }) => ({ userId, start, length })),
         clientMessageId,
         tempId,
       });

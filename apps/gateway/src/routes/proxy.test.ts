@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
+import type { Express } from 'express';
 import express, { type Request, type Response } from 'express';
-import app from '../app.js';
 
 // Mock services for testing
 const mockAuthService = express();
@@ -49,19 +49,29 @@ let chatsServer: any;
 let messagesServer: any;
 let mediaServer: any;
 let notificationsServer: any;
+let app: Express;
 
 describe('API Proxy Routes', () => {
   beforeAll(async () => {
+    process.env.AUTH_SERVICE_URL = 'http://127.0.0.1:4101';
+    process.env.USERS_SERVICE_URL = 'http://127.0.0.1:4102';
+    process.env.CHATS_SERVICE_URL = 'http://127.0.0.1:4103';
+    process.env.MESSAGES_SERVICE_URL = 'http://127.0.0.1:4104';
+    process.env.MEDIA_SERVICE_URL = 'http://127.0.0.1:4105';
+    process.env.NOTIFICATIONS_SERVICE_URL = 'http://127.0.0.1:4106';
+
     // Start mock services
-    authServer = mockAuthService.listen(3001);
-    usersServer = mockUsersService.listen(3002);
-    chatsServer = mockChatsService.listen(3003);
-    messagesServer = mockMessagesService.listen(3004);
-    mediaServer = mockMediaService.listen(3005);
-    notificationsServer = mockNotificationsService.listen(3006);
+    authServer = mockAuthService.listen(4101);
+    usersServer = mockUsersService.listen(4102);
+    chatsServer = mockChatsService.listen(4103);
+    messagesServer = mockMessagesService.listen(4104);
+    mediaServer = mockMediaService.listen(4105);
+    notificationsServer = mockNotificationsService.listen(4106);
 
     // Wait a bit for servers to start
     await new Promise((resolve) => setTimeout(resolve, 100));
+
+    app = (await import('../app.js')).default;
   });
 
   afterAll(() => {
@@ -72,6 +82,13 @@ describe('API Proxy Routes', () => {
     messagesServer?.close();
     mediaServer?.close();
     notificationsServer?.close();
+
+    delete process.env.AUTH_SERVICE_URL;
+    delete process.env.USERS_SERVICE_URL;
+    delete process.env.CHATS_SERVICE_URL;
+    delete process.env.MESSAGES_SERVICE_URL;
+    delete process.env.MEDIA_SERVICE_URL;
+    delete process.env.NOTIFICATIONS_SERVICE_URL;
   });
 
   describe('Auth Service Proxy', () => {

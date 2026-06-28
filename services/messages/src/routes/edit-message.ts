@@ -2,10 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { EventType, MessageEditedEvent, UpdateMessageDTOSchema } from '@repo/types';
 import { getMessagesCollection } from '../models/message';
+import { getDatabase } from '../db';
 import { createEvent, logger } from '@repo/utils';
 import { serializeMessage } from '../serialize-message';
 import { assertChatMembership } from '../chat-access';
 import { getPubSub } from '../pubsub';
+import { newlyMentionedUserIds, validateMentions } from '../mentions';
 
 export async function editMessage(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -34,7 +36,7 @@ export async function editMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const { body } = bodyResult.data;
+    const { body, mentions } = bodyResult.data;
 
     const collection = getMessagesCollection();
     const messageObjectId = new ObjectId(messageId);
@@ -48,7 +50,7 @@ export async function editMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    await assertChatMembership(message.chatId, userObjectId);
+    const chat = await assertChatMembership(message.chatId, userObjectId);
 
     // Verify the user is the sender
     if (!message.senderId.equals(userObjectId)) {
@@ -59,12 +61,16 @@ export async function editMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
+    const nextMentions = mentions ? await validateMentions(chat, body, mentions) : undefined;
+    const addedMentionUserIds = newlyMentionedUserIds(message.mentions, nextMentions);
+
     // Update the message
     const result = await collection.findOneAndUpdate(
       { _id: messageObjectId },
       {
         $set: {
           body,
+          mentions: nextMentions ?? [],
           editedAt: new Date(),
         },
       },
@@ -76,15 +82,30 @@ export async function editMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const apiMessage = serializeMessage(result);
+    const apiMessage = serializeMessage(result, undefined, userObjectId);
+    const db = getDatabase();
+    const [chatDoc, sender] = await Promise.all([
+      db.collection('chats').findOne({ _id: message.chatId }),
+      db.collection('users').findOne(
+        { _id: userObjectId },
+        { projection: { name: 1, username: 1 } }
+      ),
+    ]);
+    const senderName = sender?.name || sender?.username || 'Someone';
 
     try {
       const pubsub = getPubSub();
       const event = createEvent<MessageEditedEvent>(EventType.MESSAGE_EDITED, {
         messageId: apiMessage._id,
         chatId: apiMessage.chatId,
+        senderId: userId,
+        senderName,
+        chatType: chatDoc?.type,
+        chatTitle: chatDoc?.title,
+        participants: chatDoc?.participants?.map((participantId: ObjectId) => participantId.toString()),
         content: apiMessage.body,
         message: apiMessage,
+        mentions: (apiMessage.mentions || []).filter((mention: any) => addedMentionUserIds.includes(mention.userId)),
         editedAt: apiMessage.editedAt?.toISOString() ?? new Date().toISOString(),
       });
       await pubsub.publish(event);

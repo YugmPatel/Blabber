@@ -1,24 +1,39 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Users, Phone, Video, Search, MoreVertical, X, Sparkles, Crown, Shield, UserPlus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, FolderOpen, Pin, Users, Phone, Video, Search, MoreVertical, X, Sparkles, Crown, Shield, UserPlus, Trash2, Camera, Loader2 } from 'lucide-react';
 import type { Chat, User } from '@repo/types';
 import Avatar from './Avatar';
 import GroupCallModal, { createGroupCallId } from './GroupCallModal';
-import { useMessages } from '@/hooks/useMessages';
 import { useAuth } from '@/contexts/AuthContext';
-import { apiClient } from '@/api/client';
+import {
+  apiClient,
+  blockUser,
+  createReport,
+  fetchGroupModerationActivity,
+  moderationRemoveGroupMember,
+  restrictGroupMember,
+  searchChatMessages,
+  unrestrictGroupMember,
+  updateGroupModerationSettings,
+  updateGroupIntelligenceSettings,
+} from '@/api/client';
 import { useAppStore } from '@/store/app-store';
+import { useFileUpload } from '@/hooks/useFileUpload';
 import {
   useAddMember,
   useDeleteGroup,
   useDemoteMember,
   useLeaveGroup,
+  useCreateInviteLink,
   usePromoteMember,
-  useRemoveMember,
+  useInviteLinkSettings,
+  useRegenerateInviteLink,
+  useRevokeInviteLink,
   useTransferOwnership,
   useUpdateChat,
 } from '@/hooks/useChats';
+import type { InviteExpiry, InviteMaxUses } from '@/api/client';
 import { useSearchUsers } from '@/hooks/useUsers';
 
 interface ChatHeaderProps {
@@ -29,6 +44,13 @@ interface ChatHeaderProps {
   isGroupChat: boolean;
   onOpenIntelligence?: () => void;
   intelligenceEnabled?: boolean;
+  onJumpToMessage?: (messageId: string) => void;
+  pinnedCount?: number;
+  onOpenPins?: () => void;
+  onOpenShared?: () => void;
+  onArchiveChat?: () => void;
+  onUnarchiveChat?: () => void;
+  isArchived?: boolean;
 }
 
 type DisplayUser = Partial<User> & { _id: string };
@@ -48,6 +70,7 @@ function UserProfileModal({
   user: DisplayUser | null;
   onClose: () => void;
 }) {
+  const [notice, setNotice] = useState('');
   useEffect(() => {
     if (!user) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -56,6 +79,15 @@ function UserProfileModal({
   }, [user, onClose]);
 
   if (!user) return null;
+
+  const runTrustAction = async (action: () => Promise<unknown>, success: string) => {
+    try {
+      await action();
+      setNotice(success);
+    } catch (error: any) {
+      setNotice(error?.response?.data?.message || error?.message || 'Action failed');
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
@@ -91,6 +123,21 @@ function UserProfileModal({
             Close
           </button>
         </div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <button
+            onClick={() => runTrustAction(() => blockUser(user._id), 'User blocked.')}
+            className="rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Block
+          </button>
+          <button
+            onClick={() => runTrustAction(() => createReport({ targetType: 'user', targetId: user._id, reason: 'User report' }), 'Report submitted.')}
+            className="rounded-xl border border-rose-200 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
+          >
+            Report
+          </button>
+        </div>
+        {notice && <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">{notice}</p>}
       </div>
     </div>
   );
@@ -116,35 +163,48 @@ function GroupInfoModal({
   onSelectMember: (user: DisplayUser) => void;
 }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const ownerId = chat.ownerId || chat.admins?.[0];
   const adminIds = new Set(chat.admins || []);
   const isOwner = ownerId === currentUserId;
   const isAdmin = Boolean(currentUserId && adminIds.has(currentUserId));
   const canEdit = isOwner || isAdmin;
   const [editTitle, setEditTitle] = useState(title);
-  const [editDescription, setEditDescription] = useState(chat.description || '');
-  const [editGroupContext, setEditGroupContext] = useState(chat.groupContext || '');
+  const [editDescription, setEditDescription] = useState(chat.description || chat.groupContext || '');
   const [memberQuery, setMemberQuery] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const updateChat = useUpdateChat(chat._id);
+  const { uploadMedia, isUploading: isUploadingGroupAvatar } = useFileUpload();
   const addMember = useAddMember(chat._id);
-  const removeMember = useRemoveMember(chat._id);
   const promoteMember = usePromoteMember(chat._id);
   const demoteMember = useDemoteMember(chat._id);
   const transferOwnership = useTransferOwnership(chat._id);
   const leaveGroup = useLeaveGroup(chat._id);
   const deleteGroup = useDeleteGroup(chat._id);
+  const inviteSettings = useInviteLinkSettings(chat._id, isOpen && canEdit && chat.type === 'group');
+  const createInvite = useCreateInviteLink(chat._id);
+  const regenerateInvite = useRegenerateInviteLink(chat._id);
+  const revokeInvite = useRevokeInviteLink(chat._id);
   const { data: searchUsers = [], isFetching: isSearching } = useSearchUsers(memberQuery.trim());
   const memberIds = new Set(members.map((member) => member._id));
   const availableUsers = searchUsers.filter((user) => !memberIds.has(user._id));
   const selectedUsers = searchUsers.filter((user) => selectedMemberIds.includes(user._id));
+  const [inviteExpiry, setInviteExpiry] = useState<InviteExpiry>('never');
+  const [inviteMaxUses, setInviteMaxUses] = useState<InviteMaxUses>('unlimited');
+  const [latestInviteUrl, setLatestInviteUrl] = useState('');
+  const moderationActivity = useQuery({
+    queryKey: ['group-moderation-activity', chat._id],
+    queryFn: () => fetchGroupModerationActivity(chat._id),
+    enabled: isOpen && canEdit && chat.type === 'group',
+  });
+  const restrictedIds = new Set((chat.memberRestrictions || []).map((restriction) => restriction.userId));
 
   useEffect(() => {
     setEditTitle(title);
-    setEditDescription(chat.description || '');
-    setEditGroupContext(chat.groupContext || '');
+    setEditDescription(chat.description || chat.groupContext || '');
   }, [title, chat.description, chat.groupContext, isOpen]);
 
   useEffect(() => {
@@ -173,10 +233,36 @@ function GroupInfoModal({
       await updateChat.mutateAsync({
         title: editTitle.trim() || title,
         description: editDescription.trim(),
-        groupContext: editGroupContext.trim(),
       });
     },
     'Group details updated.'
+  );
+
+  const updateGroupAvatar = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setNotice('Choose an image file for the group photo.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setNotice('This group photo is too large.');
+      return;
+    }
+
+    await submit(async () => {
+      const uploaded = await uploadMedia?.(file);
+      const nextAvatarUrl = uploaded?.mediaUrl || uploaded?.publicUrl;
+      if (!nextAvatarUrl) {
+        throw new Error('We could not upload this group photo. Try again.');
+      }
+      await updateChat.mutateAsync({ avatarUrl: nextAvatarUrl });
+    }, 'Group photo updated.');
+  };
+
+  const removeGroupAvatar = () => submit(
+    async () => {
+      await updateChat.mutateAsync({ avatarUrl: '' });
+    },
+    'Group photo removed.'
   );
 
   const addSelectedMembers = () => submit(
@@ -189,6 +275,63 @@ function GroupInfoModal({
     },
     'Members added.'
   );
+
+  const buildInviteUrl = (token: string) => `${window.location.origin}/join/${encodeURIComponent(token)}`;
+
+  const createInviteLink = () => submit(async () => {
+    const result = await createInvite.mutateAsync({ expiresIn: inviteExpiry, maxUses: inviteMaxUses });
+    setLatestInviteUrl(buildInviteUrl(result.token));
+  }, 'Invite link created.');
+
+  const regenerateInviteLink = () => submit(async () => {
+    if (!window.confirm('Regenerating this link will immediately invalidate the previous link.')) return;
+    const result = await regenerateInvite.mutateAsync({ expiresIn: inviteExpiry, maxUses: inviteMaxUses });
+    setLatestInviteUrl(buildInviteUrl(result.token));
+  }, 'Invite link regenerated.');
+
+  const revokeInviteLink = () => submit(async () => {
+    if (!window.confirm('Revoking this link prevents anyone new from joining with it.')) return;
+    await revokeInvite.mutateAsync();
+    setLatestInviteUrl('');
+  }, 'Invite link revoked.');
+
+  const copyInviteLink = () => submit(async () => {
+    if (!latestInviteUrl) {
+      throw new Error('Regenerate the invite link to copy a fresh URL.');
+    }
+    await navigator.clipboard.writeText(latestInviteUrl);
+  }, 'Invite link copied.');
+
+  const reportGroup = () => submit(async () => {
+    await createReport({ targetType: 'group', targetId: chat._id, reason: 'Group report' });
+  }, 'Group report submitted.');
+
+  const setSendMode = (sendMode: 'everyone' | 'admins_only') => submit(async () => {
+    await updateGroupModerationSettings(chat._id, sendMode);
+    queryClient.invalidateQueries({ queryKey: ['chats'] });
+  }, 'Send permissions updated.');
+
+  const setAiEnabled = (aiEnabled: boolean) => submit(async () => {
+    await updateGroupIntelligenceSettings(chat._id, aiEnabled);
+    queryClient.invalidateQueries({ queryKey: ['chats'] });
+    queryClient.invalidateQueries({ queryKey: ['chat', chat._id] });
+  }, aiEnabled ? 'AI Intelligence enabled.' : 'AI Intelligence disabled.');
+
+  const toggleRestriction = (memberId: string) => submit(async () => {
+    if (restrictedIds.has(memberId)) {
+      await unrestrictGroupMember(chat._id, memberId);
+    } else {
+      await restrictGroupMember(chat._id, memberId);
+    }
+    queryClient.invalidateQueries({ queryKey: ['chats'] });
+    queryClient.invalidateQueries({ queryKey: ['group-moderation-activity', chat._id] });
+  }, restrictedIds.has(memberId) ? 'Member can send again.' : 'Member restricted.');
+
+  const removeWithModeration = (memberId: string) => submit(async () => {
+    await moderationRemoveGroupMember(chat._id, memberId);
+    queryClient.invalidateQueries({ queryKey: ['chats'] });
+    queryClient.invalidateQueries({ queryKey: ['group-moderation-activity', chat._id] });
+  }, 'Member removed.');
 
   const leave = () => submit(
     async () => {
@@ -225,17 +368,61 @@ function GroupInfoModal({
           </button>
         </div>
         <div className="px-5 py-5 text-center">
-          {avatarUrl ? (
-            <Avatar src={avatarUrl} alt={title} size="xl" />
-          ) : (
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-teal-600">
-              <Users size={30} className="text-white" />
+          <div className="relative mx-auto h-20 w-20">
+            {avatarUrl ? (
+              <Avatar src={avatarUrl} alt={title} size="xl" />
+            ) : (
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-teal-600">
+                <Users size={30} className="text-white" />
+              </div>
+            )}
+            {canEdit && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={isUploadingGroupAvatar || updateChat.isPending}
+                  className="absolute bottom-0 right-0 rounded-full bg-teal-600 p-2 text-white shadow-lg transition hover:bg-teal-700 disabled:opacity-60"
+                  aria-label="Change group photo"
+                >
+                  {isUploadingGroupAvatar ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                </button>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void updateGroupAvatar(file);
+                    event.target.value = '';
+                  }}
+                />
+              </>
+            )}
+          </div>
+          {canEdit && avatarUrl && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={removeGroupAvatar}
+                disabled={updateChat.isPending}
+                className="text-xs font-semibold text-rose-600 transition hover:text-rose-700 disabled:opacity-60 dark:text-rose-400"
+              >
+                Remove photo
+              </button>
             </div>
           )}
           <h4 className="mt-3 text-lg font-semibold text-slate-900 dark:text-white">{title}</h4>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {members.length} {members.length === 1 ? 'member' : 'members'}
           </p>
+          <button
+            onClick={reportGroup}
+            className="mt-3 rounded-xl border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
+          >
+            Report group
+          </button>
           <div className="mt-2 flex flex-wrap justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
             {createdAt && <span>Created {createdAt.toLocaleDateString()}</span>}
             {chat.groupKind === 'temporary' && expiresAt && <span>Expires {expiresAt.toLocaleString()}</span>}
@@ -248,13 +435,13 @@ function GroupInfoModal({
             </div>
           )}
 
-          {!canEdit && chat.groupContext && (
+          {!canEdit && (chat.description || chat.groupContext) && (
             <div className="border-b border-slate-200 p-5 text-left dark:border-slate-700">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Group Context
+                Description
               </p>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-200">
-                {chat.groupContext}
+                {chat.description || chat.groupContext}
               </p>
             </div>
           )}
@@ -280,16 +467,6 @@ function GroupInfoModal({
                   />
                 </label>
               </div>
-              <label className="block text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Group Context
-                <textarea
-                  value={editGroupContext}
-                  onChange={(event) => setEditGroupContext(event.target.value)}
-                  placeholder="Goals, norms, important background, or how Chat Intelligence should understand this group."
-                  maxLength={2000}
-                  className="mt-1 min-h-24 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
-              </label>
               <button
                 onClick={saveDetails}
                 disabled={updateChat.isPending}
@@ -297,6 +474,144 @@ function GroupInfoModal({
               >
                 {updateChat.isPending ? 'Saving...' : 'Save details'}
               </button>
+            </div>
+          )}
+
+          {canEdit && (
+            <div className="space-y-3 border-b border-slate-200 p-5 text-left dark:border-slate-700">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <UserPlus size={16} />
+                Invite link
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Expiry
+                  <select
+                    value={inviteExpiry}
+                    onChange={(event) => setInviteExpiry(event.target.value as InviteExpiry)}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="never">Never</option>
+                    <option value="1d">1 day</option>
+                    <option value="7d">7 days</option>
+                    <option value="30d">30 days</option>
+                  </select>
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Maximum uses
+                  <select
+                    value={inviteMaxUses}
+                    onChange={(event) => setInviteMaxUses(event.target.value === 'unlimited' ? 'unlimited' : Number(event.target.value) as InviteMaxUses)}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="unlimited">Unlimited</option>
+                    <option value="10">10</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </label>
+              </div>
+              {inviteSettings.data?.invite ? (
+                <div className="rounded-xl border border-slate-200 p-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                  <div className="font-medium text-slate-900 dark:text-white">
+                    {inviteSettings.data.invite.useCount}
+                    {inviteSettings.data.invite.maxUses ? ` / ${inviteSettings.data.invite.maxUses}` : ''} uses
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {inviteSettings.data.invite.expiresAt
+                      ? `Expires ${new Date(inviteSettings.data.invite.expiresAt).toLocaleString()}`
+                      : 'Never expires'}
+                  </div>
+                  {latestInviteUrl ? (
+                    <input
+                      readOnly
+                      value={latestInviteUrl}
+                      className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    />
+                  ) : (
+                    <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                      Regenerate to copy a fresh invite URL. Stored links keep only a hash of the token.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No active invite link.</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {!inviteSettings.data?.invite ? (
+                  <button
+                    onClick={createInviteLink}
+                    disabled={createInvite.isPending}
+                    className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60"
+                  >
+                    {createInvite.isPending ? 'Creating...' : 'Create invite link'}
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={copyInviteLink}
+                      disabled={!latestInviteUrl}
+                      className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-950"
+                    >
+                      Copy link
+                    </button>
+                    <button
+                      onClick={regenerateInviteLink}
+                      disabled={regenerateInvite.isPending}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      {regenerateInvite.isPending ? 'Regenerating...' : 'Regenerate'}
+                    </button>
+                    <button
+                      onClick={revokeInviteLink}
+                      disabled={revokeInvite.isPending}
+                      className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                    >
+                      {revokeInvite.isPending ? 'Revoking...' : 'Revoke'}
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-4 pt-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">AI Intelligence</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Allow Catch Me Up, Group Brain, and AI suggestions.</p>
+                </div>
+                <button
+                  onClick={() => setAiEnabled(chat.aiEnabled === false)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    chat.aiEnabled === false
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                      : 'bg-teal-600 text-white hover:bg-teal-700'
+                  }`}
+                >
+                  {chat.aiEnabled === false ? 'Off' : 'On'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {canEdit && (
+            <div className="space-y-3 border-b border-slate-200 p-5 text-left dark:border-slate-700">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <Shield size={16} />
+                Send permissions
+              </div>
+              <div className="inline-flex rounded-xl border border-slate-200 p-1 dark:border-slate-700">
+                {(['everyone', 'admins_only'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setSendMode(mode)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      (chat.sendMode || 'everyone') === mode
+                        ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
+                        : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {mode === 'everyone' ? 'Everyone' : 'Admins only'}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -388,7 +703,13 @@ function GroupInfoModal({
                       </button>
                     )}
                     <button
-                      onClick={() => submit(() => removeMember.mutateAsync(member._id), 'Member removed.')}
+                      onClick={() => toggleRestriction(member._id)}
+                      className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                    >
+                      {restrictedIds.has(member._id) ? 'Allow send' : 'Restrict'}
+                    </button>
+                    <button
+                      onClick={() => removeWithModeration(member._id)}
                       className="rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
                     >
                       Remove
@@ -399,6 +720,29 @@ function GroupInfoModal({
             </div>
           ))}
           </div>
+
+          {canEdit && (
+            <div className="border-t border-slate-200 p-5 text-left dark:border-slate-700">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                <Shield size={16} />
+                Moderation activity
+              </div>
+              <div className="space-y-2">
+                {moderationActivity.data?.activity?.length ? (
+                  moderationActivity.data.activity.slice(0, 8).map((item) => (
+                    <div key={item.id} className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                      <span className="font-semibold">{item.actor?.name || item.actor?.username || 'Deleted user'}</span>
+                      {' '}
+                      {item.action.replaceAll('_', ' ')}
+                      {item.target ? ` · ${item.target.name || item.target.username || 'Deleted user'}` : ''}
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">No moderation activity yet.</p>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-3 border-t border-slate-200 p-5 dark:border-slate-700">
             <button
@@ -496,21 +840,32 @@ export default function ChatHeader({
   isGroupChat,
   onOpenIntelligence,
   intelligenceEnabled = true,
+  onJumpToMessage,
+  pinnedCount = 0,
+  onOpenPins,
+  onOpenShared,
+  onArchiveChat,
+  onUnarchiveChat,
+  isArchived = false,
 }: ChatHeaderProps) {
   const { user: currentUser } = useAuth();
+  const queryClient = useQueryClient();
   const setActiveCall = useAppStore((state) => state.setActiveCall);
+  const socket = useAppStore((state) => state.socket);
+  const isConnected = useAppStore((state) => state.isConnected);
   const [showMenu, setShowMenu] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [profileUser, setProfileUser] = useState<DisplayUser | null>(null);
   const [callNotice, setCallNotice] = useState<{ title: string; message: string } | null>(null);
-  const [groupCall, setGroupCall] = useState<{ callId: string; callType: 'audio' | 'video' } | null>(null);
+  const [groupCall, setGroupCall] = useState<{ callId: string; callType: 'audio' | 'video'; isInitiator?: boolean } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
-  const { data: messagesData } = useMessages(chat._id);
   const participantQueries = useQueries({
     queries: chat.participants.map((participantId) => ({
       queryKey: ['users', participantId] as const,
@@ -546,17 +901,85 @@ export default function ChatHeader({
     [currentUser?._id, members]
   );
 
-  const visibleMessages = useMemo(
-    () => messagesData?.pages.flatMap((page) => page.messages) || [],
-    [messagesData]
-  );
+  const { data: activeGroupCallData } = useQuery({
+    queryKey: ['chats', chat._id, 'active-group-call'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<{
+        activeCall: {
+          callId: string;
+          chatId: string;
+          callType: 'audio' | 'video';
+          callerId: string;
+          startedAt: string;
+        } | null;
+      }>(`/api/chats/${chat._id}/calls/active`);
+      return data.activeCall;
+    },
+    enabled: isGroupChat,
+    refetchInterval: isGroupChat ? 15_000 : false,
+  });
+
+  useEffect(() => {
+    if (!socket || !isGroupChat) return;
+
+    const activeCallQueryKey = ['chats', chat._id, 'active-group-call'];
+    const clearIfCurrentCall = (data: { callId: string; chatId: string }) => {
+      if (data.chatId !== chat._id) return;
+      queryClient.setQueryData(activeCallQueryKey, null);
+      setGroupCall((current) => (current?.callId === data.callId ? null : current));
+    };
+    const updateParticipants = (data: {
+      callId: string;
+      chatId: string;
+      activeParticipantIds: string[];
+    }) => {
+      if (data.chatId !== chat._id) return;
+      if (data.activeParticipantIds.length === 0) {
+        clearIfCurrentCall(data);
+      } else {
+        void queryClient.invalidateQueries({ queryKey: activeCallQueryKey });
+      }
+    };
+
+    socket.on('group-call:ended', clearIfCurrentCall);
+    socket.on('group-call:participants', updateParticipants);
+    return () => {
+      socket.off('group-call:ended', clearIfCurrentCall);
+      socket.off('group-call:participants', updateParticipants);
+    };
+  }, [socket, isGroupChat, chat._id, queryClient]);
 
   const trimmedSearch = searchQuery.trim();
-  const searchMatchCount = useMemo(() => {
-    if (!trimmedSearch) return 0;
-    const q = trimmedSearch.toLowerCase();
-    return visibleMessages.filter((message) => message.body?.toLowerCase().includes(q)).length;
-  }, [trimmedSearch, visibleMessages]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearchQuery(trimmedSearch), 250);
+    return () => window.clearTimeout(timeout);
+  }, [trimmedSearch]);
+
+  const chatSearch = useQuery({
+    queryKey: ['messages', 'search', chat._id, debouncedSearchQuery],
+    queryFn: () => searchChatMessages({ chatId: chat._id, q: debouncedSearchQuery, limit: 20 }),
+    enabled: showSearch && debouncedSearchQuery.length >= 2,
+    staleTime: 20_000,
+  });
+  const searchResults = chatSearch.data?.results || [];
+  const searchMatchCount = searchResults.length;
+
+  useEffect(() => {
+    setActiveSearchIndex(0);
+  }, [debouncedSearchQuery, chat._id]);
+
+  const jumpToSearchResult = (index: number) => {
+    const result = searchResults[index];
+    if (!result) return;
+    setActiveSearchIndex(index);
+    onJumpToMessage?.(result.messageId);
+  };
+
+  const goToSearchResult = (direction: 1 | -1) => {
+    if (searchResults.length === 0) return;
+    const nextIndex = (activeSearchIndex + direction + searchResults.length) % searchResults.length;
+    jumpToSearchResult(nextIndex);
+  };
 
   const positionMenu = () => {
     const rect = menuButtonRef.current?.getBoundingClientRect();
@@ -637,8 +1060,23 @@ export default function ChatHeader({
     const title = callType === 'video' ? 'Video call' : 'Audio call';
 
     if (isGroupChat) {
+      if (!socket || !isConnected || !currentUser?._id) {
+        setCallNotice({ title, message: 'Realtime connection is required to start a group call.' });
+        return;
+      }
+      const callId = createGroupCallId(chat._id);
       setShowSearch(false);
-      setGroupCall({ callId: createGroupCallId(chat._id), callType });
+      socket.emit('group-call:start', {
+        callId,
+        chatId: chat._id,
+        chatTitle: getChatTitle(chat),
+        chatAvatarUrl: getChatAvatar(chat),
+        fromUserId: currentUser._id,
+        fromUserName: getUserTitle(currentUser as DisplayUser, 'You'),
+        callType,
+        startedAt: new Date().toISOString(),
+      });
+      setGroupCall({ callId, callType, isInitiator: true });
       return;
     }
 
@@ -717,6 +1155,33 @@ export default function ChatHeader({
             )}
 
             {/* Search */}
+            {pinnedCount > 0 && (
+              <button
+                onClick={onOpenPins}
+                aria-label="Pinned messages"
+                title="Pinned messages"
+                className={btnBase}
+              >
+                <span className="relative">
+                  <Pin size={17} />
+                  <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-teal-500 px-1 text-[9px] font-bold text-white">
+                    {pinnedCount}
+                  </span>
+                </span>
+              </button>
+            )}
+
+            {/* Search */}
+            <button
+              onClick={onOpenShared}
+              aria-label="Shared content"
+              title="Shared content"
+              className={btnBase}
+            >
+              <FolderOpen size={18} />
+            </button>
+
+            {/* Search */}
             <button
               onClick={() => { setShowSearch((v) => !v); }}
               aria-label="Search in chat"
@@ -783,10 +1248,30 @@ export default function ChatHeader({
                   <button
                     role="menuitem"
                     className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
+                    onClick={() => { setShowMenu(false); onOpenShared?.(); }}
+                  >
+                    Shared
+                  </button>
+                  <button
+                    role="menuitem"
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
                     onClick={() => setShowMenu(false)}
                   >
                     Mute notifications
                   </button>
+                  {(onArchiveChat || onUnarchiveChat) && (
+                    <button
+                      role="menuitem"
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
+                      onClick={() => {
+                        setShowMenu(false);
+                        if (isArchived) onUnarchiveChat?.();
+                        else onArchiveChat?.();
+                      }}
+                    >
+                      {isArchived ? 'Unarchive chat' : 'Archive chat'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -802,14 +1287,50 @@ export default function ChatHeader({
                 ref={searchInputRef}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Escape') setShowSearch(false); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setShowSearch(false);
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (e.shiftKey) goToSearchResult(-1);
+                    else if (searchResults.length > 0) {
+                      if (activeSearchIndex === 0) jumpToSearchResult(0);
+                      else goToSearchResult(1);
+                    }
+                  }
+                }}
                 placeholder="Search in this chat…"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-8 pr-24 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-500"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-8 pr-28 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-500"
               />
               {trimmedSearch && (
-                <span className="absolute right-9 text-[11px] text-slate-500 dark:text-slate-400">
-                  {searchMatchCount} {searchMatchCount === 1 ? 'match' : 'matches'}
-                </span>
+                <div className="absolute right-9 flex items-center gap-1">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {chatSearch.isFetching ? 'Searching' : searchMatchCount ? `${activeSearchIndex + 1}/${searchMatchCount}` : '0'}
+                  </span>
+                  {chatSearch.isFetching ? (
+                    <Loader2 size={13} className="animate-spin text-slate-400" />
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => goToSearchResult(-1)}
+                        disabled={searchResults.length === 0}
+                        className="rounded p-0.5 text-slate-500 hover:bg-slate-200 disabled:opacity-40 dark:hover:bg-slate-700"
+                        aria-label="Previous search result"
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => goToSearchResult(1)}
+                        disabled={searchResults.length === 0}
+                        className="rounded p-0.5 text-slate-500 hover:bg-slate-200 disabled:opacity-40 dark:hover:bg-slate-700"
+                        aria-label="Next search result"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
               <button
                 onClick={() => setShowSearch(false)}
@@ -819,6 +1340,32 @@ export default function ChatHeader({
                 <X size={14} />
               </button>
             </div>
+          </div>
+        )}
+
+        {isGroupChat && activeGroupCallData && !groupCall && (
+          <div className="flex items-center justify-between gap-3 border-t border-teal-100 bg-teal-50 px-4 py-2 dark:border-teal-900/50 dark:bg-teal-950/30">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-teal-900 dark:text-teal-100">
+                {activeGroupCallData.callType === 'video' ? 'Video call in progress' : 'Audio call in progress'}
+              </p>
+              <p className="truncate text-xs text-teal-700 dark:text-teal-300">
+                Join the active group call
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                setGroupCall({
+                  callId: activeGroupCallData.callId,
+                  callType: activeGroupCallData.callType,
+                  isInitiator: false,
+                })
+              }
+              className="shrink-0 rounded-full bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700"
+            >
+              Join
+            </button>
           </div>
         )}
       </div>
@@ -853,6 +1400,7 @@ export default function ChatHeader({
           title={getChatTitle(chat)}
           callType={groupCall.callType}
           callId={groupCall.callId}
+          isInitiator={groupCall.isInitiator}
           onClose={() => setGroupCall(null)}
         />
       )}

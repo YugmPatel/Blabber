@@ -7,6 +7,17 @@ export interface NotificationPreferences {
   messageNotificationsEnabled: boolean;
   callNotificationsEnabled: boolean;
   notificationPreviewsEnabled: boolean;
+  mentionNotificationsEnabled: boolean;
+  actionRemindersEnabled: boolean;
+  actionReminderDueTomorrowEnabled: boolean;
+  actionReminderDueTodayEnabled: boolean;
+  actionReminderOverdueEnabled: boolean;
+  actionReminderStaleEnabled: boolean;
+  eventRemindersEnabled: boolean;
+  eventReminderDayBeforeEnabled: boolean;
+  eventReminderHourBeforeEnabled: boolean;
+  momentUpdatesEnabled: boolean;
+  momentActivityEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -14,7 +25,20 @@ export interface NotificationPreferences {
 export type NotificationPreferencePatch = Partial<
   Pick<
     NotificationPreferences,
-    'messageNotificationsEnabled' | 'callNotificationsEnabled' | 'notificationPreviewsEnabled'
+    | 'messageNotificationsEnabled'
+    | 'callNotificationsEnabled'
+    | 'notificationPreviewsEnabled'
+    | 'mentionNotificationsEnabled'
+    | 'actionRemindersEnabled'
+    | 'actionReminderDueTomorrowEnabled'
+    | 'actionReminderDueTodayEnabled'
+    | 'actionReminderOverdueEnabled'
+    | 'actionReminderStaleEnabled'
+    | 'eventRemindersEnabled'
+    | 'eventReminderDayBeforeEnabled'
+    | 'eventReminderHourBeforeEnabled'
+    | 'momentUpdatesEnabled'
+    | 'momentActivityEnabled'
   >
 >;
 
@@ -22,6 +46,17 @@ const DEFAULT_PREFERENCES = {
   messageNotificationsEnabled: false,
   callNotificationsEnabled: false,
   notificationPreviewsEnabled: false,
+  mentionNotificationsEnabled: true,
+  actionRemindersEnabled: true,
+  actionReminderDueTomorrowEnabled: true,
+  actionReminderDueTodayEnabled: true,
+  actionReminderOverdueEnabled: true,
+  actionReminderStaleEnabled: true,
+  eventRemindersEnabled: true,
+  eventReminderDayBeforeEnabled: true,
+  eventReminderHourBeforeEnabled: true,
+  momentUpdatesEnabled: false,
+  momentActivityEnabled: true,
 };
 
 export async function createNotificationPreferenceIndexes() {
@@ -38,7 +73,7 @@ export async function getNotificationPreferences(
   const existing = await collection.findOne({ userId });
 
   if (existing) {
-    return existing;
+    return { ...DEFAULT_PREFERENCES, ...existing };
   }
 
   const now = new Date();
@@ -82,6 +117,28 @@ export function serializeNotificationPreferences(preferences: NotificationPrefer
     messageNotificationsEnabled: preferences.messageNotificationsEnabled,
     callNotificationsEnabled: preferences.callNotificationsEnabled,
     notificationPreviewsEnabled: preferences.notificationPreviewsEnabled,
+    mentionNotificationsEnabled:
+      preferences.mentionNotificationsEnabled ?? DEFAULT_PREFERENCES.mentionNotificationsEnabled,
+    actionRemindersEnabled:
+      preferences.actionRemindersEnabled ?? DEFAULT_PREFERENCES.actionRemindersEnabled,
+    actionReminderDueTomorrowEnabled:
+      preferences.actionReminderDueTomorrowEnabled ?? DEFAULT_PREFERENCES.actionReminderDueTomorrowEnabled,
+    actionReminderDueTodayEnabled:
+      preferences.actionReminderDueTodayEnabled ?? DEFAULT_PREFERENCES.actionReminderDueTodayEnabled,
+    actionReminderOverdueEnabled:
+      preferences.actionReminderOverdueEnabled ?? DEFAULT_PREFERENCES.actionReminderOverdueEnabled,
+    actionReminderStaleEnabled:
+      preferences.actionReminderStaleEnabled ?? DEFAULT_PREFERENCES.actionReminderStaleEnabled,
+    eventRemindersEnabled:
+      preferences.eventRemindersEnabled ?? DEFAULT_PREFERENCES.eventRemindersEnabled,
+    eventReminderDayBeforeEnabled:
+      preferences.eventReminderDayBeforeEnabled ?? DEFAULT_PREFERENCES.eventReminderDayBeforeEnabled,
+    eventReminderHourBeforeEnabled:
+      preferences.eventReminderHourBeforeEnabled ?? DEFAULT_PREFERENCES.eventReminderHourBeforeEnabled,
+    momentUpdatesEnabled:
+      preferences.momentUpdatesEnabled ?? DEFAULT_PREFERENCES.momentUpdatesEnabled,
+    momentActivityEnabled:
+      preferences.momentActivityEnabled ?? DEFAULT_PREFERENCES.momentActivityEnabled,
     updatedAt: preferences.updatedAt,
   };
 }

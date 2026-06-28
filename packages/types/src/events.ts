@@ -7,6 +7,15 @@ export enum EventType {
   MESSAGE_REACTION = 'message:reaction',
   MESSAGE_READ = 'message:read',
 
+  // Moment events
+  MOMENT_REACTION_UPDATED = 'moment:reaction:updated',
+  MOMENT_INTERACTIONS_UPDATED = 'moment:interactions:updated',
+
+  // Profile events
+  PROFILE_UPDATED = 'profile:updated',
+  FOLLOW_UPDATED = 'follow:updated',
+  FOLLOW_REQUEST_UPDATED = 'follow:request-updated',
+
   // Chat events
   CHAT_CREATED = 'chat:created',
   CHAT_UPDATED = 'chat:updated',
@@ -14,6 +23,9 @@ export enum EventType {
   CHAT_MEMBER_REMOVED = 'chat:member:removed',
   CHAT_PINNED = 'chat:pinned',
   CHAT_ARCHIVED = 'chat:archived',
+  CHAT_UNARCHIVED = 'chat:unarchived',
+  MESSAGE_PINNED = 'message:pinned',
+  MESSAGE_UNPINNED = 'message:unpinned',
 
   // Intelligence events
   ACTION_CREATED = 'action:created',
@@ -50,6 +62,7 @@ export interface MessageSentEvent extends BaseEvent {
     participants?: string[];
     message?: any;
     replyTo?: string;
+    mentions?: Array<{ userId: string; start: number; length: number; displayName: string }>;
     createdAt: string;
   };
 }
@@ -59,8 +72,14 @@ export interface MessageEditedEvent extends BaseEvent {
   data: {
     messageId: string;
     chatId: string;
+    senderId?: string;
+    senderName?: string;
+    chatType?: 'direct' | 'group';
+    chatTitle?: string;
+    participants?: string[];
     content: string;
     message?: any;
+    mentions?: Array<{ userId: string; start: number; length: number; displayName: string }>;
     editedAt: string;
   };
 }
@@ -97,6 +116,46 @@ export interface MessageReadEvent extends BaseEvent {
     chatId: string;
     userId: string;
     messageIds: string[];
+  };
+}
+
+export interface MomentReactionUpdatedEvent extends BaseEvent {
+  type: EventType.MOMENT_REACTION_UPDATED;
+  data: {
+    momentId: string;
+    viewerUserId: string;
+    authorUserId: string;
+    emoji: string | null;
+    operation: 'set' | 'remove';
+  };
+}
+
+export interface MomentInteractionsUpdatedEvent extends BaseEvent {
+  type: EventType.MOMENT_INTERACTIONS_UPDATED;
+  data: {
+    momentId: string;
+    authorUserId: string;
+  };
+}
+
+export interface ProfileUpdatedEvent extends BaseEvent {
+  type: EventType.PROFILE_UPDATED;
+  data: {
+    userId: string;
+  };
+}
+
+export interface FollowUpdatedEvent extends BaseEvent {
+  type: EventType.FOLLOW_UPDATED;
+  data: {
+    userIds: string[];
+  };
+}
+
+export interface FollowRequestUpdatedEvent extends BaseEvent {
+  type: EventType.FOLLOW_REQUEST_UPDATED;
+  data: {
+    userIds: string[];
   };
 }
 
@@ -137,6 +196,28 @@ export interface ChatMemberRemovedEvent extends BaseEvent {
     chatId: string;
     userId: string;
     removedBy: string;
+  };
+}
+
+export interface ChatArchiveEvent extends BaseEvent {
+  type: EventType.CHAT_ARCHIVED | EventType.CHAT_UNARCHIVED;
+  data: {
+    chatId: string;
+    userId: string;
+    archived: boolean;
+    archivedAt?: string;
+    chat?: any;
+  };
+}
+
+export interface MessagePinEvent extends BaseEvent {
+  type: EventType.MESSAGE_PINNED | EventType.MESSAGE_UNPINNED;
+  data: {
+    chatId: string;
+    messageId: string;
+    pinnedBy: string;
+    participants: string[];
+    pin?: any;
   };
 }
 
@@ -197,10 +278,17 @@ export type AppEvent =
   | MessageDeletedEvent
   | MessageReactionEvent
   | MessageReadEvent
+  | MomentReactionUpdatedEvent
+  | MomentInteractionsUpdatedEvent
+  | ProfileUpdatedEvent
+  | FollowUpdatedEvent
+  | FollowRequestUpdatedEvent
   | ChatCreatedEvent
   | ChatUpdatedEvent
   | ChatMemberAddedEvent
   | ChatMemberRemovedEvent
+  | ChatArchiveEvent
+  | MessagePinEvent
   | ActionCreatedEvent
   | ActionUpdatedEvent
   | UserOnlineEvent

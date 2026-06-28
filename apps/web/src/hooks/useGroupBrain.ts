@@ -24,8 +24,7 @@ export function useGroupBrain(chatId: string | undefined) {
     isFetchingBrain: brainQuery.isFetching,
     brainError: brainQuery.error,
     refetchBrain: brainQuery.refetch,
-    askBrain: askMutation.mutate,
-    brainAnswer: askMutation.data ?? null,
+    askBrain: askMutation.mutateAsync,
     isAskingBrain: askMutation.isPending,
     askBrainError: askMutation.error,
   };

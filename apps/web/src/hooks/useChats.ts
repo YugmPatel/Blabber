@@ -1,5 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '../api/client';
+import {
+  apiClient,
+  createInviteLink,
+  fetchInviteLinkSettings,
+  joinInvite,
+  previewInvite,
+  regenerateInviteLink,
+  revokeInviteLink,
+} from '../api/client';
+import type { InviteSettingsPayload } from '../api/client';
 import type { Chat, CreateChatDTO, UpdateChatDTO } from '@repo/types';
 
 // Query keys
@@ -8,6 +17,8 @@ export const chatKeys = {
   lists: () => [...chatKeys.all, 'list'] as const,
   list: (filters?: { archived?: boolean }) => [...chatKeys.lists(), filters] as const,
   detail: (id: string) => [...chatKeys.all, id] as const,
+  invite: (id: string) => [...chatKeys.all, id, 'invite-link'] as const,
+  invitePreview: (token: string) => [...chatKeys.all, 'invite-preview', token] as const,
 };
 
 // Fetch all chats
@@ -215,6 +226,71 @@ export const useArchiveChat = () => {
     },
     onSuccess: () => {
       // Invalidate chat lists to refetch with updated archive status
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useUnarchiveChat = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (chatId: string) => {
+      await apiClient.post(`/api/chats/${chatId}/unarchive`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useInviteLinkSettings = (chatId: string | undefined, enabled = true) => {
+  return useQuery({
+    queryKey: chatKeys.invite(chatId || ''),
+    queryFn: () => fetchInviteLinkSettings(chatId!),
+    enabled: Boolean(chatId) && enabled,
+  });
+};
+
+export const useCreateInviteLink = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: InviteSettingsPayload) => createInviteLink(chatId, payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: chatKeys.invite(chatId) }),
+  });
+};
+
+export const useRegenerateInviteLink = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: InviteSettingsPayload) => regenerateInviteLink(chatId, payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: chatKeys.invite(chatId) }),
+  });
+};
+
+export const useRevokeInviteLink = (chatId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => revokeInviteLink(chatId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: chatKeys.invite(chatId) }),
+  });
+};
+
+export const useInvitePreview = (token: string | undefined) => {
+  return useQuery({
+    queryKey: chatKeys.invitePreview(token || ''),
+    queryFn: () => previewInvite(token!),
+    enabled: Boolean(token),
+    retry: false,
+  });
+};
+
+export const useJoinInvite = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => joinInvite(token),
+    onSuccess: ({ chat }) => {
+      queryClient.setQueryData(chatKeys.detail(chat._id), chat);
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
   });

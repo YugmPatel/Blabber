@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { messageKeys } from './useMessages';
 import { chatKeys } from './useChats';
 import { userKeys } from './useUsers';
-import { chatActionKeys } from './useChatActions';
+import { chatActionKeys, upsertOrRemoveAction } from './useChatActions';
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -150,6 +150,10 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
 
             const shouldIncrementUnread =
               !wasAlreadyProcessed && !isOwnMessage && !isActiveVisibleChat;
+            const shouldIncrementMention =
+              shouldIncrementUnread &&
+              chat.type === 'group' &&
+              (message.mentions || []).some((mention) => mention.userId === user?._id);
 
             return {
               ...chat,
@@ -165,12 +169,21 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
                 : isActiveVisibleChat
                   ? 0
                   : chat.unreadCount || 0,
+              mentionUnreadCount: shouldIncrementMention
+                ? (chat.mentionUnreadCount || 0) + 1
+                : isActiveVisibleChat
+                  ? 0
+                  : chat.mentionUnreadCount || 0,
             };
           });
 
           return [...updated].sort(sortChatsByUpdatedAt);
         });
       });
+
+      if (!isActiveVisibleChat) {
+        queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      }
     };
 
     // Handler for message edits
@@ -331,7 +344,7 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
           queryClient.setQueryData<Chat[]>(query.queryKey, (old) => {
             if (!old) return old;
             return old.map((chat) =>
-              chat._id === data.chatId ? { ...chat, unreadCount: 0 } : chat
+              chat._id === data.chatId ? { ...chat, unreadCount: 0, mentionUnreadCount: 0 } : chat
             );
           });
         });
@@ -371,19 +384,49 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
     };
 
     const handleActionCreated = (data: { chatId: string; action: any }) => {
+      const isPersonalForAnotherUser =
+        data.action?.visibility === 'personal' &&
+        data.action?.personalOwnerUserId &&
+        data.action.personalOwnerUserId !== user?._id;
+      if (isPersonalForAnotherUser) return;
       queryClient.setQueryData<{ actions: any[] }>(chatActionKeys.list(data.chatId), (current) => {
         const actions = current?.actions || [];
         if (actions.some((action) => action.id === data.action.id)) return current;
         return { actions: [data.action, ...actions] };
       });
+      const belongsInMine =
+        data.action.visibility === 'personal'
+          ? data.action.personalOwnerUserId === user?._id
+          : data.action.assignedTo?.userId === user?._id || data.action.createdBy?.userId === user?._id;
+      queryClient.setQueryData<{ actions: any[] }>(chatActionKeys.mine(), (current) => {
+        if (!current) return current;
+        if (!belongsInMine && !current.actions.some((action) => action.id === data.action.id)) return current;
+        return { actions: upsertOrRemoveAction(current.actions, data.action) };
+      });
+      queryClient.invalidateQueries({ queryKey: chatActionKeys.list(data.chatId) });
+      queryClient.invalidateQueries({ queryKey: chatActionKeys.mine() });
     };
 
     const handleActionUpdated = (data: { chatId: string; action: any }) => {
+      const isPersonalForAnotherUser =
+        data.action?.visibility === 'personal' &&
+        data.action?.personalOwnerUserId &&
+        data.action.personalOwnerUserId !== user?._id;
+      if (isPersonalForAnotherUser) return;
       queryClient.setQueryData<{ actions: any[] }>(chatActionKeys.list(data.chatId), (current) => ({
-        actions: (current?.actions || []).map((action) =>
-          action.id === data.action.id ? data.action : action
-        ),
+        actions: upsertOrRemoveAction(current?.actions, data.action),
       }));
+      const belongsInMine =
+        data.action.visibility === 'personal'
+          ? data.action.personalOwnerUserId === user?._id
+          : data.action.assignedTo?.userId === user?._id || data.action.createdBy?.userId === user?._id;
+      queryClient.setQueryData<{ actions: any[] }>(chatActionKeys.mine(), (current) => {
+        if (!current) return current;
+        if (!belongsInMine && !current.actions.some((action) => action.id === data.action.id)) return current;
+        return { actions: upsertOrRemoveAction(current.actions, data.action) };
+      });
+      queryClient.invalidateQueries({ queryKey: chatActionKeys.list(data.chatId) });
+      queryClient.invalidateQueries({ queryKey: chatActionKeys.mine() });
     };
 
     // Handler for presence updates
@@ -423,6 +466,34 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       // For now, just log the error
     };
 
+    const handleGroupCallEnded = (data: { chatId: string }) => {
+      queryClient.setQueryData(['chats', data.chatId, 'active-group-call'], null);
+      queryClient.invalidateQueries({ queryKey: chatKeys.detail(data.chatId) });
+    };
+
+    const handleGroupCallParticipants = (data: {
+      chatId: string;
+      activeParticipantIds: string[];
+    }) => {
+      if (data.activeParticipantIds.length === 0) {
+        queryClient.setQueryData(['chats', data.chatId, 'active-group-call'], null);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['chats', data.chatId, 'active-group-call'] });
+      }
+    };
+
+    const handleMessagePin = (data: { chatId: string }) => {
+      queryClient.invalidateQueries({ queryKey: messageKeys.pins(data.chatId) });
+    };
+
+    const handleMessageUnpin = (data: { chatId: string }) => {
+      queryClient.invalidateQueries({ queryKey: messageKeys.pins(data.chatId) });
+    };
+
+    const handleChatArchiveState = () => {
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    };
+
     // Register all event listeners
     socket.on('message:ack', handleMessageAck);
     socket.on('message:new', handleMessageNew);
@@ -437,6 +508,12 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
     socket.on('action:created', handleActionCreated);
     socket.on('action:updated', handleActionUpdated);
     socket.on('presence:update', handlePresenceUpdate);
+    socket.on('group-call:ended', handleGroupCallEnded);
+    socket.on('group-call:participants', handleGroupCallParticipants);
+    socket.on('message:pin', handleMessagePin);
+    socket.on('message:unpin', handleMessageUnpin);
+    socket.on('chat:archived', handleChatArchiveState);
+    socket.on('chat:unarchived', handleChatArchiveState);
     socket.on('error', handleError);
 
     // Cleanup: remove all event listeners
@@ -454,6 +531,12 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       socket.off('action:created', handleActionCreated);
       socket.off('action:updated', handleActionUpdated);
       socket.off('presence:update', handlePresenceUpdate);
+      socket.off('group-call:ended', handleGroupCallEnded);
+      socket.off('group-call:participants', handleGroupCallParticipants);
+      socket.off('message:pin', handleMessagePin);
+      socket.off('message:unpin', handleMessageUnpin);
+      socket.off('chat:archived', handleChatArchiveState);
+      socket.off('chat:unarchived', handleChatArchiveState);
       socket.off('error', handleError);
     };
   }, [socket, queryClient, resolvePendingMessage, setTyping, activeChat, user?._id]);

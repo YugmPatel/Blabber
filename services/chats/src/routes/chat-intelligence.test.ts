@@ -21,7 +21,7 @@ describe('Chat intelligence routes', () => {
   beforeEach(async () => {
     delete process.env.OPENROUTER_API_KEY;
     delete process.env.OPENROUTER_MODEL;
-    delete process.env.OPENROUTER_MOCK_FALLBACK;
+    process.env.OPENROUTER_MOCK_FALLBACK = 'true';
     await connectToDatabase();
     const db = getDatabase();
     await db.collection('chats').deleteMany({});
@@ -114,7 +114,13 @@ describe('Chat intelligence routes', () => {
     const getResponse = await request(app).get(`/intelligence/chats/${id}/summary`);
 
     expect(getResponse.status).toBe(200);
-    expect(getResponse.body.summary).toEqual(postResponse.body.summary);
+    expect(getResponse.body.summary).toEqual({
+      ...postResponse.body.summary,
+      scope: {
+        ...postResponse.body.summary.scope,
+        since: null,
+      },
+    });
   });
 
   it('POST /intelligence/chats/:chatId/summarize returns 400 for invalid payload', async () => {

@@ -16,6 +16,7 @@ describe('Composer', () => {
   const mockUploadFile = vi.fn();
   const mockSocketEmit = vi.fn();
   const mockSocket = { emit: mockSocketEmit };
+  const messagePlaceholder = /type a message/i;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -45,49 +46,49 @@ describe('Composer', () => {
   it('renders composer with input and buttons', () => {
     render(<Composer chatId="chat-1" />);
 
-    expect(screen.getByPlaceholderText('Type a message...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(messagePlaceholder)).toBeInTheDocument();
     expect(screen.getByLabelText('Add emoji')).toBeInTheDocument();
-    expect(screen.getByLabelText('Attach file')).toBeInTheDocument();
-    expect(screen.getByLabelText('Send message')).toBeInTheDocument();
+    expect(screen.getByLabelText('Open composer actions')).toBeInTheDocument();
+    expect(screen.getByLabelText('Voice message')).toBeInTheDocument();
   });
 
   it('sends message when send button is clicked', async () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
-    const sendButton = screen.getByLabelText('Send message');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
 
     await user.type(input, 'Hello world');
+    const sendButton = screen.getByLabelText('Send message');
     await user.click(sendButton);
 
-    expect(mockSendMessage).toHaveBeenCalledWith({
+    expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: 'chat-1',
       body: 'Hello world',
       replyToId: undefined,
-    });
+    }));
   });
 
   it('sends message when Enter key is pressed', async () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
 
     await user.type(input, 'Hello world{Enter}');
 
-    expect(mockSendMessage).toHaveBeenCalledWith({
+    expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: 'chat-1',
       body: 'Hello world',
       replyToId: undefined,
-    });
+    }));
   });
 
   it('does not send message when Shift+Enter is pressed', async () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
 
     await user.type(input, 'Line 1{Shift>}{Enter}{/Shift}Line 2');
 
@@ -99,9 +100,7 @@ describe('Composer', () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const sendButton = screen.getByLabelText('Send message');
-
-    await user.click(sendButton);
+    expect(screen.queryByLabelText('Send message')).not.toBeInTheDocument();
 
     expect(mockSendMessage).not.toHaveBeenCalled();
   });
@@ -110,24 +109,24 @@ describe('Composer', () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
-    const sendButton = screen.getByLabelText('Send message');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
 
     await user.type(input, '  Hello world  ');
+    const sendButton = screen.getByLabelText('Send message');
     await user.click(sendButton);
 
-    expect(mockSendMessage).toHaveBeenCalledWith({
+    expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: 'chat-1',
       body: 'Hello world',
       replyToId: undefined,
-    });
+    }));
   });
 
   it('clears input after sending message', async () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
 
     await user.type(input, 'Hello world{Enter}');
 
@@ -151,7 +150,7 @@ describe('Composer', () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
     const emojiButton = screen.getByLabelText('Add emoji');
 
     await user.type(input, 'Hello ');
@@ -202,14 +201,14 @@ describe('Composer', () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" replyToId="msg-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
     await user.type(input, 'Reply message{Enter}');
 
-    expect(mockSendMessage).toHaveBeenCalledWith({
+    expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: 'chat-1',
       body: 'Reply message',
       replyToId: 'msg-1',
-    });
+    }));
   });
 
   it('triggers file upload when file is selected', async () => {
@@ -218,7 +217,7 @@ describe('Composer', () => {
 
     render(<Composer chatId="chat-1" />);
 
-    const fileInput = screen.getByLabelText('Attach file').nextElementSibling as HTMLInputElement;
+    const fileInput = document.querySelector('input[accept="image/*"]') as HTMLInputElement;
     const file = new File(['test'], 'test.png', { type: 'image/png' });
 
     await user.upload(fileInput, file);
@@ -234,21 +233,22 @@ describe('Composer', () => {
 
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
     await user.type(input, 'Check this out');
 
-    const fileInput = screen.getByLabelText('Attach file').nextElementSibling as HTMLInputElement;
+    const fileInput = document.querySelector('input[accept="image/*"]') as HTMLInputElement;
     const file = new File(['test'], 'test.png', { type: 'image/png' });
 
     await user.upload(fileInput, file);
 
     await waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalledWith({
+      expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
         chatId: 'chat-1',
         body: 'Check this out',
         mediaId: 'media-123',
+        mediaKind: 'image',
         replyToId: undefined,
-      });
+      }));
     });
   });
 
@@ -263,7 +263,7 @@ describe('Composer', () => {
 
     render(<Composer chatId="chat-1" />);
 
-    expect(screen.getByText('Uploading...')).toBeInTheDocument();
+    expect(screen.getByText('Uploading…')).toBeInTheDocument();
     expect(screen.getByText('50%')).toBeInTheDocument();
   });
 
@@ -278,18 +278,17 @@ describe('Composer', () => {
 
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
-    const sendButton = screen.getByLabelText('Send message');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
 
     expect(input).toBeDisabled();
-    expect(sendButton).toBeDisabled();
+    expect(screen.getByLabelText('Voice message')).toBeDisabled();
   });
 
   it('emits typing:start when user starts typing', async () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const input = screen.getByPlaceholderText('Type a message...');
+    const input = screen.getByPlaceholderText(messagePlaceholder);
     await user.type(input, 'H');
 
     expect(mockSocketEmit).toHaveBeenCalledWith('typing:start', { chatId: 'chat-1' });
@@ -299,7 +298,7 @@ describe('Composer', () => {
     const user = userEvent.setup();
     render(<Composer chatId="chat-1" />);
 
-    const textarea = screen.getByPlaceholderText('Type a message...') as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText(messagePlaceholder) as HTMLTextAreaElement;
 
     await user.type(textarea, 'Test message');
 

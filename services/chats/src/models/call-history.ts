@@ -12,6 +12,8 @@ export interface CallHistoryDocument {
   callType: 'audio' | 'video';
   callerId: ObjectId;
   participantIds: ObjectId[];
+  activeParticipantIds?: ObjectId[];
+  activeParticipantKeys?: string[];
   outcome: CallOutcome;
   startedAt: Date;
   answeredAt?: Date;

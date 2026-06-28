@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+const AvatarUrlSchema = z
+  .string()
+  .refine(
+    (value) => {
+      if (value === '') return true;
+      if (value.startsWith('/api/media/')) return true;
+      return /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(value);
+    },
+    { message: 'Invalid url' }
+  );
+
 // Chat TypeScript Interface
 export interface Chat {
   _id: string;
@@ -12,6 +23,13 @@ export interface Chat {
   groupContext?: string;
   avatarUrl?: string;
   groupKind?: 'standard' | 'temporary';
+  sendMode?: 'everyone' | 'admins_only';
+  aiEnabled?: boolean;
+  memberRestrictions?: {
+    userId: string;
+    restrictedBy: string;
+    restrictedAt: Date;
+  }[];
   expiresAt?: Date;
   endedAt?: Date;
   deletedAt?: Date;
@@ -23,6 +41,9 @@ export interface Chat {
     createdAt: Date;
   };
   unreadCount?: number;
+  mentionUnreadCount?: number;
+  archived?: boolean;
+  archivedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,7 +62,7 @@ export const ChatParticipantProfileSchema = z.object({
   name: z.string(),
   username: z.string().optional(),
   email: z.string().optional(),
-  avatarUrl: z.string().url().optional(),
+  avatarUrl: AvatarUrlSchema.optional(),
 });
 
 export const ChatSchema = z.object({
@@ -53,8 +74,15 @@ export const ChatSchema = z.object({
   title: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
   groupContext: z.string().max(2000).optional(),
-  avatarUrl: z.string().url().optional(),
+  avatarUrl: AvatarUrlSchema.optional(),
   groupKind: z.enum(['standard', 'temporary']).optional(),
+  sendMode: z.enum(['everyone', 'admins_only']).optional(),
+  aiEnabled: z.boolean().optional(),
+  memberRestrictions: z.array(z.object({
+    userId: z.string(),
+    restrictedBy: z.string(),
+    restrictedAt: z.date(),
+  })).optional(),
   expiresAt: z.date().optional(),
   endedAt: z.date().optional(),
   deletedAt: z.date().optional(),
@@ -66,6 +94,9 @@ export const ChatSchema = z.object({
     createdAt: z.date(),
   }).optional(),
   unreadCount: z.number().int().min(0).optional(),
+  mentionUnreadCount: z.number().int().min(0).optional(),
+  archived: z.boolean().optional(),
+  archivedAt: z.date().optional(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -77,7 +108,7 @@ export const CreateChatDTOSchema = z.object({
   title: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
   groupContext: z.string().max(2000).optional(),
-  avatarUrl: z.string().url().optional(),
+  avatarUrl: AvatarUrlSchema.optional(),
   groupKind: z.enum(['standard', 'temporary']).optional(),
   expiresAt: z.string().datetime().optional(),
 }).refine(
@@ -102,7 +133,7 @@ export const UpdateChatDTOSchema = z.object({
   title: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
   groupContext: z.string().max(2000).optional(),
-  avatarUrl: z.string().url().optional(),
+  avatarUrl: AvatarUrlSchema.optional(),
   expiresAt: z.string().datetime().optional(),
 });
 

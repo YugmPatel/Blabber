@@ -5,3 +5,5 @@ export * from './jwt';
 export * from './s3';
 export * from './cors';
 export * from './vapid';
+export * from './safe';
+export * from './test-env';

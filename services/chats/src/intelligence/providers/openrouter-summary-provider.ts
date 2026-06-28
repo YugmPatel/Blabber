@@ -29,6 +29,10 @@ Summarize only the provided chat messages.
 Extract a unified briefing with overview, confirmed decisions, questions for the current user, important links, task suggestions, waiting-on context, and safe-to-skip material.
 Preserve sourceMessageIds from the provided messages.
 Do not invent facts, people, assignments, links, dates, or decisions.
+For task ownership, set assignedToUserId only when the owner is clearly one of the provided participants.
+For first-person commitments like "I will", resolve the owner to that message's senderId, not the current viewer.
+If ownership is ambiguous, set assignedTo and assignedToUserId to null.
+For dueDate, include only explicit reasonably unambiguous dates from the message; leave null when unsure.
 Only mark a decision when the messages show agreement or confirmation.
 Only include actual links that appear in messages.
 If a field has no items, return [].
@@ -50,6 +54,7 @@ Return exactly this JSON shape:
     {
       "title": "string",
       "assignedTo": "string or null",
+      "assignedToUserId": "participant userId or null",
       "dueDate": "string or null",
       "status": "pending | in_progress | done | blocked",
       "sourceMessageId": "sourceMessageId"
@@ -96,6 +101,7 @@ function buildUserPrompt(context: AISummaryContext): string {
       groupContext: context.groupContext ?? null,
       currentUserId: context.currentUserId,
       currentUserName: context.currentUserName ?? null,
+      participants: context.participants ?? [],
       recentMessages: context.messages.map((message) => ({
         sourceMessageId: message._id,
         senderId: message.senderId,

@@ -49,6 +49,12 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
 
   // Ensure the creator is in the participants list (for group chats)
   const creatorObjectId = new ObjectId(userId);
+  if (type === 'direct' && !participantObjectIds.some((id) => id.equals(creatorObjectId))) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'You cannot create a direct chat for other users',
+    });
+  }
   if (type === 'group' && !participantObjectIds.some((id) => id.equals(creatorObjectId))) {
     participantObjectIds.push(creatorObjectId);
   }
@@ -73,6 +79,25 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
+  if (type === 'direct') {
+    const otherParticipantId = participantObjectIds.find((id) => !id.equals(creatorObjectId));
+    const existingBlock = otherParticipantId
+      ? await getDatabase().collection('user_blocks').findOne({
+          $or: [
+            { blockerUserId: creatorObjectId, blockedUserId: otherParticipantId },
+            { blockerUserId: otherParticipantId, blockedUserId: creatorObjectId },
+          ],
+        })
+      : null;
+
+    if (existingBlock) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Direct chat is unavailable',
+      });
+    }
+  }
+
   // For group chats, set creator as initial admin
   const admins = type === 'group' ? [creatorObjectId] : [];
 
@@ -88,6 +113,7 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
     groupContext: type === 'group' ? groupContext : undefined,
     avatarUrl,
     groupKind: type === 'group' ? groupKind || 'standard' : undefined,
+    aiEnabled: type === 'group' ? true : undefined,
     expiresAt: type === 'group' && groupKind === 'temporary' ? expiresDate : undefined,
     createdAt: now,
     updatedAt: now,

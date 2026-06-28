@@ -4,12 +4,25 @@ import { X, Plus, Trash2 } from 'lucide-react';
 interface PollModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreatePoll: (question: string, options: string[]) => void;
+  onCreatePoll: (
+    question: string,
+    options: string[],
+    settings: {
+      allowMultiple: boolean;
+      allowVoteChanges: boolean;
+      showVoters: boolean;
+      closesAt?: string;
+    }
+  ) => void;
 }
 
 export default function PollModal({ isOpen, onClose, onCreatePoll }: PollModalProps) {
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState(['', '']);
+  const [allowMultiple, setAllowMultiple] = useState(false);
+  const [allowVoteChanges, setAllowVoteChanges] = useState(true);
+  const [showVoters, setShowVoters] = useState(false);
+  const [closesAt, setClosesAt] = useState('');
 
   const handleAddOption = () => {
     if (options.length < 10) {
@@ -32,7 +45,12 @@ export default function PollModal({ isOpen, onClose, onCreatePoll }: PollModalPr
   const handleCreate = () => {
     const validOptions = options.filter((opt) => opt.trim());
     if (question.trim() && validOptions.length >= 2) {
-      onCreatePoll(question.trim(), validOptions);
+      onCreatePoll(question.trim(), validOptions, {
+        allowMultiple,
+        allowVoteChanges,
+        showVoters,
+        closesAt: closesAt ? new Date(closesAt).toISOString() : undefined,
+      });
       handleClose();
     }
   };
@@ -40,6 +58,10 @@ export default function PollModal({ isOpen, onClose, onCreatePoll }: PollModalPr
   const handleClose = () => {
     setQuestion('');
     setOptions(['', '']);
+    setAllowMultiple(false);
+    setAllowVoteChanges(true);
+    setShowVoters(false);
+    setClosesAt('');
     onClose();
   };
 
@@ -107,6 +129,45 @@ export default function PollModal({ isOpen, onClose, onCreatePoll }: PollModalPr
                 Add option
               </button>
             )}
+          </div>
+
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <label className="flex items-center justify-between gap-3 text-sm text-gray-700">
+              <span>Multiple choice</span>
+              <input
+                type="checkbox"
+                checked={allowMultiple}
+                onChange={(e) => setAllowMultiple(e.target.checked)}
+                className="h-4 w-4 accent-[#00a884]"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3 text-sm text-gray-700">
+              <span>Allow vote changes</span>
+              <input
+                type="checkbox"
+                checked={allowVoteChanges}
+                onChange={(e) => setAllowVoteChanges(e.target.checked)}
+                className="h-4 w-4 accent-[#00a884]"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3 text-sm text-gray-700">
+              <span>Show voters</span>
+              <input
+                type="checkbox"
+                checked={showVoters}
+                onChange={(e) => setShowVoters(e.target.checked)}
+                className="h-4 w-4 accent-[#00a884]"
+              />
+            </label>
+            <label className="block text-sm text-gray-700">
+              <span className="mb-1 block font-medium">Close time</span>
+              <input
+                type="datetime-local"
+                value={closesAt}
+                onChange={(e) => setClosesAt(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#00a884]"
+              />
+            </label>
           </div>
         </div>
 

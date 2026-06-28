@@ -5,7 +5,12 @@ import { serviceUrls } from '../config.js';
 const router: Router = Router();
 
 function hasJsonBody(req: any) {
-  return req.body && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  return (
+    req.body &&
+    contentType.includes('application/json') &&
+    ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
+  );
 }
 
 function writeJsonBody(proxyReq: any, req: any) {
@@ -14,6 +19,18 @@ function writeJsonBody(proxyReq: any, req: any) {
   proxyReq.setHeader('Content-Type', 'application/json');
   proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
   proxyReq.write(bodyData);
+}
+
+function forwardCommonHeaders(proxyReq: any, req: any) {
+  if (req.headers.authorization) {
+    proxyReq.setHeader('Authorization', req.headers.authorization);
+  }
+  if (req.headers.cookie) {
+    proxyReq.setHeader('Cookie', req.headers.cookie);
+  }
+  if (req.requestId) {
+    proxyReq.setHeader('x-request-id', req.requestId);
+  }
 }
 
 // Proxy to Auth Service
@@ -27,10 +44,7 @@ router.use(
     },
     cookieDomainRewrite: '',
     onProxyReq: (proxyReq, req: any) => {
-      // Forward cookies
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
+      forwardCommonHeaders(proxyReq, req);
       writeJsonBody(proxyReq, req);
     },
     onProxyRes: (proxyRes, _req, res) => {
@@ -64,20 +78,97 @@ router.use(
       '^/api/users': '',
     },
     onProxyReq: (proxyReq, req: any) => {
-      // Forward Authorization header
-      if (req.headers.authorization) {
-        proxyReq.setHeader('Authorization', req.headers.authorization);
-      }
-      // Forward cookies
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
+      forwardCommonHeaders(proxyReq, req);
       writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
       console.error('Users service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Users service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/moments',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/moments': '/moments',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Moments service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Moments service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/profiles',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/profiles': '/profiles',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Profiles service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Profiles service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/reports',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/reports': '/reports',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Reports service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Reports service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/moderation',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/moderation': '/moderation',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Moderation service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Moderation service unavailable' });
       }
     },
   })
@@ -93,14 +184,7 @@ router.use(
       '^/api/chats': '',
     },
     onProxyReq: (proxyReq, req: any) => {
-      // Forward Authorization header
-      if (req.headers.authorization) {
-        proxyReq.setHeader('Authorization', req.headers.authorization);
-      }
-      // Forward cookies
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
+      forwardCommonHeaders(proxyReq, req);
       writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
@@ -122,12 +206,7 @@ router.use(
       '^/api/intelligence': '/intelligence',
     },
     onProxyReq: (proxyReq, req: any) => {
-      if (req.headers.authorization) {
-        proxyReq.setHeader('Authorization', req.headers.authorization);
-      }
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
+      forwardCommonHeaders(proxyReq, req);
       writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
@@ -149,14 +228,7 @@ router.use(
       '^/api/messages': '',
     },
     onProxyReq: (proxyReq, req: any) => {
-      // Forward Authorization header
-      if (req.headers.authorization) {
-        proxyReq.setHeader('Authorization', req.headers.authorization);
-      }
-      // Forward cookies
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
+      forwardCommonHeaders(proxyReq, req);
       writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
@@ -178,18 +250,35 @@ router.use(
       '^/api/calls': '/calls',
     },
     onProxyReq: (proxyReq, req: any) => {
-      if (req.headers.authorization) {
-        proxyReq.setHeader('Authorization', req.headers.authorization);
-      }
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
+      forwardCommonHeaders(proxyReq, req);
       writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
       console.error('Calls service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Calls service unavailable' });
+      }
+    },
+  })
+);
+
+// Proxy group invite preview/join endpoints to Chats Service
+router.use(
+  '/api/invites',
+  createProxyMiddleware({
+    target: serviceUrls.chats,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/invites': '/invites',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Invites service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Invites service unavailable' });
       }
     },
   })
@@ -206,12 +295,7 @@ router.use(
       '^/api/media': '',
     },
     onProxyReq: (proxyReq, req: any) => {
-      if (req.headers.authorization) {
-        proxyReq.setHeader('Authorization', req.headers.authorization);
-      }
-      if (req.headers.cookie) {
-        proxyReq.setHeader('Cookie', req.headers.cookie);
-      }
+      forwardCommonHeaders(proxyReq, req);
       writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {
@@ -233,6 +317,7 @@ router.use(
       '^/api/notifications': '',
     },
     onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
       writeJsonBody(proxyReq, req);
     },
     onError: (err, _req, res) => {

@@ -1,14 +1,16 @@
-import type { ChatIntelligenceSummary } from '@repo/types';
+import type { ChatIntelligenceSummary, SourceReference } from '@repo/types';
+import SourceEvidence from './SourceEvidence';
 
 interface ChatSummaryPanelProps {
   summary: ChatIntelligenceSummary;
+  onJumpToSource?: (source: SourceReference) => void;
 }
 
 function EmptySection({ text }: { text: string }) {
   return <p className="text-sm text-gray-500">{text}</p>;
 }
 
-export default function ChatSummaryPanel({ summary }: ChatSummaryPanelProps) {
+export default function ChatSummaryPanel({ summary, onJumpToSource }: ChatSummaryPanelProps) {
   return (
     <div className="mt-3 space-y-4">
       <div>
@@ -25,6 +27,7 @@ export default function ChatSummaryPanel({ summary }: ChatSummaryPanelProps) {
               <div key={`${decision.title}-${index}`} className="text-sm text-gray-700">
                 <p className="font-medium">{decision.title}</p>
                 <p className="text-xs text-gray-500">Status: {decision.status}</p>
+                <SourceEvidence sources={decision.sources} compact onJump={onJumpToSource} />
               </div>
             ))}
           </div>
@@ -41,6 +44,7 @@ export default function ChatSummaryPanel({ summary }: ChatSummaryPanelProps) {
                   {task.assignedTo ? `Assigned to ${task.assignedTo}` : 'Unassigned'}
                   {task.dueDate ? ` • Due ${task.dueDate}` : ''}
                 </p>
+                <SourceEvidence sources={task.sources} compact onJump={onJumpToSource} />
               </div>
             ))}
           </div>
@@ -53,9 +57,10 @@ export default function ChatSummaryPanel({ summary }: ChatSummaryPanelProps) {
           <div className="mt-1 space-y-1">
             {summary.questionsForMe.length === 0 && <EmptySection text="No direct questions." />}
             {summary.questionsForMe.map((question, index) => (
-              <p key={`${question.question}-${index}`} className="text-sm text-gray-700">
-                {question.question}
-              </p>
+              <div key={`${question.question}-${index}`} className="text-sm text-gray-700">
+                <p>{question.question}</p>
+                <SourceEvidence sources={question.sources} compact onJump={onJumpToSource} />
+              </div>
             ))}
           </div>
         </section>
@@ -65,15 +70,17 @@ export default function ChatSummaryPanel({ summary }: ChatSummaryPanelProps) {
           <div className="mt-1 space-y-1">
             {summary.importantLinks.length === 0 && <EmptySection text="No links highlighted." />}
             {summary.importantLinks.map((link, index) => (
-              <a
-                key={`${link.url}-${index}`}
-                href={link.url}
-                target="_blank"
-                rel="noreferrer"
-                className="block text-sm text-blue-600 hover:underline"
-              >
-                {link.label || link.url}
-              </a>
+              <div key={`${link.url}-${index}`}>
+                <a
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-sm text-blue-600 hover:underline"
+                >
+                  {link.label || link.url}
+                </a>
+                <SourceEvidence sources={link.sources} compact onJump={onJumpToSource} />
+              </div>
             ))}
           </div>
         </section>
@@ -83,9 +90,10 @@ export default function ChatSummaryPanel({ summary }: ChatSummaryPanelProps) {
           <div className="mt-1 space-y-1">
             {summary.waitingOn.length === 0 && <EmptySection text="Nothing currently waiting." />}
             {summary.waitingOn.map((item, index) => (
-              <p key={`${item.title}-${index}`} className="text-sm text-gray-700">
-                {item.title}
-              </p>
+              <div key={`${item.title}-${index}`} className="text-sm text-gray-700">
+                <p>{item.title}</p>
+                <SourceEvidence sources={item.sources} compact onJump={onJumpToSource} />
+              </div>
             ))}
           </div>
         </section>

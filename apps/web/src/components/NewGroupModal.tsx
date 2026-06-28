@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { X, Search, Loader2, Users, Check, Clock, Timer, Archive, Camera } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { apiClient, getAccessToken } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { chatKeys } from '@/hooks/useChats';
+import { useFileUpload } from '@/hooks/useFileUpload';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Chat, User } from '@repo/types';
 
@@ -14,15 +15,6 @@ interface NewGroupModalProps {
 }
 
 type ExpirationOption = '1hour' | '24hours' | '3days' | '1week' | 'custom';
-
-interface AvatarPresignResponse {
-  uploadUrl: string;
-  mediaId: string;
-  mediaUrl?: string;
-  publicUrl?: string;
-  url?: string;
-  uploadAuthRequired?: boolean;
-}
 
 const expirationOptions: { value: ExpirationOption; label: string; ms?: number }[] = [
   { value: '1hour', label: '1 hour', ms: 60 * 60 * 1000 },
@@ -39,7 +31,6 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [groupName, setGroupName] = useState('');
   const [groupDescription, setGroupDescription] = useState('');
-  const [groupContext, setGroupContext] = useState('');
   const [isTemporary, setIsTemporary] = useState(false);
   const [expiration, setExpiration] = useState<ExpirationOption>('24hours');
   const [customExpirationDate, setCustomExpirationDate] = useState('');
@@ -52,6 +43,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
+  const { uploadMedia } = useFileUpload();
 
   const getExpirationDate = (): Date | null => {
     if (!isTemporary) return null;
@@ -92,7 +84,6 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
         participantIds,
         title: groupName.trim() || 'New Group',
         description: groupDescription.trim() || undefined,
-        groupContext: groupContext.trim() || undefined,
         ...(groupAvatarUrl ? { avatarUrl: groupAvatarUrl } : {}),
         groupKind: isTemporary ? 'temporary' : 'standard',
         expiresAt: getExpirationDate()?.toISOString(),
@@ -107,48 +98,6 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
       navigate(`/chats/${chat._id}`);
     },
   });
-
-  const uploadGroupAvatar = async (file: File): Promise<string | null> => {
-    setIsUploadingAvatar(true);
-    setAvatarUploadError('');
-    try {
-      const { data: presignData } = await apiClient.post<AvatarPresignResponse>('/api/media/presign', {
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-      });
-
-      const headers: Record<string, string> = { 'Content-Type': file.type };
-      if (presignData.uploadAuthRequired) {
-        const token = getAccessToken();
-        if (!token) throw new Error('Authentication required to upload group photo');
-        headers.Authorization = `Bearer ${token}`;
-      }
-
-      await axios.put(presignData.uploadUrl, file, {
-        headers,
-        withCredentials: Boolean(presignData.uploadAuthRequired),
-      });
-
-      return (
-        presignData.mediaUrl ||
-        presignData.publicUrl ||
-        presignData.url ||
-        presignData.uploadUrl.split('?')[0] ||
-        null
-      );
-    } catch (err) {
-      const message = axios.isAxiosError(err)
-        ? err.response?.data?.message || err.message
-        : err instanceof Error
-          ? err.message
-          : 'Group photo upload failed';
-      setAvatarUploadError(`${message}. The preview will not be saved unless upload succeeds.`);
-      return null;
-    } finally {
-      setIsUploadingAvatar(false);
-    }
-  };
 
   const handleUserToggle = (user: User) => {
     setSelectedUsers((prev) => {
@@ -166,7 +115,6 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     setSelectedUsers([]);
     setGroupName('');
     setGroupDescription('');
-    setGroupContext('');
     setIsTemporary(false);
     setExpiration('24hours');
     setCustomExpirationDate('');
@@ -198,8 +146,16 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     };
     reader.readAsDataURL(file);
 
-    const uploadedUrl = await uploadGroupAvatar(file);
-    setGroupAvatarUrl(uploadedUrl || '');
+    setIsUploadingAvatar(true);
+    setAvatarUploadError('');
+    const uploaded = await uploadMedia?.(file);
+    if (uploaded?.mediaUrl || uploaded?.publicUrl) {
+      setGroupAvatarUrl(uploaded.mediaUrl || uploaded.publicUrl || '');
+    } else {
+      setGroupAvatarUrl('');
+      setAvatarUploadError('We could not upload this group photo. Try again.');
+    }
+    setIsUploadingAvatar(false);
 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -232,8 +188,8 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
-      <div className="grid max-h-[88vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 md:grid-cols-[1fr_320px]">
-        <div className="flex flex-col overflow-hidden">
+      <div className="flex max-h-[88vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex w-full flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-700">
           <div className="flex items-center gap-3">
@@ -297,7 +253,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
               <div className="mb-3 flex items-center gap-6 text-xs font-semibold uppercase tracking-[0.1em] text-slate-400">
                 <span className="text-[#0f766e]">Basics</span>
                 <span>Members</span>
-                <span>Group Context</span>
+                <span>Description</span>
               </div>
               <div className="relative">
                 <Search
@@ -452,21 +408,8 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                   maxLength={500}
                   className="min-h-20 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-400 focus:ring-2 focus:ring-[#99f6e4] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-teal-500"
                 />
-              </div>
-
-              <div className="mb-4">
-                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Group Context
-                </label>
-                <textarea
-                  value={groupContext}
-                  onChange={(e) => setGroupContext(e.target.value)}
-                  placeholder="Optional: goals, norms, important background, or how Chat Intelligence should understand this group."
-                  maxLength={2000}
-                  className="min-h-28 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-400 focus:ring-2 focus:ring-[#99f6e4] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-teal-500"
-                />
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Used by Summary, Actions, and Group Brain. Members can see it; admins can edit it.
+                  Describe what this group is for. Blabber uses this to help members and improve summaries, actions, and group memory.
                 </p>
               </div>
 
@@ -647,34 +590,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
             )}
           </>
         )}
-      </div>
-        <aside className="hidden border-l border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-800/50 md:block">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 text-center dark:border-slate-700 dark:bg-slate-800">
-            {groupAvatar ? (
-              <img
-                src={groupAvatar}
-                alt="Group preview"
-                className="mx-auto mb-3 h-16 w-16 rounded-2xl object-cover"
-              />
-            ) : (
-              <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 text-3xl text-slate-900 dark:border-slate-700 dark:text-white">
-                #
-              </div>
-            )}
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Group Preview</h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Add shared context so Summary, Actions, and Group Brain understand the group.
-            </p>
-            <div className="mt-3 flex justify-center gap-2">
-              <span className="rounded-full bg-[#e7f8f4] px-2 py-1 text-[10px] font-semibold text-[#0f766e]">
-                AI Enhanced
-              </span>
-              <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200">
-                Encrypted
-              </span>
-            </div>
-          </div>
-        </aside>
+        </div>
       </div>
     </div>
   );

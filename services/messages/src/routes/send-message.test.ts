@@ -103,6 +103,18 @@ describe('POST /:chatId - Send Message', () => {
   });
 
   it('should send message with media', async () => {
+    const mediaId = new ObjectId();
+    await getDatabase().collection('media').insertOne({
+      _id: mediaId,
+      userId: TEST_USER_ID,
+      fileType: 'image/jpeg',
+      url: 'http://localhost:3000/api/media/local/test-image.jpg',
+      storage: 'local',
+      uploadedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
     const token = generateToken(TEST_USER_ID.toString());
 
     const response = await request(app)
@@ -110,7 +122,7 @@ describe('POST /:chatId - Send Message', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         body: 'Check out this image',
-        mediaId: 'media-123',
+        mediaId: mediaId.toString(),
       });
 
     expect(response.status).toBe(201);

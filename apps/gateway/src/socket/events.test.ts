@@ -1,8 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { createServer } from 'http';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import jwt from 'jsonwebtoken';
-import express from 'express';
 import axios from 'axios';
 import app from '../app.js';
 import { setupSocketIO } from './index.js';
@@ -20,64 +19,12 @@ describe('Socket.io Client Events', () => {
   const TEST_USER_ID = 'user123';
   let validToken: string;
 
-  // Mock services
-  let mockMessagesService: any;
-  let mockChatsService: any;
-
   beforeAll(async () => {
     // Set JWT secret for testing
     process.env.JWT_ACCESS_SECRET = JWT_SECRET;
 
-    // Set service URLs for testing
-    process.env.MESSAGES_SERVICE_URL = 'http://localhost:4001';
-    process.env.CHATS_SERVICE_URL = 'http://localhost:4002';
-
     // Generate valid token
     validToken = jwt.sign({ userId: TEST_USER_ID }, JWT_SECRET, { expiresIn: '15m' });
-
-    // Start mock services
-    const mockMessagesApp = express();
-    mockMessagesApp.use(express.json());
-    mockMessagesApp.post('/:chatId', (req, res) => {
-      res.json({
-        message: {
-          _id: 'msg123',
-          chatId: req.params.chatId,
-          senderId: req.headers['x-user-id'],
-          body: req.body.body,
-          createdAt: new Date().toISOString(),
-        },
-      });
-    });
-    mockMessagesApp.post('/:messageId/read', (req, res) => {
-      res.json({ success: true });
-    });
-    mockMessagesApp.post('/:messageId/react', (req, res) => {
-      res.json({
-        message: {
-          _id: req.params.messageId,
-          reactions: [{ userId: req.headers['x-user-id'], emoji: req.body.emoji }],
-        },
-      });
-    });
-    mockMessagesService = mockMessagesApp.listen(4001);
-
-    const mockChatsApp = express();
-    mockChatsApp.use(express.json());
-    mockChatsApp.post('/', (req, res) => {
-      res.json({
-        chat: {
-          _id: 'chat123',
-          type: req.body.type,
-          participants: req.body.participantIds,
-          createdAt: new Date().toISOString(),
-        },
-      });
-    });
-    mockChatsService = mockChatsApp.listen(4002);
-
-    // Wait for mock services to start
-    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Create HTTP server
     httpServer = createServer(app);
@@ -93,11 +40,47 @@ describe('Socket.io Client Events', () => {
     });
   });
 
-  afterAll(async () => {
-    // Close mock services
-    mockMessagesService?.close();
-    mockChatsService?.close();
+  beforeEach(() => {
+    mockedAxios.post.mockImplementation((url: string, body: any) => {
+      if (url.endsWith('/chat123')) {
+        return Promise.resolve({
+          data: {
+            _id: 'msg123',
+            chatId: 'chat123',
+            senderId: TEST_USER_ID,
+            body: body.body,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
 
+      if (url.includes('/read')) {
+        return Promise.resolve({ data: { success: true } });
+      }
+
+      if (url.includes('/react')) {
+        return Promise.resolve({
+          data: {
+            _id: 'msg123',
+            reactions: [{ userId: TEST_USER_ID, emoji: body.emoji }],
+          },
+        });
+      }
+
+      return Promise.resolve({
+        data: {
+          chat: {
+            _id: 'chat123',
+            type: body.type,
+            participants: body.participantIds,
+            createdAt: new Date().toISOString(),
+          },
+        },
+      });
+    });
+  });
+
+  afterAll(async () => {
     // Close Socket.io server
     await new Promise<void>((resolve) => {
       io.close(() => {
@@ -114,8 +97,6 @@ describe('Socket.io Client Events', () => {
 
     // Clean up env
     delete process.env.JWT_ACCESS_SECRET;
-    delete process.env.MESSAGES_SERVICE_URL;
-    delete process.env.CHATS_SERVICE_URL;
   });
 
   it('should handle auth:hello event', async () => {
@@ -163,10 +144,11 @@ describe('Socket.io Client Events', () => {
       clientSocket.on('connect', () => {
         // Join the chat room first
         clientSocket.on('chat:joined', () => {
-          // Listen for new message
-          clientSocket.on('message:new', (message) => {
-            expect(message._id).toBe('msg123');
-            expect(message.body).toBe('Hello world');
+          // Listen for sender acknowledgement. Broadcast delivery comes from pubsub.
+          clientSocket.on('message:ack', (ack) => {
+            expect(ack.messageId).toBe('msg123');
+            expect(ack.message._id).toBe('msg123');
+            expect(ack.message.body).toBe('Hello world');
             clientSocket.disconnect();
             resolve();
           });

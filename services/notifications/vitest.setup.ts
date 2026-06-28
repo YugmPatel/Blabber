@@ -1,7 +1,6 @@
-// Mock environment variables for testing
-process.env.NODE_ENV = 'test';
-process.env.LOG_LEVEL = 'error';
-process.env.PORT = '3006';
-process.env.MONGO_URI = 'mongodb://localhost:27017';
-process.env.MONGO_DB_NAME = 'whatsapp_test';
-process.env.ALLOWED_ORIGINS = 'http://localhost:3000';
+import { configureTestServiceEnv } from '@repo/config';
+
+configureTestServiceEnv({ service: 'notifications', port: 3006 });
+process.env.VAPID_PUBLIC_KEY ||= 'test-vapid-public-key';
+process.env.VAPID_PRIVATE_KEY ||= 'test-vapid-private-key';
+process.env.VAPID_SUBJECT ||= 'mailto:test@example.com';

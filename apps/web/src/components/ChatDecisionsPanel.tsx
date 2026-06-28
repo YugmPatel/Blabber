@@ -1,5 +1,6 @@
 import { Check, RefreshCw, Scale, X } from 'lucide-react';
-import type { ChatDecision, ChatDecisionStatus } from '@repo/types';
+import type { ChatDecision, ChatDecisionStatus, SourceReference } from '@repo/types';
+import SourceEvidence from './SourceEvidence';
 
 interface ChatDecisionsPanelProps {
   decisions: ChatDecision[];
@@ -10,6 +11,7 @@ interface ChatDecisionsPanelProps {
   onFindDecisions: () => void;
   onUpdateDecision: (decisionId: string, status: ChatDecisionStatus) => void;
   onDeleteDecision: (decisionId: string) => void;
+  onJumpToSource?: (source: SourceReference) => void;
 }
 
 const groupOrder: ChatDecisionStatus[] = ['final', 'proposed', 'changed', 'dismissed'];
@@ -44,11 +46,13 @@ function DecisionCard({
   isUpdating,
   onUpdateDecision,
   onDeleteDecision,
+  onJumpToSource,
 }: {
   decision: ChatDecision;
   isUpdating: boolean;
   onUpdateDecision: (decisionId: string, status: ChatDecisionStatus) => void;
   onDeleteDecision: (decisionId: string) => void;
+  onJumpToSource?: (source: SourceReference) => void;
 }) {
   const decisionId = decision.id;
   const people = formatPeople(decision);
@@ -82,6 +86,7 @@ function DecisionCard({
         {decision.decidedAt && <span>{decision.decidedAt}</span>}
         <span>{decision.sourceMessageIds.length} source</span>
       </div>
+      <SourceEvidence sources={decision.sources} compact onJump={onJumpToSource} />
 
       {decisionId && (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -143,6 +148,7 @@ export default function ChatDecisionsPanel({
   onFindDecisions,
   onUpdateDecision,
   onDeleteDecision,
+  onJumpToSource,
 }: ChatDecisionsPanelProps) {
   const grouped = groupOrder
     .map((status) => ({
@@ -202,6 +208,7 @@ export default function ChatDecisionsPanel({
                     isUpdating={isUpdating}
                     onUpdateDecision={onUpdateDecision}
                     onDeleteDecision={onDeleteDecision}
+                    onJumpToSource={onJumpToSource}
                   />
                 ))}
               </div>

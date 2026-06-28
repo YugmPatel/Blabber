@@ -21,9 +21,24 @@ export async function requireChatIntelligenceEnabled(
     if (settings?.chatIntelligenceEnabled === false) {
       res.status(403).json({
         error: 'Forbidden',
-        message: 'Chat Intelligence is disabled in your settings.',
+        message: 'AI privacy is disabled in your settings.',
       });
       return;
+    }
+
+    const chatId = (req.params.chatId || req.params.id) as string | undefined;
+    if (chatId && ObjectId.isValid(chatId)) {
+      const chat = await getDatabase()
+        .collection('chats')
+        .findOne({ _id: new ObjectId(chatId), type: 'group', participants: new ObjectId(userId) });
+
+      if (chat?.aiEnabled === false) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'AI Intelligence is disabled for this group.',
+        });
+        return;
+      }
     }
 
     next();

@@ -20,6 +20,17 @@ const updatePreferencesSchema = z
     messageNotificationsEnabled: z.boolean().optional(),
     callNotificationsEnabled: z.boolean().optional(),
     notificationPreviewsEnabled: z.boolean().optional(),
+    mentionNotificationsEnabled: z.boolean().optional(),
+    actionRemindersEnabled: z.boolean().optional(),
+    actionReminderDueTomorrowEnabled: z.boolean().optional(),
+    actionReminderDueTodayEnabled: z.boolean().optional(),
+    actionReminderOverdueEnabled: z.boolean().optional(),
+    actionReminderStaleEnabled: z.boolean().optional(),
+    eventRemindersEnabled: z.boolean().optional(),
+    eventReminderDayBeforeEnabled: z.boolean().optional(),
+    eventReminderHourBeforeEnabled: z.boolean().optional(),
+    momentUpdatesEnabled: z.boolean().optional(),
+    momentActivityEnabled: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'At least one preference is required',
@@ -27,6 +38,10 @@ const updatePreferencesSchema = z
 
 export async function getPreferences(req: Request, res: Response) {
   try {
+    const authUserId = (req as any).user?.userId;
+    if (!authUserId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+    }
     const params = userIdParamsSchema.safeParse(req.params);
     if (!params.success) {
       return res.status(400).json({
@@ -34,6 +49,9 @@ export async function getPreferences(req: Request, res: Response) {
         message: 'Invalid user ID',
         details: params.error.errors,
       });
+    }
+    if (authUserId !== params.data.userId) {
+      return res.status(403).json({ error: 'Forbidden', message: "You cannot view another user's notification settings" });
     }
 
     const preferences = await getNotificationPreferences(new ObjectId(params.data.userId));
@@ -49,6 +67,10 @@ export async function getPreferences(req: Request, res: Response) {
 
 export async function updatePreferences(req: Request, res: Response) {
   try {
+    const authUserId = (req as any).user?.userId;
+    if (!authUserId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+    }
     const params = userIdParamsSchema.safeParse(req.params);
     if (!params.success) {
       return res.status(400).json({
@@ -56,6 +78,9 @@ export async function updatePreferences(req: Request, res: Response) {
         message: 'Invalid user ID',
         details: params.error.errors,
       });
+    }
+    if (authUserId !== params.data.userId) {
+      return res.status(403).json({ error: 'Forbidden', message: "You cannot update another user's notification settings" });
     }
 
     const body = updatePreferencesSchema.safeParse(req.body);

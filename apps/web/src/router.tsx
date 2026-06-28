@@ -7,9 +7,14 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import ChatsLayout from './pages/ChatsLayout';
 import ChatView from './pages/ChatView';
 import SettingsPage from './pages/SettingsPage';
-import StatusPage from './pages/StatusPage';
+import MomentsPage from './pages/MomentsPage';
 import CallsPage from './pages/CallsPage';
 import MyActionsPage from './pages/MyActionsPage';
+import MessageSearchPage from './pages/MessageSearchPage';
+import ArchivedChatsPage from './pages/ArchivedChatsPage';
+import SavedMessagesPage from './pages/SavedMessagesPage';
+import JoinInvitePage from './pages/JoinInvitePage';
+import SocialProfilePage from './pages/SocialProfilePage';
 
 export const router = createBrowserRouter([
   {
@@ -33,6 +38,10 @@ export const router = createBrowserRouter([
     element: <ResetPasswordPage />,
   },
   {
+    path: '/join/:token',
+    element: <JoinInvitePage />,
+  },
+  {
     path: '/chats',
     element: (
       <ProtectedRoute>
@@ -51,6 +60,14 @@ export const router = createBrowserRouter([
     element: <Navigate to="/settings?s=profile" replace />,
   },
   {
+    path: '/p/:handle',
+    element: (
+      <ProtectedRoute>
+        <SocialProfilePage />
+      </ProtectedRoute>
+    ),
+  },
+  {
     path: '/settings',
     element: (
       <ProtectedRoute>
@@ -60,9 +77,21 @@ export const router = createBrowserRouter([
   },
   {
     path: '/status',
+    element: <Navigate to="/moments" replace />,
+  },
+  {
+    path: '/moments',
     element: (
       <ProtectedRoute>
-        <StatusPage />
+        <MomentsPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/moments/archive',
+    element: (
+      <ProtectedRoute>
+        <MomentsPage />
       </ProtectedRoute>
     ),
   },
@@ -71,6 +100,30 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <CallsPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/archived',
+    element: (
+      <ProtectedRoute>
+        <ArchivedChatsPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/saved',
+    element: (
+      <ProtectedRoute>
+        <SavedMessagesPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/search',
+    element: (
+      <ProtectedRoute>
+        <MessageSearchPage />
       </ProtectedRoute>
     ),
   },

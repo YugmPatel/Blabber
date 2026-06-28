@@ -279,7 +279,7 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Status Message</label>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Profile note</label>
                 <textarea
                   value={about}
                   onChange={(e) => setAbout(e.target.value)}

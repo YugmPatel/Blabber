@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import bcrypt from 'bcrypt';
 import { ObjectId } from 'mongodb';
 import { asyncHandler, UnauthorizedError } from '@repo/utils';
-import { getDeviceSessionsCollection } from '../models/device-session';
+import { compareRefreshToken, getDeviceSessionsCollection, hashRefreshToken } from '../models/device-session';
 import { getUsersCollection } from '../models/user';
 import {
   generateAccessToken,
@@ -32,7 +31,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
 
   // Find matching DeviceSession
   const deviceSessionsCollection = getDeviceSessionsCollection();
-  const sessions = await deviceSessionsCollection.find({ userId }).toArray();
+  const sessions = await deviceSessionsCollection.find({ userId, revokedAt: { $exists: false } } as any).toArray();
 
   if (sessions.length === 0) {
     throw new UnauthorizedError('Invalid refresh token');
@@ -41,7 +40,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
   // Find the session that matches the refresh token
   let matchingSession = null;
   for (const session of sessions) {
-    const isMatch = await bcrypt.compare(refreshToken, session.refreshTokenHash);
+    const isMatch = await compareRefreshToken(refreshToken, session.refreshTokenHash);
     if (isMatch) {
       matchingSession = session;
       break;
@@ -56,7 +55,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
   const usersCollection = getUsersCollection();
   const user = await usersCollection.findOne({ _id: userId });
 
-  if (!user) {
+  if (!user || user.deactivatedAt) {
     throw new UnauthorizedError('User not found');
   }
 
@@ -74,7 +73,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
   const newRefreshToken = generateRefreshToken(tokenPayload);
 
   // Hash new refresh token
-  const newRefreshTokenHash = await bcrypt.hash(newRefreshToken, 10);
+  const newRefreshTokenHash = await hashRefreshToken(newRefreshToken);
 
   // Create new DeviceSession
   const refreshTTL = getRefreshTokenTTL();
@@ -89,6 +88,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
     ipAddress: req.ip || 'unknown',
     expiresAt,
     createdAt: now,
+    lastActiveAt: now,
   });
 
   // Set new httpOnly cookie

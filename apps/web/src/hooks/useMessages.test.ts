@@ -135,7 +135,7 @@ describe('useMessages hooks', () => {
   describe('useSendMessage', () => {
     it('should send a message', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce({
-        data: { message: mockMessage },
+        data: mockMessage,
       });
 
       const { result } = renderQueryHook(() => useSendMessage('chat-1'));
@@ -152,7 +152,7 @@ describe('useMessages hooks', () => {
 
     it('should handle optimistic updates with tempId', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce({
-        data: { message: mockMessage },
+        data: mockMessage,
       });
 
       const { result } = renderQueryHook(() => useSendMessage('chat-1'));
@@ -178,7 +178,7 @@ describe('useMessages hooks', () => {
       };
 
       vi.mocked(apiClient.post).mockResolvedValueOnce({
-        data: { message: messageWithMedia },
+        data: messageWithMedia,
       });
 
       const { result } = renderQueryHook(() => useSendMessage('chat-1'));
@@ -203,7 +203,7 @@ describe('useMessages hooks', () => {
       };
 
       vi.mocked(apiClient.patch).mockResolvedValueOnce({
-        data: { message: editedMessage },
+        data: editedMessage,
       });
 
       const { result, queryClient } = renderQueryHook(() => useEditMessage('chat-1'));
@@ -248,7 +248,7 @@ describe('useMessages hooks', () => {
       };
 
       vi.mocked(apiClient.post).mockResolvedValueOnce({
-        data: { message: messageWithReaction },
+        data: messageWithReaction,
       });
 
       const { result, queryClient } = renderQueryHook(() => useAddReaction('chat-1'));
@@ -278,7 +278,7 @@ describe('useMessages hooks', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-      expect(apiClient.post).toHaveBeenCalledWith('/api/messages/msg-1/read', {
+      expect(apiClient.post).toHaveBeenCalledWith('/api/messages/read', {
         messageIds: ['msg-1', 'msg-2'],
       });
     });

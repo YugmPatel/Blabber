@@ -6,6 +6,8 @@ export interface RateLimitOptions {
   windowMs: number; // Time window in milliseconds
   maxRequests: number; // Max requests per window
   keyPrefix?: string; // Redis key prefix
+  keyGenerator?: (req: Request) => string;
+  failOpen?: boolean;
   skipSuccessfulRequests?: boolean;
   skipFailedRequests?: boolean;
 }
@@ -18,6 +20,8 @@ export class RateLimiter {
     this.redis = redis;
     this.options = {
       keyPrefix: 'ratelimit',
+      keyGenerator: this.getIdentifier.bind(this),
+      failOpen: process.env.NODE_ENV !== 'production',
       skipSuccessfulRequests: false,
       skipFailedRequests: false,
       ...options,
@@ -27,7 +31,7 @@ export class RateLimiter {
   middleware() {
     return async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const identifier = this.getIdentifier(req);
+        const identifier = this.options.keyGenerator(req);
         const key = `${this.options.keyPrefix}:${identifier}`;
         const windowSeconds = Math.ceil(this.options.windowMs / 1000);
 
@@ -50,6 +54,7 @@ export class RateLimiter {
 
         // Check if limit exceeded
         if (current > this.options.maxRequests) {
+          res.setHeader('Retry-After', ttl > 0 ? ttl : windowSeconds);
           throw new AppError(
             429,
             'Too many requests, please try again later',
@@ -59,6 +64,9 @@ export class RateLimiter {
 
         next();
       } catch (error) {
+        if (this.options.failOpen && !(error instanceof AppError)) {
+          return next();
+        }
         next(error);
       }
     };

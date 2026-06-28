@@ -14,6 +14,7 @@ const booleanFields = [
   'lastSeenVisible',
   'incomingCallsEnabled',
   'chatIntelligenceEnabled',
+  'momentArchiveEnabled',
 ] as const;
 
 function serializeSettings(settings: any) {
@@ -25,8 +26,19 @@ function serializeSettings(settings: any) {
     themePreference: settings.themePreference ?? DEFAULT_USER_SETTINGS.themePreference,
     chatIntelligenceEnabled:
       settings.chatIntelligenceEnabled ?? DEFAULT_USER_SETTINGS.chatIntelligenceEnabled,
+    momentArchiveEnabled: settings.momentArchiveEnabled ?? DEFAULT_USER_SETTINGS.momentArchiveEnabled,
+    timezone: settings.timezone ?? DEFAULT_USER_SETTINGS.timezone,
     updatedAt: settings.updatedAt,
   };
+}
+
+function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export const getMySettings = asyncHandler(async (req: Request, res: Response) => {
@@ -47,7 +59,7 @@ export const updateMySettings = asyncHandler(async (req: Request, res: Response)
     return;
   }
 
-  const patch: Record<string, boolean | ThemePreference> = {};
+  const patch: Record<string, boolean | ThemePreference | string> = {};
   for (const field of booleanFields) {
     if (field in req.body) {
       if (typeof req.body[field] !== 'boolean') {
@@ -62,6 +74,13 @@ export const updateMySettings = asyncHandler(async (req: Request, res: Response)
       throw new ValidationError('themePreference must be light, dark, or system');
     }
     patch.themePreference = req.body.themePreference;
+  }
+
+  if ('timezone' in req.body) {
+    if (typeof req.body.timezone !== 'string' || !isValidTimezone(req.body.timezone)) {
+      throw new ValidationError('timezone must be a valid IANA timezone');
+    }
+    patch.timezone = req.body.timezone;
   }
 
   if (Object.keys(patch).length === 0) {

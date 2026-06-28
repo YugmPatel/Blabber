@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isProduction, requireSafeParse, throwConfigError } from './safe';
 
 const JWTConfigSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
@@ -10,12 +11,21 @@ const JWTConfigSchema = z.object({
 export type JWTConfig = z.infer<typeof JWTConfigSchema>;
 
 export function loadJWTConfig(): JWTConfig {
-  const result = JWTConfigSchema.safeParse(process.env);
-  
-  if (!result.success) {
-    console.error('❌ Invalid JWT configuration:', result.error.format());
-    throw new Error('Invalid JWT configuration');
+  const config = requireSafeParse('jwt', JWTConfigSchema, process.env) as JWTConfig;
+
+  if (
+    isProduction() &&
+    [config.JWT_ACCESS_SECRET, config.JWT_REFRESH_SECRET].some((secret) =>
+      /test|dev|development|secret/i.test(secret)
+    )
+  ) {
+    throwConfigError('jwt', [
+      {
+        path: 'JWT_ACCESS_SECRET/JWT_REFRESH_SECRET',
+        message: 'Production JWT secrets must not use development or test-looking values',
+      },
+    ]);
   }
-  
-  return result.data;
+
+  return config;
 }

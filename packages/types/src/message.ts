@@ -32,8 +32,22 @@ export interface Message {
       id: string;
       text: string;
       votes: string[];
+      voteCount?: number;
     }>;
     allowMultiple?: boolean;
+    allowVoteChanges?: boolean;
+    showVoters?: boolean;
+    closesAt?: string;
+    closedAt?: string;
+    closedBy?: string;
+    createdBy?: string;
+    currentUserVote?: string[];
+    votes?: Array<{
+      userId: string;
+      optionIds: string[];
+      votedAt: Date;
+      updatedAt: Date;
+    }>;
     closed?: boolean;
   };
   sticker?: {
@@ -43,14 +57,48 @@ export interface Message {
   event?: {
     title: string;
     startsAt: string;
+    startAt?: string;
+    endAt?: string;
+    timezone?: string;
     location?: string;
+    meetingUrl?: string;
     description?: string;
+    createdBy?: string;
+    updatedAt?: Date;
+    cancelledAt?: string;
+    cancelledBy?: string;
+    reminderEnabled?: boolean;
+    currentUserRsvp?: 'going' | 'maybe' | 'declined';
+    rsvps?: Array<{
+      userId: string;
+      status: 'going' | 'maybe' | 'declined';
+      respondedAt: Date;
+      updatedAt: Date;
+    }>;
   };
   replyTo?: {
     messageId: string;
     body: string;
     senderId: string;
+    senderDisplayName?: string;
+    messageType?: Message['type'];
+    snippet?: string;
+    attachmentLabel?: string;
+    unavailable?: boolean;
   };
+  forwarded?: {
+    isForwarded: boolean;
+  };
+  momentReply?: {
+    isMomentReply: boolean;
+    label: string;
+  };
+  mentions?: Array<{
+    userId: string;
+    start: number;
+    length: number;
+    displayName: string;
+  }>;
   reactions: Reaction[];
   status: 'sent' | 'delivered' | 'read';
   deletedFor: string[];
@@ -90,8 +138,22 @@ export const MessageSchema = z.object({
       id: z.string(),
       text: z.string(),
       votes: z.array(z.string()),
+      voteCount: z.number().int().min(0).optional(),
     })),
     allowMultiple: z.boolean().optional(),
+    allowVoteChanges: z.boolean().optional(),
+    showVoters: z.boolean().optional(),
+    closesAt: z.string().optional(),
+    closedAt: z.string().optional(),
+    closedBy: z.string().optional(),
+    createdBy: z.string().optional(),
+    currentUserVote: z.array(z.string()).optional(),
+    votes: z.array(z.object({
+      userId: z.string(),
+      optionIds: z.array(z.string()),
+      votedAt: z.date(),
+      updatedAt: z.date(),
+    })).optional(),
     closed: z.boolean().optional(),
   }).optional(),
   sticker: z.object({
@@ -101,14 +163,48 @@ export const MessageSchema = z.object({
   event: z.object({
     title: z.string(),
     startsAt: z.string(),
+    startAt: z.string().optional(),
+    endAt: z.string().optional(),
+    timezone: z.string().optional(),
     location: z.string().optional(),
+    meetingUrl: z.string().optional(),
     description: z.string().optional(),
+    createdBy: z.string().optional(),
+    updatedAt: z.date().optional(),
+    cancelledAt: z.string().optional(),
+    cancelledBy: z.string().optional(),
+    reminderEnabled: z.boolean().optional(),
+    currentUserRsvp: z.enum(['going', 'maybe', 'declined']).optional(),
+    rsvps: z.array(z.object({
+      userId: z.string(),
+      status: z.enum(['going', 'maybe', 'declined']),
+      respondedAt: z.date(),
+      updatedAt: z.date(),
+    })).optional(),
   }).optional(),
   replyTo: z.object({
     messageId: z.string(),
     body: z.string(),
     senderId: z.string(),
+    senderDisplayName: z.string().optional(),
+    messageType: z.enum(['text', 'image', 'audio', 'document', 'poll', 'sticker', 'event']).optional(),
+    snippet: z.string().optional(),
+    attachmentLabel: z.string().optional(),
+    unavailable: z.boolean().optional(),
   }).optional(),
+  forwarded: z.object({
+    isForwarded: z.boolean(),
+  }).optional(),
+  momentReply: z.object({
+    isMomentReply: z.boolean(),
+    label: z.string(),
+  }).optional(),
+  mentions: z.array(z.object({
+    userId: z.string(),
+    start: z.number().int().min(0),
+    length: z.number().int().positive(),
+    displayName: z.string(),
+  })).optional(),
   reactions: z.array(ReactionSchema),
   status: z.enum(['sent', 'delivered', 'read']),
   deletedFor: z.array(z.string()),
@@ -126,6 +222,9 @@ export const CreateMessageDTOSchema = z.object({
     question: z.string().min(1).max(300),
     options: z.array(z.string().min(1).max(200)).min(2).max(12),
     allowMultiple: z.boolean().optional(),
+    allowVoteChanges: z.boolean().optional(),
+    showVoters: z.boolean().optional(),
+    closesAt: z.string().datetime().optional(),
   }).optional(),
   sticker: z.object({
     emoji: z.string().min(1).max(20),
@@ -134,10 +233,20 @@ export const CreateMessageDTOSchema = z.object({
   event: z.object({
     title: z.string().min(1).max(200),
     startsAt: z.string().min(1),
+    startAt: z.string().datetime().optional(),
+    endAt: z.string().datetime().optional(),
+    timezone: z.string().min(1).max(80).optional(),
     location: z.string().max(200).optional(),
+    meetingUrl: z.string().url().optional(),
     description: z.string().max(1000).optional(),
+    reminderEnabled: z.boolean().optional(),
   }).optional(),
   replyToId: z.string().optional(),
+  mentions: z.array(z.object({
+    userId: z.string(),
+    start: z.number().int().min(0),
+    length: z.number().int().positive(),
+  })).max(20).optional(),
   clientMessageId: z.string().optional(),
   tempId: z.string().optional(),
 });
@@ -147,6 +256,11 @@ export type CreateMessageDTO = z.infer<typeof CreateMessageDTOSchema>;
 // Update Message DTO
 export const UpdateMessageDTOSchema = z.object({
   body: z.string().min(1).max(10000),
+  mentions: z.array(z.object({
+    userId: z.string(),
+    start: z.number().int().min(0),
+    length: z.number().int().positive(),
+  })).max(20).optional(),
 });
 
 export type UpdateMessageDTO = z.infer<typeof UpdateMessageDTOSchema>;
@@ -167,7 +281,32 @@ export type MarkReadDTO = z.infer<typeof MarkReadDTOSchema>;
 
 // Poll Vote DTO
 export const PollVoteDTOSchema = z.object({
-  optionId: z.string().min(1),
+  optionId: z.string().min(1).optional(),
+  optionIds: z.array(z.string().min(1)).min(1).max(12).optional(),
+}).refine((value) => Boolean(value.optionId || value.optionIds?.length), {
+  message: 'At least one poll option is required',
 });
 
 export type PollVoteDTO = z.infer<typeof PollVoteDTOSchema>;
+
+export const EventRsvpDTOSchema = z.object({
+  status: z.enum(['going', 'maybe', 'declined']),
+});
+
+export type EventRsvpDTO = z.infer<typeof EventRsvpDTOSchema>;
+
+export const UpdateEventDTOSchema = z.object({
+  title: z.string().min(1).max(200).optional(),
+  startsAt: z.string().min(1).optional(),
+  startAt: z.string().datetime().optional(),
+  endAt: z.string().datetime().optional(),
+  timezone: z.string().min(1).max(80).optional(),
+  location: z.string().max(200).optional(),
+  meetingUrl: z.string().url().optional().nullable(),
+  description: z.string().max(1000).optional(),
+  reminderEnabled: z.boolean().optional(),
+}).refine((value) => Object.keys(value).length > 0, {
+  message: 'At least one event field is required',
+});
+
+export type UpdateEventDTO = z.infer<typeof UpdateEventDTOSchema>;

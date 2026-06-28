@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { requireSafeParse } from './safe';
 
 const CommonConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -9,12 +10,5 @@ const CommonConfigSchema = z.object({
 export type CommonConfig = z.infer<typeof CommonConfigSchema>;
 
 export function loadCommonConfig(): CommonConfig {
-  const result = CommonConfigSchema.safeParse(process.env);
-  
-  if (!result.success) {
-    console.error('❌ Invalid common configuration:', result.error.format());
-    throw new Error('Invalid common configuration');
-  }
-  
-  return result.data;
+  return requireSafeParse('common', CommonConfigSchema, process.env) as CommonConfig;
 }

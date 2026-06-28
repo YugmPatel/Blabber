@@ -12,7 +12,14 @@ export interface User {
   avatarSource?: 'google' | 'upload' | 'none';
   googleAvatarUrl?: string;
   about?: string;
+  profileHandle?: string;
+  profileBio?: string;
+  profileWebsite?: string;
+  profileVisibility?: 'private' | 'public';
+  profileHandleChangedAt?: Date;
+  profileUpdatedAt?: Date;
   role?: string;
+  platformRole?: 'user' | 'moderator' | 'admin';
   department?: string;
   contacts: ObjectId[];
   blocked: ObjectId[];
@@ -35,6 +42,11 @@ export async function createUserIndexes(): Promise<void> {
 
     // Unique index on email
     await collection.createIndex({ email: 1 }, { unique: true });
+    await collection.createIndex(
+      { profileHandle: 1 },
+      { unique: true, sparse: true, name: 'profile_handle_unique' }
+    );
+    await collection.createIndex({ platformRole: 1 }, { sparse: true });
 
     // Text index on username and name for search. MongoDB rejects creating the
     // same text index under a new name, so reuse an equivalent existing index.

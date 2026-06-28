@@ -113,7 +113,7 @@ describe('POST /password/forgot', () => {
     expect(tokens).toHaveLength(1);
   });
 
-  it('should return reset token in development mode', async () => {
+  it('should not return reset token in API responses', async () => {
     // Create test user
     const usersCollection = getUsersCollection();
     const passwordHash = await bcrypt.hash('password123', 10);
@@ -132,20 +132,12 @@ describe('POST /password/forgot', () => {
       updatedAt: new Date(),
     });
 
-    // Set NODE_ENV to development
-    const originalEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'development';
-
     const response = await request(app).post('/password/forgot').send({
       email: 'test@example.com',
     });
 
     expect(response.status).toBe(200);
-    expect(response.body.resetToken).toBeDefined();
-    expect(typeof response.body.resetToken).toBe('string');
-
-    // Restore NODE_ENV
-    process.env.NODE_ENV = originalEnv;
+    expect(response.body.resetToken).toBeUndefined();
   });
 
   it('should reject invalid email format', async () => {

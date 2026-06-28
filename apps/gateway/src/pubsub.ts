@@ -12,10 +12,17 @@ import {
   MessageDeletedEvent,
   MessageReactionEvent,
   MessageReadEvent,
+  MomentInteractionsUpdatedEvent,
+  MomentReactionUpdatedEvent,
+  ProfileUpdatedEvent,
+  FollowUpdatedEvent,
+  FollowRequestUpdatedEvent,
   ChatCreatedEvent,
   ChatUpdatedEvent,
   ChatMemberAddedEvent,
   ChatMemberRemovedEvent,
+  ChatArchiveEvent,
+  MessagePinEvent,
   UserOnlineEvent,
   UserOfflineEvent,
   UserTypingEvent,
@@ -60,12 +67,52 @@ function buildNoPreviewBody(event: MessageSentEvent) {
   return `${event.data.senderName || 'Someone'} sent you a new message`;
 }
 
+function mentionedUserIds(event: Pick<MessageSentEvent | MessageEditedEvent, 'data'>) {
+  return Array.from(new Set((event.data.mentions || []).map((mention: any) => mention.userId).filter(Boolean)));
+}
+
+function buildMentionPreview(event: Pick<MessageSentEvent | MessageEditedEvent, 'data'>) {
+  const senderName = event.data.senderName || 'Someone';
+  const text = (event.data.content || event.data.message?.body || '').trim();
+  return text ? `${senderName}: ${text.slice(0, 140)}` : `${senderName} mentioned you.`;
+}
+
+async function sendMentionPushes(io: SocketIOServer, event: Pick<MessageSentEvent | MessageEditedEvent, 'data'>): Promise<void> {
+  if (event.data.chatType !== 'group') return;
+  const groupName = event.data.chatTitle || 'a group';
+  const recipients = mentionedUserIds(event)
+    .filter((userId) => userId !== event.data.senderId)
+    .filter((userId) => (event.data.participants || []).includes(userId));
+
+  await Promise.all(Array.from(new Set(recipients)).map(async (recipientId) => {
+    if (isRecipientActivelyViewingChat(io, recipientId, event.data.chatId)) return;
+    try {
+      await axios.post(`${serviceUrls.notifications}/send`, {
+        userId: recipientId,
+        kind: 'mention',
+        title: `You were mentioned in ${groupName}`,
+        body: buildMentionPreview(event),
+        data: {
+          chatId: event.data.chatId,
+          messageId: event.data.messageId,
+          senderId: event.data.senderId,
+          route: `/chats/${event.data.chatId}?message=${event.data.messageId}`,
+          noPreviewBody: `You were mentioned in ${groupName}.`,
+        },
+      });
+    } catch (error: any) {
+      logger.error({ error: error.response?.data || error.message, recipientId, chatId: event.data.chatId }, 'Failed to send mention push notification');
+    }
+  }));
+}
+
 async function sendMessagePushes(io: SocketIOServer, event: MessageSentEvent): Promise<void> {
   const participants = event.data.participants ?? [];
   if (participants.length === 0) return;
 
   const senderId = event.data.senderId;
-  const recipients = participants.filter((participantId) => participantId !== senderId);
+  const mentionRecipients = new Set(mentionedUserIds(event));
+  const recipients = participants.filter((participantId) => participantId !== senderId && !mentionRecipients.has(participantId));
   const uniqueRecipients = Array.from(new Set(recipients));
 
   await Promise.all(
@@ -165,6 +212,7 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
     }
 
     void sendMessagePushes(io, eventTyped);
+    void sendMentionPushes(io, eventTyped);
   });
 
   pubsub.on(EventType.MESSAGE_EDITED, (event: AppEvent) => {
@@ -180,6 +228,23 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
         body: e.data.content,
         editedAt: e.data.editedAt,
       },
+    });
+    if (e.data.mentions?.length) {
+      void sendMentionPushes(io, e);
+    }
+  });
+
+  pubsub.on(EventType.MESSAGE_PINNED, (event: AppEvent) => {
+    const e = event as MessagePinEvent;
+    e.data.participants.forEach((userId) => {
+      io.to(`user:${userId}`).emit('message:pin', { pin: e.data.pin, chatId: e.data.chatId });
+    });
+  });
+
+  pubsub.on(EventType.MESSAGE_UNPINNED, (event: AppEvent) => {
+    const e = event as MessagePinEvent;
+    e.data.participants.forEach((userId) => {
+      io.to(`user:${userId}`).emit('message:unpin', { messageId: e.data.messageId, chatId: e.data.chatId });
     });
   });
 
@@ -220,6 +285,41 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
       chatId: e.data.chatId,
       userId: e.data.userId,
       messageIds: e.data.messageIds,
+    });
+  });
+
+  pubsub.on(EventType.MOMENT_REACTION_UPDATED, (event: AppEvent) => {
+    const e = event as MomentReactionUpdatedEvent;
+    io.to(`user:${e.data.viewerUserId}`).emit('moment:reaction', {
+      momentId: e.data.momentId,
+      emoji: e.data.emoji,
+      operation: e.data.operation,
+    });
+  });
+
+  pubsub.on(EventType.MOMENT_INTERACTIONS_UPDATED, (event: AppEvent) => {
+    const e = event as MomentInteractionsUpdatedEvent;
+    io.to(`user:${e.data.authorUserId}`).emit('moment:interactions', {
+      momentId: e.data.momentId,
+    });
+  });
+
+  pubsub.on(EventType.PROFILE_UPDATED, (event: AppEvent) => {
+    const e = event as ProfileUpdatedEvent;
+    io.to(`user:${e.data.userId}`).emit('profile:updated', { userId: e.data.userId });
+  });
+
+  pubsub.on(EventType.FOLLOW_UPDATED, (event: AppEvent) => {
+    const e = event as FollowUpdatedEvent;
+    Array.from(new Set(e.data.userIds)).forEach((userId) => {
+      io.to(`user:${userId}`).emit('follow:updated', {});
+    });
+  });
+
+  pubsub.on(EventType.FOLLOW_REQUEST_UPDATED, (event: AppEvent) => {
+    const e = event as FollowRequestUpdatedEvent;
+    Array.from(new Set(e.data.userIds)).forEach((userId) => {
+      io.to(`user:${userId}`).emit('follow:request-updated', {});
     });
   });
 
@@ -282,6 +382,16 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
     io.to(`user:${e.data.userId}`).emit('chat:left', {
       chatId: e.data.chatId,
     });
+  });
+
+  pubsub.on(EventType.CHAT_ARCHIVED, (event: AppEvent) => {
+    const e = event as ChatArchiveEvent;
+    io.to(`user:${e.data.userId}`).emit('chat:archived', e.data);
+  });
+
+  pubsub.on(EventType.CHAT_UNARCHIVED, (event: AppEvent) => {
+    const e = event as ChatArchiveEvent;
+    io.to(`user:${e.data.userId}`).emit('chat:unarchived', e.data);
   });
 
   pubsub.on(EventType.ACTION_CREATED, (event: AppEvent) => {

@@ -1,8 +1,16 @@
-import express, { Request, Response, NextFunction, Express } from 'express';
+import express, { Request, Response, Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { loadCommonConfig, loadCORSConfig, loadJWTConfig } from '@repo/config';
-import { logger, createAuthMiddleware } from '@repo/utils';
+import {
+  createAuthMiddleware,
+  errorHandler,
+  notFoundHandler,
+  requestIdMiddleware,
+  requestLogger,
+  runReadinessChecks,
+} from '@repo/utils';
+import { getDatabase } from './db';
 
 const app: Express = express();
 
@@ -31,18 +39,8 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  logger.info(
-    {
-      method: req.method,
-      path: req.path,
-      ip: req.ip,
-    },
-    'Incoming request'
-  );
-  next();
-});
+app.use(requestIdMiddleware);
+app.use(requestLogger('messages'));
 
 // Health check endpoint
 app.get('/healthz', (_req: Request, res: Response) => {
@@ -50,6 +48,17 @@ app.get('/healthz', (_req: Request, res: Response) => {
     status: 'ok',
     service: 'messages',
     timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/readyz', async (_req: Request, res: Response) => {
+  const readiness = await runReadinessChecks([
+    { name: 'mongo', check: () => getDatabase().command({ ping: 1 }).then(() => undefined) },
+  ]);
+  res.status(readiness.ready ? 200 : 503).json({
+    status: readiness.ready ? 'ready' : 'not_ready',
+    service: 'messages',
+    checks: readiness.checks,
   });
 });
 
@@ -61,9 +70,33 @@ import { deleteMessage } from './routes/delete-message';
 import { reactToMessage } from './routes/react-message';
 import { markMessagesAsRead } from './routes/mark-read';
 import { votePoll } from './routes/vote-poll';
+import { getMessageWindow } from './routes/get-message-window';
+import { searchMessages, searchMessagesGlobal } from './routes/search-messages';
+import { forwardMessage } from './routes/forward-message';
+import { listPins, pinMessage, unpinMessage } from './routes/message-pins';
+import { listSavedMessages, saveMessage, unsaveMessage } from './routes/saved-messages';
+import { listSharedContent } from './routes/shared-content';
+import { closePoll } from './routes/poll-actions';
+import { cancelEvent, exportEventIcs, rsvpEvent, updateEvent } from './routes/event-actions';
 // Note: Specific routes must come before parameterized routes
 app.post('/read', authMiddleware, markMessagesAsRead);
 app.post('/:messageId/read', authMiddleware, markMessagesAsRead);
+app.get('/source/:messageId/window', authMiddleware, getMessageWindow);
+app.get('/search/global', authMiddleware, searchMessagesGlobal);
+app.get('/search', authMiddleware, searchMessages);
+app.get('/shared', authMiddleware, listSharedContent);
+app.get('/saved', authMiddleware, listSavedMessages);
+app.get('/pins/:chatId', authMiddleware, listPins);
+app.post('/:messageId/forward', authMiddleware, forwardMessage);
+app.post('/:messageId/pin', authMiddleware, pinMessage);
+app.delete('/:messageId/pin', authMiddleware, unpinMessage);
+app.post('/:messageId/save', authMiddleware, saveMessage);
+app.delete('/:messageId/save', authMiddleware, unsaveMessage);
+app.post('/:messageId/poll/close', authMiddleware, closePoll);
+app.post('/:messageId/event/rsvp', authMiddleware, rsvpEvent);
+app.patch('/:messageId/event', authMiddleware, updateEvent);
+app.post('/:messageId/event/cancel', authMiddleware, cancelEvent);
+app.get('/:messageId/event.ics', authMiddleware, exportEventIcs);
 app.get('/:chatId', authMiddleware, getMessages);
 app.post('/:chatId', authMiddleware, sendMessage);
 app.patch('/:messageId', authMiddleware, editMessage);
@@ -72,40 +105,9 @@ app.post('/:messageId/react', authMiddleware, reactToMessage);
 app.post('/:messageId/poll/vote', authMiddleware, votePoll);
 
 // 404 handler
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Route ${req.method} ${req.path} not found`,
-  });
-});
+app.use(notFoundHandler);
 
 // Error handling middleware
-app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-  logger.error(
-    {
-      error: err.message,
-      stack: err.stack,
-      path: req.path,
-      method: req.method,
-      statusCode: err.statusCode,
-    },
-    'Error occurred'
-  );
-
-  // Handle AppError instances
-  if (err.statusCode) {
-    return res.status(err.statusCode).json({
-      error: err.name || 'Error',
-      message: err.message,
-      code: err.code,
-    });
-  }
-
-  // Handle unknown errors
-  return res.status(500).json({
-    error: 'Internal Server Error',
-    message: commonConfig.NODE_ENV === 'development' ? err.message : 'An unexpected error occurred',
-  });
-});
+app.use(errorHandler('messages', commonConfig.NODE_ENV));
 
 export default app;

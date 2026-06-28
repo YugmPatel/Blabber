@@ -47,6 +47,7 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
     const senderName = sender?.name || sender?.username || sender?.email;
     return senderName ? `${senderName}: ${body}` : body;
   };
+  const mentionCount = chat.mentionUnreadCount || 0;
 
   const temporaryLabel = () => {
     if (!isTemporary || !chat.expiresAt) return null;
@@ -128,6 +129,11 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
           {unreadCount > 0 && (
             <span className="ml-2 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-teal-500 text-[10px] font-bold text-white">
               {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+          {mentionCount > 0 && (
+            <span className="ml-1 flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+              @{mentionCount > 9 ? '9+' : mentionCount}
             </span>
           )}
         </div>

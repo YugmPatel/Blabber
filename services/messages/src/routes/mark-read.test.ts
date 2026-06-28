@@ -4,6 +4,7 @@ import { ObjectId } from 'mongodb';
 import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
 import { getMessagesCollection } from '../models/message';
+import { seedMessageTestChat } from '../test-fixtures';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_ACCESS_SECRET!;
@@ -27,6 +28,8 @@ describe('POST /read - Mark Messages as Read', () => {
   beforeEach(async () => {
     const db = getDatabase();
     await db.collection('messages').deleteMany({});
+    await db.collection('chats').deleteMany({});
+    await seedMessageTestChat(TEST_CHAT_ID, [TEST_USER_ID, OTHER_USER_ID]);
   });
 
   it('should mark a single message as read', async () => {
@@ -211,7 +214,7 @@ describe('POST /read - Mark Messages as Read', () => {
     expect(response.status).toBe(401);
   });
 
-  it('should handle non-existent message IDs gracefully', async () => {
+  it('should reject non-existent message IDs', async () => {
     const token = generateToken(TEST_USER_ID.toString());
     const nonExistentId1 = new ObjectId();
     const nonExistentId2 = new ObjectId();
@@ -223,8 +226,7 @@ describe('POST /read - Mark Messages as Read', () => {
         messageIds: [nonExistentId1.toString(), nonExistentId2.toString()],
       });
 
-    expect(response.status).toBe(200);
-    expect(response.body.success).toBe(true);
-    expect(response.body.modifiedCount).toBe(0);
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('Not Found');
   });
 });

@@ -58,6 +58,31 @@ export interface CallErrorPayload {
   message: string;
 }
 
+export interface GroupCallStartPayload {
+  callId: string;
+  chatId: string;
+  chatTitle?: string;
+  chatAvatarUrl?: string;
+  fromUserId: string;
+  fromUserName?: string;
+  callType: CallType;
+  startedAt?: string;
+}
+
+export interface GroupCallDeclinePayload {
+  callId: string;
+  chatId: string;
+  fromUserId: string;
+  toUserId: string;
+}
+
+export interface GroupCallLeavePayload {
+  callId: string;
+  chatId: string;
+  fromUserId?: string;
+  clientSessionId?: string;
+}
+
 // Client to Server Events
 export interface ClientToServerEvents {
   'auth:hello': () => void;
@@ -83,6 +108,7 @@ export interface ClientToServerEvents {
       description?: string;
     };
     replyToId?: string;
+    mentions?: Array<{ userId: string; start: number; length: number }>;
     clientMessageId?: string;
     tempId?: string;
   }) => void;
@@ -115,6 +141,9 @@ export interface ClientToServerEvents {
   'call:offer': (data: CallOfferPayload) => void;
   'call:answer': (data: CallAnswerPayload) => void;
   'call:ice-candidate': (data: CallIceCandidatePayload) => void;
+  'group-call:start': (data: GroupCallStartPayload) => void;
+  'group-call:decline': (data: GroupCallDeclinePayload) => void;
+  'group-call:leave': (data: GroupCallLeavePayload) => void;
 }
 
 // Server to Client Events
@@ -132,11 +161,15 @@ export interface ServerToClientEvents {
     reactions?: any[];
     message?: any;
   }) => void;
+  'message:pin': (data: { chatId: string; messageId: string; pinnedBy: string; pin?: any }) => void;
+  'message:unpin': (data: { chatId: string; messageId: string; pinnedBy: string }) => void;
   'message:read': (data: { messageIds: string[]; userId: string; chatId?: string }) => void;
   'receipt:delivered': (data: { messageId: string; userId: string }) => void;
   'receipt:read': (data: { messageIds: string[]; userId: string }) => void;
   'typing:update': (data: { chatId: string; userId: string; isTyping: boolean }) => void;
   'chat:updated': (data: { chat: any }) => void;
+  'chat:archived': (data: { chatId: string; userId: string; archived: true; archivedAt?: string }) => void;
+  'chat:unarchived': (data: { chatId: string; userId: string; archived: false }) => void;
   'action:created': (data: { chatId: string; action: any }) => void;
   'action:updated': (data: { chatId: string; action: any }) => void;
   'presence:update': (data: { userId: string; online: boolean; lastSeen: Date | string | null }) => void;
@@ -149,6 +182,24 @@ export interface ServerToClientEvents {
   'call:answer': (data: CallAnswerPayload) => void;
   'call:ice-candidate': (data: CallIceCandidatePayload) => void;
   'call:error': (data: CallErrorPayload) => void;
+  'group-call:incoming': (data: GroupCallStartPayload) => void;
+  'group-call:started': (data: {
+    callId: string;
+    chatId: string;
+    deliveredCount: number;
+    startedAt: string;
+  }) => void;
+  'group-call:decline': (data: GroupCallDeclinePayload) => void;
+  'group-call:participants': (data: {
+    callId: string;
+    chatId: string;
+    activeParticipantIds: string[];
+  }) => void;
+  'group-call:ended': (data: {
+    callId: string;
+    chatId: string;
+    endedAt: string;
+  }) => void;
   error: (data: { message: string; code?: string }) => void;
 }
 

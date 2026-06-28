@@ -7,6 +7,10 @@ import { logger, createEvent } from '@repo/utils';
 import { getPubSub } from '../pubsub';
 import { serializeMessage } from '../serialize-message';
 import { assertChatMembership, assertChatWritable } from '../chat-access';
+import { buildReplyPreview } from '../message-preview';
+import { validateMentions } from '../mentions';
+import { unarchiveChatForParticipants } from '../chat-state';
+import { parseEventDate, validateMeetingUrl, validateTimezone } from '../event-utils';
 
 function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' {
   if (fileType.startsWith('image/')) {
@@ -18,6 +22,13 @@ function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' {
   }
 
   return 'document';
+}
+
+const MESSAGE_TOTAL_ATTACHMENT_BYTES = Number(process.env.MEDIA_MESSAGE_TOTAL_BYTES || 30 * 1024 * 1024);
+const MEDIA_UPLOAD_ERROR = 'This file could not be uploaded.';
+
+function normalizedPollOption(option: string) {
+  return option.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
 export async function sendMessage(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -47,7 +58,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const { body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, tempId, clientMessageId } =
+    const { body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, mentions, tempId, clientMessageId } =
       bodyResult.data;
     const stableClientMessageId = clientMessageId || tempId;
 
@@ -57,7 +68,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
     const senderObjectId = new ObjectId(userId);
 
     const chatAccess = await assertChatMembership(chatObjectId, senderObjectId);
-    assertChatWritable(chatAccess);
+    await assertChatWritable(chatAccess, senderObjectId);
 
     if (stableClientMessageId) {
       const existingMessage = await collection.findOne({
@@ -67,7 +78,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       });
 
       if (existingMessage) {
-        res.status(200).json(serializeMessage(existingMessage, stableClientMessageId));
+        res.status(200).json(serializeMessage(existingMessage, stableClientMessageId, senderObjectId));
         return;
       }
     }
@@ -99,17 +110,18 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       const mediaDoc = await db.collection('media').findOne({
         _id: new ObjectId(mediaId),
         userId: senderObjectId,
+        status: 'approved',
       });
 
       if (!mediaDoc?.url || !mediaDoc?.fileType) {
-        res.status(404).json({ error: 'Not Found', message: 'Media not found' });
+        res.status(404).json({ error: 'Not Found', message: MEDIA_UPLOAD_ERROR });
         return;
       }
 
-      if (mediaDoc.storage === 'local' && !mediaDoc.uploadedAt) {
+      if ((mediaDoc.storage === 'local' && !mediaDoc.uploadedAt) || mediaDoc.fileSize > MESSAGE_TOTAL_ATTACHMENT_BYTES) {
         res.status(400).json({
           error: 'Bad Request',
-          message: 'Media upload has not completed',
+          message: MEDIA_UPLOAD_ERROR,
         });
         return;
       }
@@ -128,6 +140,18 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
     }
 
     if (poll) {
+      const closesAt = poll.closesAt ? new Date(poll.closesAt) : undefined;
+      if (closesAt && closesAt.getTime() <= Date.now()) {
+        res.status(400).json({ error: 'Bad Request', message: 'Poll close time must be in the future' });
+        return;
+      }
+
+      const normalizedOptions = poll.options.map(normalizedPollOption);
+      if (new Set(normalizedOptions).size !== normalizedOptions.length) {
+        res.status(400).json({ error: 'Bad Request', message: 'Poll options must be unique' });
+        return;
+      }
+
       messageDoc.type = 'poll';
       messageDoc.poll = {
         question: poll.question,
@@ -137,6 +161,11 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
           votes: [],
         })),
         allowMultiple: poll.allowMultiple ?? false,
+        allowVoteChanges: poll.allowVoteChanges ?? true,
+        showVoters: poll.showVoters ?? false,
+        closesAt,
+        createdBy: senderObjectId,
+        votes: [],
         closed: false,
       };
     }
@@ -147,8 +176,55 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
     }
 
     if (event) {
+      const startAt = parseEventDate(event.startAt || event.startsAt);
+      const endAt = parseEventDate(event.endAt);
+      const timezone = validateTimezone(event.timezone);
+      const meetingUrl = validateMeetingUrl(event.meetingUrl);
+
+      if (!startAt) {
+        res.status(400).json({ error: 'Bad Request', message: 'Invalid event start time' });
+        return;
+      }
+
+      if (endAt && endAt.getTime() <= startAt.getTime()) {
+        res.status(400).json({ error: 'Bad Request', message: 'Event end time must be after start time' });
+        return;
+      }
+
+      if (!timezone) {
+        res.status(400).json({ error: 'Bad Request', message: 'Invalid event timezone' });
+        return;
+      }
+
+      if (meetingUrl === null) {
+        res.status(400).json({ error: 'Bad Request', message: 'Meeting URL must use http or https' });
+        return;
+      }
+
       messageDoc.type = 'event';
-      messageDoc.event = event;
+      messageDoc.event = {
+        ...event,
+        startsAt: startAt.toISOString(),
+        startAt,
+        endAt: endAt || undefined,
+        timezone,
+        meetingUrl: typeof meetingUrl === 'string' ? meetingUrl : undefined,
+        createdBy: senderObjectId,
+        updatedAt: new Date(),
+        reminderEnabled: event.reminderEnabled ?? true,
+        rsvps: [
+          {
+            userId: senderObjectId,
+            status: 'going',
+            respondedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      };
+    }
+
+    if (mentions?.length) {
+      messageDoc.mentions = await validateMentions(chatAccess, body, mentions);
     }
 
     // Add replyTo if provided
@@ -159,18 +235,17 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       }
 
       const replyToObjectId = new ObjectId(replyToId);
-      const replyToMessage = await collection.findOne({ _id: replyToObjectId });
+      const replyToMessage = await collection.findOne({
+        _id: replyToObjectId,
+        deletedFor: { $ne: senderObjectId },
+      });
 
       if (!replyToMessage || !replyToMessage.chatId.equals(chatObjectId)) {
         res.status(404).json({ error: 'Not Found', message: 'Reply message not found' });
         return;
       }
 
-      messageDoc.replyTo = {
-        messageId: replyToMessage._id,
-        body: replyToMessage.body,
-        senderId: replyToMessage.senderId,
-      };
+      messageDoc.replyTo = await buildReplyPreview(replyToMessage);
     }
 
     // Insert message
@@ -179,6 +254,9 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
     // Update chat's lastMessageRef
     const chatsCollection = db.collection('chats');
     const chatDoc = await chatsCollection.findOne({ _id: chatObjectId });
+    if (chatDoc?.participants?.length) {
+      await unarchiveChatForParticipants(chatObjectId, chatDoc.participants);
+    }
     await chatsCollection.updateOne(
       { _id: chatObjectId },
       {
@@ -194,7 +272,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       }
     );
 
-    const apiMessage = serializeMessage(messageDoc, stableClientMessageId);
+    const apiMessage = serializeMessage(messageDoc, stableClientMessageId, senderObjectId);
     const sender = await db.collection('users').findOne(
       { _id: senderObjectId },
       { projection: { name: 1, username: 1 } }
@@ -227,6 +305,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
         participants: chatDoc?.participants?.map((participantId: ObjectId) => participantId.toString()),
         message: apiMessage,
         replyTo: messageDoc.replyTo?.messageId.toString(),
+        mentions: apiMessage.mentions,
         createdAt: messageDoc.createdAt.toISOString(),
       });
       await pubsub.publish(event);

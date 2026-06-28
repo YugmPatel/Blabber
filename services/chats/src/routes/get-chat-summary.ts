@@ -3,6 +3,24 @@ import { ObjectId } from 'mongodb';
 import { asyncHandler } from '@repo/utils';
 import { getChatsCollection } from '../models/chat';
 import { getChatSummariesCollection } from '../models/chat-summary';
+import { materializeSummarySources } from '../intelligence-source-materializer';
+import { getDatabase } from '../db';
+import { personalizeSummary } from '../summary-personalization';
+
+interface MessageDocument {
+  _id: ObjectId;
+  chatId: ObjectId;
+  senderId: ObjectId;
+  body: string;
+  createdAt: Date;
+  deletedFor?: ObjectId[];
+}
+
+interface UserDocument {
+  _id: ObjectId;
+  username?: string;
+  name?: string;
+}
 
 export const getChatSummary = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.userId;
@@ -52,7 +70,31 @@ export const getChatSummary = asyncHandler(async (req: Request, res: Response) =
     }
   );
 
-  return res.status(200).json({
-    summary: latestSummary?.summary ?? null,
-  });
+  let summary = null;
+  if (latestSummary) {
+    const db = getDatabase();
+    const [messages, viewer] = await Promise.all([
+      db
+        .collection<MessageDocument>('messages')
+        .find({ chatId: chatObjectId, deletedFor: { $ne: userObjectId }, 'momentReply.isMomentReply': { $ne: true } })
+        .sort({ createdAt: -1 })
+        .limit(200)
+        .toArray(),
+      db
+        .collection<UserDocument>('users')
+        .findOne({ _id: userObjectId }, { projection: { _id: 1, username: 1, name: 1 } }),
+    ]);
+
+    summary = await materializeSummarySources({
+      summary: personalizeSummary({
+        summary: latestSummary.summary,
+        messages,
+        viewer: viewer || { _id: userObjectId },
+      }),
+      chatId: chatObjectId,
+      userId: userObjectId,
+    });
+  }
+
+  return res.status(200).json({ summary });
 });

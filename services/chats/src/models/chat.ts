@@ -13,6 +13,13 @@ export interface Chat {
   groupContext?: string;
   avatarUrl?: string;
   groupKind?: 'standard' | 'temporary';
+  sendMode?: 'everyone' | 'admins_only';
+  aiEnabled?: boolean;
+  memberRestrictions?: {
+    userId: ObjectId;
+    restrictedBy: ObjectId;
+    restrictedAt: Date;
+  }[];
   expiresAt?: Date;
   endedAt?: Date;
   deletedAt?: Date;
@@ -42,6 +49,7 @@ export async function createChatIndexes(): Promise<void> {
     await collection.createIndex({ updatedAt: -1 });
     await collection.createIndex({ expiresAt: 1 }, { sparse: true });
     await collection.createIndex({ deletedAt: 1 }, { sparse: true });
+    await collection.createIndex({ 'memberRestrictions.userId': 1 }, { sparse: true });
 
     logger.info('Chat indexes created successfully');
   } catch (error) {

@@ -16,6 +16,8 @@ import { useAppStore } from '@/store/app-store';
 import CameraModal from './CameraModal';
 import VoiceRecorder from './VoiceRecorder';
 import PollModal from './PollModal';
+import Avatar from './Avatar';
+import type { Chat } from '@repo/types';
 
 interface ReplyMessage {
   _id: string;
@@ -26,7 +28,11 @@ interface ReplyMessage {
 interface ComposerProps {
   chatId: string;
   replyToMessage?: ReplyMessage | null;
+  replyToId?: string;
   onCancelReply?: () => void;
+  chat?: Chat;
+  currentUserId?: string;
+  mentionsEnabled?: boolean;
 }
 
 // Simple emoji picker data
@@ -115,7 +121,15 @@ const SUPPORTED_DOCUMENT_TYPES = new Set([
   'text/rtf',
 ]);
 
-export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProps) => {
+export const Composer = ({
+  chatId,
+  replyToMessage,
+  replyToId,
+  onCancelReply,
+  chat,
+  currentUserId,
+  mentionsEnabled = false,
+}: ComposerProps) => {
   const [message, setMessage] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showActionMenu, setShowActionMenu] = useState(false);
@@ -126,12 +140,19 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   const [showEventComposer, setShowEventComposer] = useState(false);
   const [eventTitle, setEventTitle] = useState('');
   const [eventDateTime, setEventDateTime] = useState('');
+  const [eventEndDateTime, setEventEndDateTime] = useState('');
   const [eventLocation, setEventLocation] = useState('');
+  const [eventMeetingUrl, setEventMeetingUrl] = useState('');
   const [eventDescription, setEventDescription] = useState('');
+  const [eventReminderEnabled, setEventReminderEnabled] = useState(true);
   const [attachmentNotice, setAttachmentNotice] = useState<{
     title: string;
     message: string;
   } | null>(null);
+  const [mentions, setMentions] = useState<Array<{ userId: string; start: number; length: number; displayName: string }>>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -148,8 +169,9 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
     uploadProgress,
     error: uploadError,
   } = useFileUpload();
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+  const activeReplyToId = replyToMessage?._id || replyToId;
 
   const uploadAttachment = async (file: File): Promise<UploadResult | null> => {
     if (uploadMedia) {
@@ -210,6 +232,23 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   const handleInputChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setMessage(value);
+    const cursor = e.target.selectionStart;
+    setMentions((current) =>
+      current.filter((mention) => value.slice(mention.start, mention.start + mention.length) === `@${mention.displayName}`)
+    );
+    if (mentionsEnabled) {
+      const prefix = value.slice(0, cursor);
+      const match = prefix.match(/(^|\s)@([^\s@]*)$/);
+      if (match) {
+        const atIndex = cursor - match[2].length - 1;
+        setMentionStart(atIndex);
+        setMentionQuery(match[2].toLowerCase());
+        setActiveMentionIndex(0);
+      } else {
+        setMentionStart(null);
+        setMentionQuery(null);
+      }
+    }
 
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -244,17 +283,84 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       isTypingRef.current = false;
     }
 
-    sendMessage({ chatId, body: trimmedMessage, replyToId: replyToMessage?._id });
+    const leadingTrim = message.length - message.trimStart().length;
+    const outboundMentions = mentions
+      .map((mention) => ({ ...mention, start: mention.start - leadingTrim }))
+      .filter(
+        (mention) =>
+          mention.start >= 0 &&
+          mention.start + mention.length <= trimmedMessage.length &&
+          trimmedMessage.slice(mention.start, mention.start + mention.length) ===
+            `@${mention.displayName}`
+      )
+      .map(({ userId, start, length }) => ({ userId, start, length }));
+
+    sendMessage({
+      chatId,
+      body: trimmedMessage,
+      replyToId: activeReplyToId,
+      mentions: outboundMentions,
+    });
     setMessage('');
+    setMentions([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     if (onCancelReply) onCancelReply();
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionQuery !== null && mentionSuggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActiveMentionIndex((index) => (index + 1) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActiveMentionIndex((index) => (index - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionQuery(null);
+        setMentionStart(null);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        insertMention(mentionSuggestions[activeMentionIndex]);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const mentionSuggestions = (chat?.participantProfiles || [])
+    .filter((profile) => profile._id !== currentUserId)
+    .filter((profile) => profile.name.toLowerCase().includes(mentionQuery || ''))
+    .slice(0, 6);
+
+  const insertMention = (profile: { _id: string; name: string; avatarUrl?: string }) => {
+    const textarea = textareaRef.current;
+    if (!textarea || mentionStart === null) return;
+    const end = textarea.selectionStart;
+    const label = `@${profile.name}`;
+    const suffix = message.slice(end).startsWith(' ') ? '' : ' ';
+    const next = `${message.slice(0, mentionStart)}${label}${suffix}${message.slice(end)}`;
+    setMessage(next);
+    setMentions((current) => [
+      ...current.filter((mention) => mention.userId !== profile._id),
+      { userId: profile._id, start: mentionStart, length: label.length, displayName: profile.name },
+    ]);
+    setMentionQuery(null);
+    setMentionStart(null);
+    setTimeout(() => {
+      const pos = mentionStart + label.length + suffix.length;
+      textarea.focus();
+      textarea.setSelectionRange(pos, pos);
+    }, 0);
   };
 
   const handleEmojiSelect = (emoji: string) => {
@@ -306,7 +412,9 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         title: fileType === 'image' ? 'Photo upload failed' : 'Document upload failed',
         message:
           uploadError ||
-          'Media upload is not available for this file right now. Your text message was not sent.',
+          (fileType === 'image'
+            ? 'We could not upload this photo. Try again.'
+            : 'We could not upload this document. Try again.'),
       });
     } else {
       const body = message.trim() || (fileType === 'image' ? 'Photo' : file.name);
@@ -319,7 +427,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         mediaFileName: media.fileName || file.name,
         mediaMimeType: media.mimeType || file.type,
         mediaSize: media.size || file.size,
-        replyToId: replyToMessage?._id,
+        replyToId: activeReplyToId,
       });
       setMessage('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -335,7 +443,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
     if (!media) {
       setAttachmentNotice({
         title: 'Camera upload failed',
-        message: 'The photo was captured, but media upload is not available right now.',
+        message: uploadError || 'We could not upload this photo. Try again.',
       });
     } else {
       sendMessage({
@@ -347,7 +455,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         mediaFileName: media.fileName || file.name,
         mediaMimeType: media.mimeType || file.type,
         mediaSize: media.size || file.size,
-        replyToId: replyToMessage?._id,
+        replyToId: activeReplyToId,
       });
       if (onCancelReply) onCancelReply();
     }
@@ -361,7 +469,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
     if (!media) {
       setAttachmentNotice({
         title: 'Audio upload failed',
-        message: 'The recording was created, but media upload is not available right now.',
+        message: uploadError || 'We could not upload this voice note. Try again.',
       });
     } else {
       sendMessage({
@@ -374,20 +482,29 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
         mediaMimeType: media.mimeType || file.type,
         mediaSize: media.size || file.size,
         mediaDuration: duration > 0 ? duration : undefined,
-        replyToId: replyToMessage?._id,
+        replyToId: activeReplyToId,
       });
       if (onCancelReply) onCancelReply();
     }
     setShowVoiceRecorder(false);
   };
 
-  const handleCreatePoll = (question: string, options: string[]) => {
+  const handleCreatePoll = (
+    question: string,
+    options: string[],
+    settings: {
+      allowMultiple: boolean;
+      allowVoteChanges: boolean;
+      showVoters: boolean;
+      closesAt?: string;
+    }
+  ) => {
     sendMessage({
       chatId,
       body: question,
       type: 'poll',
-      poll: { question, options },
-      replyToId: replyToMessage?._id,
+      poll: { question, options, ...settings },
+      replyToId: activeReplyToId,
     });
     if (onCancelReply) onCancelReply();
   };
@@ -398,7 +515,7 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       body: sticker.emoji,
       type: 'sticker',
       sticker,
-      replyToId: replyToMessage?._id,
+      replyToId: activeReplyToId,
     });
     setShowStickerPicker(false);
     if (onCancelReply) onCancelReply();
@@ -407,8 +524,11 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   const resetEventComposer = () => {
     setEventTitle('');
     setEventDateTime('');
+    setEventEndDateTime('');
     setEventLocation('');
+    setEventMeetingUrl('');
     setEventDescription('');
+    setEventReminderEnabled(true);
   };
 
   const handleCreateEvent = () => {
@@ -422,10 +542,15 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
       event: {
         title,
         startsAt: new Date(eventDateTime).toISOString(),
+        startAt: new Date(eventDateTime).toISOString(),
+        endAt: eventEndDateTime ? new Date(eventEndDateTime).toISOString() : undefined,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
         location: eventLocation.trim() || undefined,
+        meetingUrl: eventMeetingUrl.trim() || undefined,
         description: eventDescription.trim() || undefined,
+        reminderEnabled: eventReminderEnabled,
       },
-      replyToId: replyToMessage?._id,
+      replyToId: activeReplyToId,
     });
     setShowEventComposer(false);
     resetEventComposer();
@@ -498,12 +623,12 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
   return (
     <div className="border-t border-slate-200 bg-white px-3 py-3 dark:border-slate-800 dark:bg-slate-900">
       {/* Reply preview */}
-      {replyToMessage && (
+      {activeReplyToId && (
         <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-teal-600">Reply</p>
             <p className="truncate text-sm text-slate-700 dark:text-slate-300">
-              {replyToMessage.body}
+              {replyToMessage?.body || 'Replying to message'}
             </p>
           </div>
           <button
@@ -619,6 +744,33 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
 
         {/* ── Text input ── */}
         <div className="relative flex-1">
+          {mentionQuery !== null && mentionSuggestions.length > 0 && (
+            <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-full max-w-xs overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+              {mentionSuggestions.map((profile, index) => (
+                <button
+                  key={profile._id}
+                  type="button"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    insertMention(profile);
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
+                    index === activeMentionIndex
+                      ? 'bg-teal-50 text-teal-900 dark:bg-teal-900/30 dark:text-teal-100'
+                      : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Avatar src={profile.avatarUrl} alt={profile.name} size="sm" />
+                  <span className="min-w-0 flex-1 truncate">{profile.name}</span>
+                  {chat?.ownerId === profile._id ? (
+                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">Owner</span>
+                  ) : chat?.admins?.includes(profile._id) ? (
+                    <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Admin</span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={message}
@@ -807,6 +959,17 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  End time
+                </span>
+                <input
+                  type="datetime-local"
+                  value={eventEndDateTime}
+                  onChange={(e) => setEventEndDateTime(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
                   Location
                 </span>
                 <input
@@ -819,6 +982,18 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Meeting link
+                </span>
+                <input
+                  type="url"
+                  value={eventMeetingUrl}
+                  onChange={(e) => setEventMeetingUrl(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500"
+                  placeholder="https://..."
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
                   Description
                 </span>
                 <textarea
@@ -827,6 +1002,15 @@ export const Composer = ({ chatId, replyToMessage, onCancelReply }: ComposerProp
                   rows={3}
                   className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500"
                   placeholder="Optional"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                <span>Event reminders</span>
+                <input
+                  type="checkbox"
+                  checked={eventReminderEnabled}
+                  onChange={(e) => setEventReminderEnabled(e.target.checked)}
+                  className="h-4 w-4 accent-teal-600"
                 />
               </label>
             </div>

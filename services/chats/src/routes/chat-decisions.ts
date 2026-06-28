@@ -19,6 +19,7 @@ import {
   type DecisionInputMessage,
   type DecisionParticipant,
 } from '../intelligence/decision-extraction-service';
+import { materializeItemSources } from '../intelligence-source-materializer';
 
 interface MessageDocument {
   _id: ObjectId;
@@ -146,6 +147,7 @@ export const extractChatDecisions = asyncHandler(async (req: Request, res: Respo
     .find({
       chatId: chatResult.chatObjectId,
       deletedFor: { $ne: chatResult.userObjectId },
+      'momentReply.isMomentReply': { $ne: true },
     })
     .sort({ createdAt: -1 })
     .limit(messageLimit)
@@ -233,10 +235,17 @@ export const extractChatDecisions = asyncHandler(async (req: Request, res: Respo
     decisions.push(toDecision(document));
   }
 
+  const sourcedDecisions = await materializeItemSources({
+    items: decisions,
+    chatId: chatResult.chatObjectId!,
+    userId: chatResult.userObjectId!,
+    label: 'Decision',
+  });
+
   const response: DecisionExtractionResult = {
     chatId,
     summary: parsedResult.data.summary,
-    decisions,
+    decisions: sourcedDecisions,
     generatedAt: parsedResult.data.generatedAt,
     sourceMessageIds: parsedResult.data.sourceMessageIds,
   };
@@ -266,7 +275,14 @@ export const getChatDecisions = asyncHandler(async (req: Request, res: Response)
     .sort({ createdAt: -1 })
     .toArray();
 
-  return res.status(200).json({ decisions: decisions.map(toDecision) });
+  const sourcedDecisions = await materializeItemSources({
+    items: decisions.map(toDecision),
+    chatId: chatResult.chatObjectId!,
+    userId: chatResult.userObjectId!,
+    label: 'Decision',
+  });
+
+  return res.status(200).json({ decisions: sourcedDecisions });
 });
 
 export const updateChatDecision = asyncHandler(async (req: Request, res: Response) => {
@@ -318,7 +334,14 @@ export const updateChatDecision = asyncHandler(async (req: Request, res: Respons
     { returnDocument: 'after' }
   );
 
-  return res.status(200).json({ decision: toDecision(updated!) });
+  const [decisionWithSources] = await materializeItemSources({
+    items: [toDecision(updated!)],
+    chatId: chatResult.chatObjectId!,
+    userId: chatResult.userObjectId!,
+    label: 'Decision',
+  });
+
+  return res.status(200).json({ decision: decisionWithSources });
 });
 
 export const deleteChatDecision = asyncHandler(async (req: Request, res: Response) => {

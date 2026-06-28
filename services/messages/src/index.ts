@@ -3,7 +3,12 @@ import { logger } from '@repo/utils';
 import app from './app';
 import { connectToDatabase, closeDatabase } from './db';
 import { createMessageIndexes } from './models/message';
+import { createMessagePinIndexes } from './models/message-pin';
+import { createSavedMessageIndexes } from './models/saved-message';
+import { createEventReminderDeliveryIndexes } from './models/event-reminder-delivery';
 import { initPubSub, closePubSub } from './pubsub';
+import { PollCloseProcessor } from './poll-closer';
+import { EventReminderProcessor } from './event-reminders';
 
 const config = loadCommonConfig();
 
@@ -14,11 +19,19 @@ async function startServer() {
 
     // Create indexes
     await createMessageIndexes();
+    await createMessagePinIndexes();
+    await createSavedMessageIndexes();
+    await createEventReminderDeliveryIndexes();
     logger.info('Database indexes created');
 
     // Initialize Redis Pub/Sub
     initPubSub();
     logger.info('Redis Pub/Sub initialized');
+
+    const pollCloseProcessor = new PollCloseProcessor();
+    pollCloseProcessor.start();
+    const eventReminderProcessor = new EventReminderProcessor();
+    await eventReminderProcessor.start();
 
     // Start Express server
     const server = app.listen(config.PORT, () => {
@@ -37,6 +50,8 @@ async function startServer() {
 
       server.close(async () => {
         logger.info('HTTP server closed');
+        pollCloseProcessor.stop();
+        eventReminderProcessor.stop();
         await closePubSub();
         await closeDatabase();
         process.exit(0);

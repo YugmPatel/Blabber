@@ -54,8 +54,14 @@ export const updateChat = asyncHandler(async (req: Request, res: Response) => {
     updateFields.title = title;
   }
 
+  const unsetFields: Record<string, string> = {};
+
   if (avatarUrl !== undefined) {
-    updateFields.avatarUrl = avatarUrl;
+    if (avatarUrl === '') {
+      unsetFields.avatarUrl = '';
+    } else {
+      updateFields.avatarUrl = avatarUrl;
+    }
   }
   if (description !== undefined) {
     updateFields.description = description;
@@ -76,7 +82,10 @@ export const updateChat = asyncHandler(async (req: Request, res: Response) => {
 
   const update: any = { $set: updateFields };
   if (expiresAt !== undefined) {
-    update.$unset = { endedAt: '' };
+    unsetFields.endedAt = '';
+  }
+  if (Object.keys(unsetFields).length > 0) {
+    update.$unset = unsetFields;
   }
 
   // Update chat

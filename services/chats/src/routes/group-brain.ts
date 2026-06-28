@@ -22,6 +22,9 @@ import { getChatActionsCollection, type ChatActionDocument } from '../models/cha
 import { getChatDecisionsCollection, type ChatDecisionDocument } from '../models/chat-decision';
 import { getChatSummariesCollection, type ChatSummaryDocument } from '../models/chat-summary';
 import { getWaitingOnCollection, type WaitingOnDocument } from '../models/chat-waiting-on';
+import { materializeAnswerSources, materializeItemSources, materializeSummarySources } from '../intelligence-source-materializer';
+import { buildSourceReferenceMap, refsForIds } from '../source-references';
+import { answerGroupBrainQuestion } from '../group-brain-answer-engine';
 
 interface MessageDocument {
   _id: ObjectId;
@@ -297,17 +300,37 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
     getWaitingOnCollection().find({ chatId: chatObjectId }).sort({ createdAt: -1 }).toArray(),
     getDatabase()
       .collection<MessageDocument>('messages')
-      .find({ chatId: chatObjectId, deletedFor: { $ne: userObjectId } })
+      .find({ chatId: chatObjectId, deletedFor: { $ne: userObjectId }, 'momentReply.isMomentReply': { $ne: true } })
       .sort({ createdAt: -1 })
       .limit(200)
       .toArray(),
     loadParticipants(chat.participants),
   ]);
 
-  const actions = actionDocs.map(toActionItem);
-  const decisions = decisionDocs.map(toDecision);
-  const waitingOn = waitingOnDocs.map(toWaitingOnItem);
-  const summaryText = latestSummary?.summary.summary || chat.groupContext;
+  const [actions, decisions, waitingOn, sourcedSummary] = await Promise.all([
+    materializeItemSources({
+      items: actionDocs.map(toActionItem),
+      chatId: chatObjectId,
+      userId: userObjectId,
+      label: 'Action',
+    }),
+    materializeItemSources({
+      items: decisionDocs.map(toDecision),
+      chatId: chatObjectId,
+      userId: userObjectId,
+      label: 'Decision',
+    }),
+    materializeItemSources({
+      items: waitingOnDocs.map(toWaitingOnItem),
+      chatId: chatObjectId,
+      userId: userObjectId,
+      label: 'Waiting On',
+    }),
+    latestSummary
+      ? materializeSummarySources({ summary: latestSummary.summary, chatId: chatObjectId, userId: userObjectId })
+      : Promise.resolve(null),
+  ]);
+  const summaryText = sourcedSummary?.summary || chat.description || chat.groupContext;
   const summaryLinks: GroupBrainLink[] = (latestSummary?.summary.importantLinks || []).map((link) => ({
     title: link.label ?? undefined,
     url: link.url,
@@ -319,6 +342,18 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
   const openQuestions = questionsFromSummary(latestSummary);
   const plans = plansFrom(actions, decisions);
   const deadlines = deadlinesFrom(actions);
+  const brainSourceIds = [
+    ...importantLinks.flatMap((item) => item.sourceMessageId ? [item.sourceMessageId] : []),
+    ...importantFiles.flatMap((item) => item.sourceMessageId ? [item.sourceMessageId] : []),
+    ...openQuestions.flatMap((item) => item.sourceMessageId ? [item.sourceMessageId] : []),
+    ...plans.flatMap((item) => item.sourceMessageIds || []),
+    ...deadlines.flatMap((item) => item.sourceMessageIds || []),
+  ];
+  const brainRefsById = await buildSourceReferenceMap({
+    chatId: chatObjectId,
+    userId: userObjectId,
+    messageIds: brainSourceIds,
+  });
 
   const brain: GroupBrain = {
     chatId,
@@ -327,17 +362,33 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
       ? {
           id: latestSummary._id.toString(),
           text: summaryText,
-          generatedAt: latestSummary.summary.generatedAt,
+          generatedAt: sourcedSummary?.generatedAt,
+          sources: sourcedSummary?.sources,
         }
       : undefined,
     decisions,
     actions,
     waitingOn,
-    importantLinks,
-    importantFiles,
-    openQuestions,
-    plans,
-    deadlines,
+    importantLinks: importantLinks.map((item) => ({
+      ...item,
+      sources: refsForIds(brainRefsById, item.sourceMessageId ? [item.sourceMessageId] : [], 'Link'),
+    })),
+    importantFiles: importantFiles.map((item) => ({
+      ...item,
+      sources: refsForIds(brainRefsById, item.sourceMessageId ? [item.sourceMessageId] : [], 'File'),
+    })),
+    openQuestions: openQuestions.map((item) => ({
+      ...item,
+      sources: refsForIds(brainRefsById, item.sourceMessageId ? [item.sourceMessageId] : [], 'Question'),
+    })),
+    plans: plans.map((item) => ({
+      ...item,
+      sources: refsForIds(brainRefsById, item.sourceMessageIds || [], 'Plan'),
+    })),
+    deadlines: deadlines.map((item) => ({
+      ...item,
+      sources: refsForIds(brainRefsById, item.sourceMessageIds || [], 'Deadline'),
+    })),
     participants,
     stats: {
       pendingActions: actions.filter((action) => action.status === 'pending' || action.status === 'accepted').length,
@@ -368,11 +419,6 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
 
   return res.status(200).json({ brain: parsedBrain.data });
 });
-
-function scoreMessageForQuestion(message: MessageDocument, terms: string[]): number {
-  const text = message.body.toLowerCase();
-  return terms.reduce((score, term) => score + (text.includes(term) ? 1 : 0), 0);
-}
 
 export const askGroupBrain = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.userId;
@@ -417,41 +463,40 @@ export const askGroupBrain = asyncHandler(async (req: Request, res: Response) =>
     });
   }
 
-  const terms: string[] = Array.from(
-    new Set<string>(
-      question
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter((term: string) => term.length > 2)
-    )
-  );
-
   const messages = await getDatabase()
     .collection<MessageDocument>('messages')
-    .find({ chatId: chatObjectId, deletedFor: { $ne: userObjectId } })
+    .find({ chatId: chatObjectId, deletedFor: { $ne: userObjectId }, 'momentReply.isMomentReply': { $ne: true } })
     .sort({ createdAt: -1 })
     .limit(500)
     .toArray();
+  const senderIds = Array.from(new Set(messages.map((message) => message.senderId.toString()))).map((id) => new ObjectId(id));
+  const senders = senderIds.length > 0
+    ? await getDatabase()
+        .collection<UserDocument>('users')
+        .find({ _id: { $in: senderIds } })
+        .project<UserDocument>({ _id: 1, username: 1, name: 1 })
+        .toArray()
+    : [];
+  const senderNameById = new Map(senders.map((sender) => [sender._id.toString(), personName(sender)]));
 
-  const matches = messages
-    .map((message) => ({ message, score: scoreMessageForQuestion(message, terms) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || b.message.createdAt.getTime() - a.message.createdAt.getTime())
-    .slice(0, 3);
+  const response = answerGroupBrainQuestion(
+    question,
+    messages.map((message) => ({
+      id: message._id.toString(),
+      body: message.body,
+      senderId: message.senderId.toString(),
+      senderName: senderNameById.get(message.senderId.toString()) ?? null,
+      createdAt: message.createdAt,
+    }))
+  );
 
-  const answer = matches.length
-    ? `Group history points to: ${matches.map((entry) => entry.message.body).join(' ')}`
-    : 'The group history does not clearly establish an answer to that question.';
+  const sourcedResponse = await materializeAnswerSources({
+    answer: response,
+    chatId: chatObjectId,
+    userId: userObjectId,
+  });
 
-  const response = {
-    answer,
-    confidence: matches.length ? 'grounded' as const : 'uncertain' as const,
-    sourceMessageIds: matches.map((entry) => entry.message._id.toString()),
-    sourceDates: matches.map((entry) => entry.message.createdAt.toISOString()),
-  };
-
-  const parsed = GroupBrainAnswerSchema.safeParse(response);
+  const parsed = GroupBrainAnswerSchema.safeParse(sourcedResponse);
   if (!parsed.success) {
     logger.error({ issues: parsed.error.flatten(), chatId }, 'Group Brain answer failed schema validation');
     return res.status(500).json({

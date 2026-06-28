@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'crypto';
 import { ObjectId } from 'mongodb';
 import { asyncHandler, logger } from '@repo/utils';
 import { getUsersCollection, UserDocument } from '../models/user';
-import { getDeviceSessionsCollection } from '../models/device-session';
+import { getDeviceSessionsCollection, hashRefreshToken } from '../models/device-session';
 import { generateAccessToken, generateRefreshToken, getRefreshTokenTTL } from '../utils/jwt';
 import { getRefreshCookieOptions } from '../utils/cookies';
 
@@ -66,7 +66,7 @@ async function createSession(req: Request, res: Response, user: UserDocument) {
   };
   const accessToken = generateAccessToken(tokenPayload);
   const refreshToken = generateRefreshToken(tokenPayload);
-  const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+  const refreshTokenHash = await hashRefreshToken(refreshToken);
   const refreshTTL = getRefreshTokenTTL();
   const now = new Date();
 
@@ -78,6 +78,7 @@ async function createSession(req: Request, res: Response, user: UserDocument) {
     ipAddress: req.ip || 'unknown',
     expiresAt: new Date(Date.now() + refreshTTL),
     createdAt: now,
+    lastActiveAt: now,
   });
 
   res.cookie('refreshToken', refreshToken, getRefreshCookieOptions(refreshTTL));
@@ -260,6 +261,11 @@ export const googleCallback = asyncHandler(async (req: Request, res: Response) =
       }
     } else {
       const avatarUpdate = googleAvatarUpdateFor(user, googleUser.picture);
+      if (user.deactivatedAt) {
+        clearOAuthCookies(res);
+        redirectWithError(res, 'google_failed');
+        return;
+      }
       if (Object.keys(avatarUpdate).length > 0) {
         await users.updateOne(
           { _id: user._id },

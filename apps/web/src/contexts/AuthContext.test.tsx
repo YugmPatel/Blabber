@@ -51,10 +51,12 @@ describe('AuthContext', () => {
       };
       const mockUserResponse = {
         data: {
-          _id: '1',
-          username: 'testuser',
-          email: 'test@example.com',
-          name: 'Test User',
+          user: {
+            _id: '1',
+            username: 'testuser',
+            email: 'test@example.com',
+            name: 'Test User',
+          },
         },
       };
 
@@ -69,7 +71,7 @@ describe('AuthContext', () => {
 
       expect(apiClient.apiClient.post).toHaveBeenCalledWith('/api/auth/refresh');
       expect(apiClient.apiClient.get).toHaveBeenCalledWith('/api/auth/me');
-      expect(result.current.user).toEqual(mockUserResponse.data);
+      expect(result.current.user).toEqual(mockUserResponse.data.user);
       expect(result.current.isAuthenticated).toBe(true);
     });
 
@@ -210,10 +212,12 @@ describe('AuthContext', () => {
 
       const mockUserResponse = {
         data: {
-          _id: '1',
-          username: 'updateduser',
-          email: 'updated@example.com',
-          name: 'Updated User',
+          user: {
+            _id: '1',
+            username: 'updateduser',
+            email: 'updated@example.com',
+            name: 'Updated User',
+          },
         },
       };
 
@@ -230,7 +234,7 @@ describe('AuthContext', () => {
       });
 
       expect(apiClient.apiClient.get).toHaveBeenCalledWith('/api/auth/me');
-      expect(result.current.user).toEqual(mockUserResponse.data);
+      expect(result.current.user).toEqual(mockUserResponse.data.user);
     });
   });
 });

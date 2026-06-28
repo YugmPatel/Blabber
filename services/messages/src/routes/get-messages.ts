@@ -100,7 +100,7 @@ export async function getMessages(req: Request, res: Response, next: NextFunctio
     }
 
     // Transform messages to API format
-    const apiMessages = resultMessages.map((msg) => serializeMessage(msg));
+    const apiMessages = resultMessages.map((msg) => serializeMessage(msg, undefined, userObjectId));
 
     logger.info(
       {

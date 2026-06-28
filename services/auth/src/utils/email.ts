@@ -19,6 +19,25 @@ function smtpConfigured() {
   return Boolean(process.env.SMTP_HOST && process.env.SMTP_FROM);
 }
 
+export function emailOperationalStatus() {
+  const captureEnabled = process.env.ACCOUNT_MAIL_CAPTURE === 'true';
+  const enabled = process.env.EMAIL_DELIVERY_ENABLED !== 'false';
+  return {
+    enabled,
+    captureEnabled,
+    configured: smtpConfigured(),
+    mode: captureEnabled ? 'capture' : smtpConfigured() ? 'smtp' : 'unconfigured',
+  };
+}
+
+export function validateEmailStartupConfig() {
+  const status = emailOperationalStatus();
+  if (process.env.NODE_ENV === 'production' && status.enabled && !status.captureEnabled && !status.configured) {
+    throw new Error('Email delivery is enabled but SMTP is not configured');
+  }
+  return status;
+}
+
 function readLine(socket: net.Socket): Promise<string> {
   return new Promise((resolve, reject) => {
     let buffer = '';

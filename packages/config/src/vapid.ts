@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { requireSafeParse } from './safe';
 
 const vapidConfigSchema = z.object({
   VAPID_PUBLIC_KEY: z.string().min(1),
@@ -15,12 +16,5 @@ export function loadVAPIDConfig(): VAPIDConfig {
     VAPID_SUBJECT: process.env.VAPID_SUBJECT,
   };
 
-  const result = vapidConfigSchema.safeParse(config);
-
-  if (!result.success) {
-    console.error('❌ Invalid VAPID configuration:', result.error.format());
-    throw new Error('Invalid VAPID configuration');
-  }
-
-  return result.data;
+  return requireSafeParse('vapid', vapidConfigSchema, config);
 }

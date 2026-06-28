@@ -18,7 +18,7 @@ describe('Users Service App', () => {
 
   describe('404 handler', () => {
     it('should return 404 for unknown routes', async () => {
-      const response = await request(app).get('/unknown-route');
+      const response = await request(app).get('/unknown/route');
 
       expect(response.status).toBe(404);
       expect(response.body).toMatchObject({

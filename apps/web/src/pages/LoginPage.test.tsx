@@ -47,19 +47,19 @@ describe('LoginPage', () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByText('Sign in to your account')).toBeInTheDocument();
+      expect(screen.getByText('Welcome Back')).toBeInTheDocument();
     });
 
-    expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Sign In$/i })).toBeInTheDocument();
   });
 
   it('shows link to register page', async () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByText(/create a new account/i)).toBeInTheDocument();
+      expect(screen.getByText(/Sign Up/i)).toBeInTheDocument();
     });
   });
 
@@ -68,11 +68,11 @@ describe('LoginPage', () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Sign In$/i })).toBeInTheDocument();
     });
 
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
-    const passwordInput = screen.getByLabelText(/password/i);
+    const submitButton = screen.getByRole('button', { name: /^Sign In$/i });
+    const passwordInput = screen.getByLabelText(/^password$/i);
 
     // Fill password but leave email empty
     await user.type(passwordInput, 'password123');
@@ -88,12 +88,12 @@ describe('LoginPage', () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Sign In$/i })).toBeInTheDocument();
     });
 
-    const emailInput = screen.getByLabelText(/email address/i);
-    const passwordInput = screen.getByLabelText(/password/i);
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const emailInput = screen.getByLabelText(/^email$/i);
+    const passwordInput = screen.getByLabelText(/^password$/i);
+    const submitButton = screen.getByRole('button', { name: /^Sign In$/i });
 
     await user.type(emailInput, 'invalid-email');
     await user.type(passwordInput, 'password123');
@@ -109,11 +109,11 @@ describe('LoginPage', () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Sign In$/i })).toBeInTheDocument();
     });
 
-    const emailInput = screen.getByLabelText(/email address/i);
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const emailInput = screen.getByLabelText(/^email$/i);
+    const submitButton = screen.getByRole('button', { name: /^Sign In$/i });
 
     await user.type(emailInput, 'test@example.com');
     await user.click(submitButton);
@@ -128,12 +128,12 @@ describe('LoginPage', () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Sign In$/i })).toBeInTheDocument();
     });
 
-    const emailInput = screen.getByLabelText(/email address/i);
-    const passwordInput = screen.getByLabelText(/password/i);
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const emailInput = screen.getByLabelText(/^email$/i);
+    const passwordInput = screen.getByLabelText(/^password$/i);
+    const submitButton = screen.getByRole('button', { name: /^Sign In$/i });
 
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, '12345');
@@ -153,9 +153,7 @@ describe('LoginPage', () => {
       name: 'Test User',
     };
 
-    // First call is the initial auth check (fails), second is the login call (succeeds)
     vi.mocked(apiClient.apiClient.post)
-      .mockRejectedValueOnce(new Error('Not authenticated'))
       .mockResolvedValueOnce({
         data: {
           accessToken: 'mock-token',
@@ -166,12 +164,12 @@ describe('LoginPage', () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Sign In$/i })).toBeInTheDocument();
     });
 
-    const emailInput = screen.getByLabelText(/email address/i);
-    const passwordInput = screen.getByLabelText(/password/i);
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const emailInput = screen.getByLabelText(/^email$/i);
+    const passwordInput = screen.getByLabelText(/^password$/i);
+    const submitButton = screen.getByRole('button', { name: /^Sign In$/i });
 
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
@@ -192,9 +190,7 @@ describe('LoginPage', () => {
   it('displays error message on login failure', async () => {
     const user = userEvent.setup();
 
-    // First call is the initial auth check (fails), second is the login call (fails)
     vi.mocked(apiClient.apiClient.post)
-      .mockRejectedValueOnce(new Error('Not authenticated'))
       .mockRejectedValueOnce({
         response: {
           data: {
@@ -206,12 +202,12 @@ describe('LoginPage', () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Sign In$/i })).toBeInTheDocument();
     });
 
-    const emailInput = screen.getByLabelText(/email address/i);
-    const passwordInput = screen.getByLabelText(/password/i);
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const emailInput = screen.getByLabelText(/^email$/i);
+    const passwordInput = screen.getByLabelText(/^password$/i);
+    const submitButton = screen.getByRole('button', { name: /^Sign In$/i });
 
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'wrongpassword');
@@ -225,9 +221,8 @@ describe('LoginPage', () => {
   it('disables form during submission', async () => {
     const user = userEvent.setup();
 
-    // Mock a delayed response - first for auth check, second for login
+    // Mock a delayed response after the initial auth check
     vi.mocked(apiClient.apiClient.post)
-      .mockRejectedValueOnce(new Error('Not authenticated'))
       .mockImplementation(
         () =>
           new Promise((resolve) =>
@@ -238,12 +233,12 @@ describe('LoginPage', () => {
     renderLoginPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Sign In$/i })).toBeInTheDocument();
     });
 
-    const emailInput = screen.getByLabelText(/email address/i);
-    const passwordInput = screen.getByLabelText(/password/i);
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const emailInput = screen.getByLabelText(/^email$/i);
+    const passwordInput = screen.getByLabelText(/^password$/i);
+    const submitButton = screen.getByRole('button', { name: /^Sign In$/i });
 
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
@@ -251,7 +246,7 @@ describe('LoginPage', () => {
 
     // Check that button shows loading state
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /signing in\.\.\./i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Signing In…$/i })).toBeInTheDocument();
     });
 
     // Check that inputs are disabled

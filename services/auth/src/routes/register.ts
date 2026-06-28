@@ -4,9 +4,11 @@ import { ObjectId } from 'mongodb';
 import { RegisterDTOSchema } from '@repo/types';
 import { asyncHandler, ValidationError } from '@repo/utils';
 import { getUsersCollection } from '../models/user';
-import { getDeviceSessionsCollection } from '../models/device-session';
+import { getDeviceSessionsCollection, hashRefreshToken } from '../models/device-session';
 import { generateAccessToken, generateRefreshToken, getRefreshTokenTTL } from '../utils/jwt';
 import { getRefreshCookieOptions } from '../utils/cookies';
+import { getEmailVerificationTokensCollection, hashToken, randomToken } from '../models/account-security';
+import { sendVerifyEmail } from '../utils/account-email';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   // Validate request body
@@ -44,6 +46,8 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     passwordHash,
     name,
     avatarSource: 'none' as const,
+    authProvider: 'password' as const,
+    emailVerified: false,
     contacts: [],
     blocked: [],
     lastSeen: now,
@@ -64,7 +68,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   const refreshToken = generateRefreshToken(tokenPayload);
 
   // Hash refresh token for storage
-  const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+  const refreshTokenHash = await hashRefreshToken(refreshToken);
 
   // Create DeviceSession
   const deviceSessionsCollection = getDeviceSessionsCollection();
@@ -79,7 +83,19 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
     ipAddress: req.ip || 'unknown',
     expiresAt,
     createdAt: now,
+    lastActiveAt: now,
   });
+
+  const verificationToken = randomToken();
+  await getEmailVerificationTokensCollection().insertOne({
+    _id: new ObjectId(),
+    userId: userDoc._id,
+    tokenHash: hashToken(verificationToken),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    createdAt: now,
+    sentToEmail: userDoc.email,
+  });
+  void sendVerifyEmail(userDoc._id, userDoc.email, verificationToken);
 
   // Set httpOnly cookie for refresh token
   res.cookie('refreshToken', refreshToken, getRefreshCookieOptions(refreshTTL));
@@ -92,6 +108,8 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
       email: userDoc.email,
       name: userDoc.name,
       avatarSource: userDoc.avatarSource,
+      authProvider: userDoc.authProvider,
+      emailVerified: userDoc.emailVerified,
     },
     accessToken,
   });

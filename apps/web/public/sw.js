@@ -16,10 +16,11 @@ self.addEventListener('push', (event) => {
     body: payload.body || 'You have a new message',
     icon: '/vite.svg',
     badge: '/vite.svg',
-    tag: payload.data?.messageId || payload.data?.chatId || undefined,
+    tag: payload.data?.actionId || payload.data?.messageId || payload.data?.chatId || undefined,
     renotify: false,
     data: {
       chatId: payload.data?.chatId,
+      actionId: payload.data?.actionId,
       route: payload.data?.route || (payload.data?.chatId ? `/chats/${payload.data.chatId}` : '/chats'),
     },
   };

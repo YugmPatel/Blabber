@@ -16,6 +16,8 @@ import {
   Moon,
   Sun,
   Shield,
+  Archive,
+  Bookmark,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
@@ -74,8 +76,10 @@ export default function Sidebar({
     navigate('/login', { replace: true });
   };
 
-  const intelligenceItems = [
+  const intelligenceItems: Array<{ label: string; icon: typeof Users; path: string; badge?: number }> = [
     { label: 'Groups', icon: Users, path: '/chats' },
+    { label: 'Archived', icon: Archive, path: '/archived' },
+    { label: 'Saved', icon: Bookmark, path: '/saved' },
     { label: 'Calls', icon: Phone, path: '/calls' },
     { label: 'My Actions', icon: CheckSquare, path: '/actions' },
   ];
@@ -84,9 +88,11 @@ export default function Sidebar({
     'relative flex items-center rounded-xl py-2.5 text-sm font-medium transition-colors';
   const navItemPadding = collapsed ? 'justify-center px-0' : 'gap-2.5 px-2.5';
   const isChatsRoute = location.pathname === '/chats' || location.pathname.startsWith('/chats/');
-  const isStatusRoute = location.pathname === '/status';
+  const isMomentsRoute = location.pathname === '/status' || location.pathname.startsWith('/moments');
   const isCallsRoute = location.pathname === '/calls';
   const isActionsRoute = location.pathname === '/actions';
+  const isArchivedRoute = location.pathname === '/archived';
+  const isSavedRoute = location.pathname === '/saved';
   const activeNavClass = 'bg-[#e7f8f4] text-[#0f766e] dark:bg-teal-900/40 dark:text-teal-300';
   const inactiveNavClass =
     'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100';
@@ -166,18 +172,18 @@ export default function Sidebar({
 
         <button
           onClick={() => {
-            navigate('/status');
+            navigate('/moments');
             onNavigateMobile?.();
           }}
-          aria-label="Status"
-          aria-pressed={isStatusRoute}
-          title={collapsed ? 'Status' : undefined}
+          aria-label="Moments"
+          aria-pressed={isMomentsRoute}
+          title={collapsed ? 'Moments' : undefined}
           className={`${navItemBase} ${navItemPadding} w-full ${
-            isStatusRoute ? activeNavClass : inactiveNavClass
+            isMomentsRoute ? activeNavClass : inactiveNavClass
           }`}
         >
           <CircleDashed size={17} className="flex-shrink-0" />
-          {!collapsed && <span className="flex-1 truncate text-left">Status</span>}
+          {!collapsed && <span className="flex-1 truncate text-left">Moments</span>}
         </button>
 
         {/* Intelligence items */}
@@ -197,6 +203,10 @@ export default function Sidebar({
             aria-pressed={
               item.label === 'Groups'
                 ? activeChatFilter === 'groups'
+                : item.label === 'Archived'
+                  ? isArchivedRoute
+                  : item.label === 'Saved'
+                    ? isSavedRoute
                 : item.label === 'Calls'
                   ? isCallsRoute
                   : item.label === 'My Actions'
@@ -206,6 +216,8 @@ export default function Sidebar({
             title={collapsed ? item.label : undefined}
             className={`${navItemBase} ${navItemPadding} w-full ${
               (item.label === 'Groups' && isChatsRoute && activeChatFilter === 'groups') ||
+              (item.label === 'Archived' && isArchivedRoute) ||
+              (item.label === 'Saved' && isSavedRoute) ||
               (item.label === 'Calls' && isCallsRoute) ||
               (item.label === 'My Actions' && isActionsRoute)
                 ? activeNavClass

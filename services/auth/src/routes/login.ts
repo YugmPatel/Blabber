@@ -4,7 +4,7 @@ import { ObjectId } from 'mongodb';
 import { LoginDTOSchema } from '@repo/types';
 import { asyncHandler, ValidationError, UnauthorizedError } from '@repo/utils';
 import { getUsersCollection } from '../models/user';
-import { getDeviceSessionsCollection } from '../models/device-session';
+import { getDeviceSessionsCollection, hashRefreshToken } from '../models/device-session';
 import { generateAccessToken, generateRefreshToken, getRefreshTokenTTL } from '../utils/jwt';
 import { getRefreshCookieOptions } from '../utils/cookies';
 
@@ -25,6 +25,9 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   if (!user) {
     throw new UnauthorizedError('Invalid email or password');
   }
+  if (user.deactivatedAt) {
+    throw new UnauthorizedError('Invalid email or password');
+  }
 
   // Verify password
   const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
@@ -43,7 +46,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   const refreshToken = generateRefreshToken(tokenPayload);
 
   // Hash refresh token for storage
-  const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+  const refreshTokenHash = await hashRefreshToken(refreshToken);
 
   // Create DeviceSession
   const deviceSessionsCollection = getDeviceSessionsCollection();
@@ -59,6 +62,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     ipAddress: req.ip || 'unknown',
     expiresAt,
     createdAt: now,
+    lastActiveAt: now,
   });
 
   // Set httpOnly cookie for refresh token with SameSite=Lax
@@ -76,6 +80,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       about: user.about,
       role: user.role,
       department: user.department,
+      authProvider: user.authProvider || 'password',
+      emailVerified: Boolean(user.emailVerified),
     },
     accessToken,
   });

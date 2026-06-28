@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CheckCircle, ChevronDown, ChevronRight, Clock3, RefreshCw, RotateCcw, X } from 'lucide-react';
-import type { WaitingOnDirection, WaitingOnItem, WaitingOnStatus } from '@repo/types';
+import type { SourceReference, WaitingOnDirection, WaitingOnItem, WaitingOnStatus } from '@repo/types';
+import SourceEvidence from './SourceEvidence';
 
 interface WaitingOnPanelProps {
   waitingOn: WaitingOnItem[];
@@ -11,6 +12,7 @@ interface WaitingOnPanelProps {
   onFindWaitingOn: () => void;
   onUpdateWaitingOn: (itemId: string, status: WaitingOnStatus) => void;
   onDeleteWaitingOn: (itemId: string) => void;
+  onJumpToSource?: (source: SourceReference) => void;
 }
 
 const directionLabels: Record<WaitingOnDirection, string> = {
@@ -40,11 +42,13 @@ function WaitingOnCard({
   isUpdating,
   onUpdateWaitingOn,
   onDeleteWaitingOn,
+  onJumpToSource,
 }: {
   item: WaitingOnItem;
   isUpdating: boolean;
   onUpdateWaitingOn: (itemId: string, status: WaitingOnStatus) => void;
   onDeleteWaitingOn: (itemId: string) => void;
+  onJumpToSource?: (source: SourceReference) => void;
 }) {
   const itemId = item.id;
 
@@ -80,6 +84,7 @@ function WaitingOnCard({
         {item.dueDate && <span>Due {item.dueDate}</span>}
         <span>{item.sourceMessageIds.length} source</span>
       </div>
+      <SourceEvidence sources={item.sources} compact onJump={onJumpToSource} />
 
       {itemId && (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -142,6 +147,7 @@ export default function WaitingOnPanel({
   onFindWaitingOn,
   onUpdateWaitingOn,
   onDeleteWaitingOn,
+  onJumpToSource,
 }: WaitingOnPanelProps) {
   const [showClosed, setShowClosed] = useState(false);
   const activeItems = waitingOn.filter((item) => item.status === 'open');
@@ -214,6 +220,7 @@ export default function WaitingOnPanel({
                     isUpdating={isUpdating}
                     onUpdateWaitingOn={onUpdateWaitingOn}
                     onDeleteWaitingOn={onDeleteWaitingOn}
+                    onJumpToSource={onJumpToSource}
                   />
                 ))}
               </div>
@@ -231,6 +238,7 @@ export default function WaitingOnPanel({
               isUpdating={isUpdating}
               onUpdateWaitingOn={onUpdateWaitingOn}
               onDeleteWaitingOn={onDeleteWaitingOn}
+              onJumpToSource={onJumpToSource}
             />
           ))}
         </div>

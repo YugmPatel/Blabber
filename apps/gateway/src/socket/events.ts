@@ -5,6 +5,9 @@ import { serviceUrls } from '../config.js';
 import type {
   CallAnswerPayload,
   CallControlPayload,
+  GroupCallDeclinePayload,
+  GroupCallLeavePayload,
+  GroupCallStartPayload,
   CallIceCandidatePayload,
   CallInvitePayload,
   CallOfferPayload,
@@ -29,7 +32,14 @@ async function getAuthorizedChat(socket: Socket, chatId: string) {
     },
   });
 
-  return response.data.chat as { participants: string[] };
+  return response.data.chat as {
+    type: 'direct' | 'group';
+    participants: string[];
+    title?: string;
+    avatarUrl?: string;
+    deletedAt?: string;
+    endedAt?: string;
+  };
 }
 
 async function validateCallTarget(socket: Socket, chatId: string, toUserId: string) {
@@ -38,6 +48,15 @@ async function validateCallTarget(socket: Socket, chatId: string, toUserId: stri
 
   if (!chat.participants.includes(toUserId) || toUserId === fromUserId) {
     throw new Error('Invalid call participant');
+  }
+
+  if (chat.type === 'direct') {
+    const response = await axios.get(`${serviceUrls.users}/blocks/relationship/${toUserId}`, {
+      headers: { Authorization: `Bearer ${socket.data.token}` },
+    });
+    if (response.data?.blocked) {
+      throw new Error('Call unavailable');
+    }
   }
 }
 
@@ -57,7 +76,7 @@ async function recordCallEvent(
     chatId: string;
     callType?: 'audio' | 'video';
     targetUserId?: string;
-    event: 'invite' | 'accept' | 'decline' | 'cancel' | 'end';
+    event: 'invite' | 'accept' | 'decline' | 'cancel' | 'end' | 'group-leave';
   }
 ) {
   try {
@@ -69,6 +88,29 @@ async function recordCallEvent(
       { error: error.response?.data || error.message, callId: payload.callId, event: payload.event },
       'Failed to record call history event'
     );
+  }
+}
+
+async function recordGroupCallLeave(socket: Socket, payload: { callId: string; chatId: string; clientSessionId?: string }) {
+  try {
+    const response = await axios.post(
+      `${serviceUrls.chats}/calls/events`,
+      { ...payload, event: 'group-leave' },
+      {
+        headers: { Authorization: `Bearer ${socket.data.token}` },
+      }
+    );
+    return response.data as {
+      success: boolean;
+      ended?: boolean;
+      activeParticipantIds?: string[];
+    };
+  } catch (error: any) {
+    logger.warn(
+      { error: error.response?.data || error.message, callId: payload.callId },
+      'Failed to record group call leave'
+    );
+    return { success: false, ended: false, activeParticipantIds: [] };
   }
 }
 
@@ -180,11 +222,12 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
         description?: string;
       };
       replyToId?: string;
+      mentions?: Array<{ userId: string; start: number; length: number }>;
       clientMessageId?: string;
       tempId?: string;
     }) => {
       try {
-        const { chatId, body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, tempId, clientMessageId } = data;
+        const { chatId, body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, mentions, tempId, clientMessageId } = data;
         const userId = socket.data.userId;
         const token = socket.data.token;
         const stableClientMessageId = clientMessageId || tempId;
@@ -206,6 +249,7 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
             sticker,
             event,
             replyToId,
+            mentions,
             clientMessageId: stableClientMessageId,
             tempId,
           },
@@ -314,6 +358,134 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
 
   socket.on('call:ice-candidate', async (data: CallIceCandidatePayload) => {
     await forwardCallSignal(socket, io, 'call:ice-candidate', data);
+  });
+
+  socket.on('group-call:start', async (data: GroupCallStartPayload) => {
+    const fromUserId = socket.data.userId;
+    if (!data?.callId || !data?.chatId || !data?.callType || !fromUserId) {
+      emitCallError(socket, data?.callId, 'Invalid group call invite');
+      return;
+    }
+
+    try {
+      const chat = await getAuthorizedChat(socket, data.chatId);
+      if (chat.type !== 'group' || !chat.participants.includes(fromUserId) || chat.deletedAt || chat.endedAt) {
+        emitCallError(socket, data.callId, 'Group call is not authorized for this chat');
+        return;
+      }
+
+      const startedAt = data.startedAt || new Date().toISOString();
+      const eligibleParticipantIds = chat.participants.filter((participantId) => participantId !== fromUserId);
+      let deliveredCount = 0;
+
+      for (const participantId of eligibleParticipantIds) {
+        try {
+          const settings = await getPublicUserSettings(participantId);
+          if (!settings.incomingCallsEnabled || !hasUserRoom(io, participantId)) continue;
+          io.to(`user:${participantId}`).emit('group-call:incoming', {
+            callId: data.callId,
+            chatId: data.chatId,
+            chatTitle: data.chatTitle || chat.title,
+            chatAvatarUrl: data.chatAvatarUrl || chat.avatarUrl,
+            fromUserId,
+            fromUserName: data.fromUserName,
+            callType: data.callType,
+            startedAt,
+          });
+          deliveredCount += 1;
+        } catch (error) {
+          logger.warn({ error, participantId, chatId: data.chatId }, 'Failed to deliver group call invite');
+        }
+      }
+
+      await recordCallEvent(socket, {
+        callId: data.callId,
+        chatId: data.chatId,
+        callType: data.callType,
+        event: 'invite',
+      });
+
+      socket.emit('group-call:started', {
+        callId: data.callId,
+        chatId: data.chatId,
+        deliveredCount,
+        startedAt,
+      });
+    } catch (error) {
+      emitCallError(socket, data.callId, 'Group call is not authorized for this chat');
+    }
+  });
+
+  socket.on('group-call:decline', async (data: GroupCallDeclinePayload) => {
+    const fromUserId = socket.data.userId;
+    if (!data?.callId || !data?.chatId || !data?.toUserId || !fromUserId) {
+      emitCallError(socket, data?.callId, 'Invalid group call response');
+      return;
+    }
+
+    try {
+      const chat = await getAuthorizedChat(socket, data.chatId);
+      if (chat.type !== 'group' || !chat.participants.includes(fromUserId) || !chat.participants.includes(data.toUserId)) {
+        emitCallError(socket, data.callId, 'Group call is not authorized for this chat');
+        return;
+      }
+      io.to(`user:${data.toUserId}`).emit('group-call:decline', {
+        ...data,
+        fromUserId,
+      });
+      await recordCallEvent(socket, {
+        callId: data.callId,
+        chatId: data.chatId,
+        targetUserId: fromUserId,
+        event: 'decline',
+      });
+    } catch (error) {
+      emitCallError(socket, data.callId, 'Group call is not authorized for this chat');
+    }
+  });
+
+  socket.on('group-call:leave', async (data: GroupCallLeavePayload) => {
+    const fromUserId = socket.data.userId;
+    if (!data?.callId || !data?.chatId || !fromUserId) {
+      emitCallError(socket, data?.callId, 'Invalid group call leave');
+      return;
+    }
+
+    try {
+      const chat = await getAuthorizedChat(socket, data.chatId);
+      if (chat.type !== 'group' || !chat.participants.includes(fromUserId)) {
+        emitCallError(socket, data.callId, 'Group call is not authorized for this chat');
+        return;
+      }
+
+      const result = await recordGroupCallLeave(socket, {
+        callId: data.callId,
+        chatId: data.chatId,
+        clientSessionId: data.clientSessionId,
+      });
+
+      const activeParticipantIds = result.activeParticipantIds || [];
+      for (const participantId of chat.participants) {
+        io.to(`user:${participantId}`).emit('group-call:participants', {
+          callId: data.callId,
+          chatId: data.chatId,
+          activeParticipantIds,
+        });
+      }
+
+      if (result.ended) {
+        const endedAt = new Date().toISOString();
+        for (const participantId of chat.participants) {
+          io.to(`user:${participantId}`).emit('group-call:ended', {
+            callId: data.callId,
+            chatId: data.chatId,
+            endedAt,
+          });
+        }
+      }
+    } catch (error) {
+      emitCallError(socket, data.callId, 'Group call is not authorized for this chat');
+    }
   });
 
   // message:read - Mark messages as read

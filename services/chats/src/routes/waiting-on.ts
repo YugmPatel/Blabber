@@ -17,6 +17,7 @@ import {
   type WaitingOnInputMessage,
   type WaitingOnParticipant,
 } from '../intelligence/waiting-on-extraction-service';
+import { materializeItemSources } from '../intelligence-source-materializer';
 
 interface MessageDocument {
   _id: ObjectId;
@@ -157,6 +158,7 @@ export const extractWaitingOnItems = asyncHandler(async (req: Request, res: Resp
     .find({
       chatId: chatResult.chatObjectId,
       deletedFor: { $ne: chatResult.userObjectId },
+      'momentReply.isMomentReply': { $ne: true },
     })
     .sort({ createdAt: -1 })
     .limit(messageLimit)
@@ -246,10 +248,17 @@ export const extractWaitingOnItems = asyncHandler(async (req: Request, res: Resp
     waitingOn.push(toWaitingOnItem(document));
   }
 
+  const sourcedWaitingOn = await materializeItemSources({
+    items: waitingOn,
+    chatId: chatResult.chatObjectId!,
+    userId: chatResult.userObjectId!,
+    label: 'Waiting On',
+  });
+
   const response: WaitingOnExtractionResult = {
     chatId,
     summary: parsedResult.data.summary,
-    waitingOn,
+    waitingOn: sourcedWaitingOn,
     generatedAt: parsedResult.data.generatedAt,
     sourceMessageIds: parsedResult.data.sourceMessageIds,
   };
@@ -279,7 +288,14 @@ export const getWaitingOnItems = asyncHandler(async (req: Request, res: Response
     .sort({ createdAt: -1 })
     .toArray();
 
-  return res.status(200).json({ waitingOn: waitingOn.map(toWaitingOnItem) });
+  const sourcedWaitingOn = await materializeItemSources({
+    items: waitingOn.map(toWaitingOnItem),
+    chatId: chatResult.chatObjectId!,
+    userId: chatResult.userObjectId!,
+    label: 'Waiting On',
+  });
+
+  return res.status(200).json({ waitingOn: sourcedWaitingOn });
 });
 
 export const updateWaitingOnItem = asyncHandler(async (req: Request, res: Response) => {
@@ -333,7 +349,14 @@ export const updateWaitingOnItem = asyncHandler(async (req: Request, res: Respon
     { returnDocument: 'after' }
   );
 
-  return res.status(200).json({ item: toWaitingOnItem(updated!) });
+  const [itemWithSources] = await materializeItemSources({
+    items: [toWaitingOnItem(updated!)],
+    chatId: chatResult.chatObjectId!,
+    userId: chatResult.userObjectId!,
+    label: 'Waiting On',
+  });
+
+  return res.status(200).json({ item: itemWithSources });
 });
 
 export const deleteWaitingOnItem = asyncHandler(async (req: Request, res: Response) => {

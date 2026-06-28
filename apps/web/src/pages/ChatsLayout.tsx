@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Outlet, useParams } from 'react-router-dom';
+import { Outlet, useNavigate, useParams } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
 import { Menu, Plus, Search, Sparkles, CheckSquare2, Brain } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
@@ -21,6 +21,7 @@ export default function ChatsLayout() {
   const [chatFilter, setChatFilter] = useState<'all' | 'groups'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { data: chats = [], isLoading, error, refetch, isFetching } = useChats();
 
@@ -94,6 +95,10 @@ export default function ChatsLayout() {
   }, [chatFilter, filteredChats]);
 
   const hasGroups = useMemo(() => chats.some((chat) => chat.type === 'group'), [chats]);
+  const openMessageSearch = () => {
+    const query = searchQuery.trim();
+    navigate(query ? `/search?q=${encodeURIComponent(query)}` : '/search');
+  };
 
   return (
     <ErrorBoundary>
@@ -160,9 +165,24 @@ export default function ChatsLayout() {
                 <input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-500 dark:focus:bg-slate-800"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      openMessageSearch();
+                    }
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-11 text-sm outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-500 dark:focus:bg-slate-800"
                   placeholder="Search conversations..."
                 />
+                <button
+                  type="button"
+                  onClick={openMessageSearch}
+                  className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+                  aria-label="Search messages"
+                  title="Search messages"
+                >
+                  <Brain size={15} />
+                </button>
               </div>
             </div>
 

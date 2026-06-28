@@ -13,9 +13,21 @@ interface MessageListProps {
   getUserAvatar: (userId: string) => string | undefined;
   isGroupChat: boolean;
   onReply?: (message: Message) => void;
+  onForward?: (message: Message) => void;
+  onPin?: (message: Message) => void;
+  onUnpin?: (message: Message) => void;
+  onSave?: (message: Message) => void;
+  onUnsave?: (message: Message) => void;
+  onJumpToMessage?: (messageId: string, chatId?: string) => void;
   onReact?: (messageId: string, emoji: string) => void;
   onDelete?: (messageId: string) => void;
-  onPollVote?: (messageId: string, optionId: string) => void;
+  onPollVote?: (messageId: string, optionIds: string[]) => void;
+  onClosePoll?: (messageId: string) => void;
+  onEventRsvp?: (messageId: string, status: 'going' | 'maybe' | 'declined') => void;
+  onEventCancel?: (messageId: string) => void;
+  onEventIcs?: (messageId: string) => void;
+  highlightedMessageId?: string | null;
+  onUserScrollInteraction?: () => void;
 }
 
 export default function MessageList({
@@ -28,9 +40,21 @@ export default function MessageList({
   getUserAvatar,
   isGroupChat,
   onReply,
+  onForward,
+  onPin,
+  onUnpin,
+  onSave,
+  onUnsave,
+  onJumpToMessage,
   onReact,
   onDelete,
   onPollVote,
+  onClosePoll,
+  onEventRsvp,
+  onEventCancel,
+  onEventIcs,
+  highlightedMessageId,
+  onUserScrollInteraction,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -134,8 +158,18 @@ export default function MessageList({
   return (
     <div
       ref={scrollRef}
+      tabIndex={0}
       className="flex-1 overflow-y-auto bg-[#f8faf9] px-6 py-5 dark:bg-slate-950 dark:[&_.bg-gray-200]:bg-slate-800 dark:[&_.text-gray-600]:text-slate-300"
       style={{ display: 'flex', flexDirection: 'column-reverse' }}
+      onWheel={onUserScrollInteraction}
+      onTouchMove={onUserScrollInteraction}
+      onPointerDown={onUserScrollInteraction}
+      onScroll={onUserScrollInteraction}
+      onKeyDown={(event) => {
+        if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)) {
+          onUserScrollInteraction?.();
+        }
+      }}
     >
       <div>
         {/* Loading indicator at top */}
@@ -167,9 +201,20 @@ export default function MessageList({
                   }
                   senderAvatarUrl={!isSentByMe ? getUserAvatar(message.senderId) : undefined}
                   onReply={onReply}
+                  onForward={onForward}
+                  onPin={onPin}
+                  onUnpin={onUnpin}
+                  onSave={onSave}
+                  onUnsave={onUnsave}
+                  onJumpToMessage={onJumpToMessage}
                   onReact={onReact}
                   onDelete={onDelete}
                   onPollVote={onPollVote}
+                  onClosePoll={onClosePoll}
+                  onEventRsvp={onEventRsvp}
+                  onEventCancel={onEventCancel}
+                  onEventIcs={onEventIcs}
+                  highlighted={message._id === highlightedMessageId}
                 />
               );
             })}

@@ -1,8 +1,17 @@
-import express, { Request, Response, NextFunction, Express } from 'express';
+import express, { Request, Response, Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { loadCommonConfig, loadCORSConfig } from '@repo/config';
-import { logger, createAuthMiddleware } from '@repo/utils';
+import {
+  createAuthMiddleware,
+  errorHandler,
+  notFoundHandler,
+  requestIdMiddleware,
+  requestLogger,
+  runReadinessChecks,
+} from '@repo/utils';
+import { getDatabase } from './db';
+import { connectToRedis } from './redis';
 
 const app: Express = express();
 
@@ -39,18 +48,8 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  logger.info(
-    {
-      method: req.method,
-      path: req.path,
-      ip: req.ip,
-    },
-    'Incoming request'
-  );
-  next();
-});
+app.use(requestIdMiddleware);
+app.use(requestLogger('media'));
 
 // Health check endpoint
 app.get('/healthz', (_req: Request, res: Response) => {
@@ -61,49 +60,31 @@ app.get('/healthz', (_req: Request, res: Response) => {
   });
 });
 
+app.get('/readyz', async (_req: Request, res: Response) => {
+  const readiness = await runReadinessChecks([
+    { name: 'mongo', check: () => getDatabase().command({ ping: 1 }).then(() => undefined) },
+    { name: 'redis', check: () => connectToRedis().ping().then(() => undefined) },
+  ]);
+  res.status(readiness.ready ? 200 : 503).json({
+    status: readiness.ready ? 'ready' : 'not_ready',
+    service: 'media',
+    checks: readiness.checks,
+  });
+});
+
 // Media routes
-import { getLocalMedia, presign, uploadLocalMedia } from './routes/presign';
+import { getLocalMedia, presign, uploadLocalMedia, uploadMultipartMedia } from './routes/presign';
 import { linkPreview } from './routes/link-preview';
 app.post('/presign', authMiddleware, presign);
+app.post('/upload', authMiddleware, express.raw({ type: 'multipart/form-data', limit: '50mb' }), uploadMultipartMedia);
 app.put('/local/:id', authMiddleware, express.raw({ type: '*/*', limit: '50mb' }), uploadLocalMedia);
 app.get('/local/:id', getLocalMedia);
 app.get('/link-preview', linkPreview);
 
 // 404 handler
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Route ${req.method} ${req.path} not found`,
-  });
-});
+app.use(notFoundHandler);
 
 // Error handling middleware
-app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-  logger.error(
-    {
-      error: err.message,
-      stack: err.stack,
-      path: req.path,
-      method: req.method,
-      statusCode: err.statusCode,
-    },
-    'Error occurred'
-  );
-
-  // Handle AppError instances
-  if (err.statusCode) {
-    return res.status(err.statusCode).json({
-      error: err.name || 'Error',
-      message: err.message,
-      code: err.code,
-    });
-  }
-
-  // Handle unknown errors
-  return res.status(500).json({
-    error: 'Internal Server Error',
-    message: commonConfig.NODE_ENV === 'development' ? err.message : 'An unexpected error occurred',
-  });
-});
+app.use(errorHandler('media', commonConfig.NODE_ENV));
 
 export default app;

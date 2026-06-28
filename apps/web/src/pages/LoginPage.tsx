@@ -83,6 +83,8 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { login, isAuthenticated } = useAuth();
+  const returnTo = searchParams.get('returnTo');
+  const safeReturnTo = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/chats';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -94,9 +96,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/chats', { replace: true });
+      navigate(safeReturnTo, { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, safeReturnTo]);
 
   useEffect(() => {
     const oauthError = searchParams.get('oauth');
@@ -140,7 +142,7 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       await login(email, password);
-      navigate('/chats', { replace: true });
+      navigate(safeReturnTo, { replace: true });
     } catch (err: any) {
       const errorMessage = err.response?.data?.message || 'Invalid email or password';
       setError(errorMessage);

@@ -5,6 +5,9 @@ import { connectToDatabase, closeDatabase } from './db';
 import { createUserIndexes } from './models/user';
 import { createDeviceSessionIndexes } from './models/device-session';
 import { createPasswordResetTokenIndexes } from './models/password-reset-token';
+import { createAccountSecurityIndexes } from './models/account-security';
+import { AccountDeletionProcessor } from './account-processors';
+import { validateEmailStartupConfig } from './utils/email';
 
 const config = loadCommonConfig();
 
@@ -12,12 +15,16 @@ async function startServer() {
   try {
     // Connect to database
     await connectToDatabase();
+    validateEmailStartupConfig();
 
     // Create indexes
     await createUserIndexes();
     await createDeviceSessionIndexes();
     await createPasswordResetTokenIndexes();
+    await createAccountSecurityIndexes();
     logger.info('Database indexes created');
+    const accountDeletionProcessor = new AccountDeletionProcessor();
+    accountDeletionProcessor.start();
 
     // Start Express server
     const server = app.listen(config.PORT, () => {
@@ -36,6 +43,7 @@ async function startServer() {
 
       server.close(async () => {
         logger.info('HTTP server closed');
+        accountDeletionProcessor.stop();
         await closeDatabase();
         process.exit(0);
       });

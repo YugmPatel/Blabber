@@ -5,6 +5,7 @@ import { useAppStore } from '@/store/app-store';
 import { useSocketEvents } from '@/hooks/useSocketEvents';
 import type { ClientToServerEvents, ServerToClientEvents } from '@repo/types';
 import CallModal from '@/components/CallModal';
+import IncomingGroupCallManager from '@/components/IncomingGroupCallManager';
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -131,6 +132,7 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
     <SocketContext.Provider value={value}>
       {children}
       <CallModal socket={socket as TypedSocket | null} isConnected={isConnected} />
+      <IncomingGroupCallManager socket={socket as TypedSocket | null} isConnected={isConnected} />
     </SocketContext.Provider>
   );
 };

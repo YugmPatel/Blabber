@@ -4,6 +4,7 @@ import { ObjectId } from 'mongodb';
 import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
 import { getMessagesCollection } from '../models/message';
+import { seedMessageTestChat } from '../test-fixtures';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_ACCESS_SECRET!;
@@ -27,6 +28,8 @@ describe('PATCH /:messageId - Edit Message', () => {
   beforeEach(async () => {
     const db = getDatabase();
     await db.collection('messages').deleteMany({});
+    await db.collection('chats').deleteMany({});
+    await seedMessageTestChat(TEST_CHAT_ID, [TEST_USER_ID, OTHER_USER_ID]);
   });
 
   it('should edit a message successfully', async () => {

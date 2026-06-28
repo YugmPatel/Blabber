@@ -1,8 +1,16 @@
-import express, { Request, Response, NextFunction, Express } from 'express';
+import express, { Request, Response, Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { loadCommonConfig, loadCORSConfig, loadJWTConfig } from '@repo/config';
-import { logger, createAuthMiddleware } from '@repo/utils';
+import {
+  createAuthMiddleware,
+  errorHandler,
+  notFoundHandler,
+  requestIdMiddleware,
+  requestLogger,
+  runReadinessChecks,
+} from '@repo/utils';
+import { getDatabase } from './db';
 
 const app: Express = express();
 
@@ -31,18 +39,8 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  logger.info(
-    {
-      method: req.method,
-      path: req.path,
-      ip: req.ip,
-    },
-    'Incoming request'
-  );
-  next();
-});
+app.use(requestIdMiddleware);
+app.use(requestLogger('chats'));
 
 // Health check endpoint
 app.get('/healthz', (_req: Request, res: Response) => {
@@ -50,6 +48,17 @@ app.get('/healthz', (_req: Request, res: Response) => {
     status: 'ok',
     service: 'chats',
     timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/readyz', async (_req: Request, res: Response) => {
+  const readiness = await runReadinessChecks([
+    { name: 'mongo', check: () => getDatabase().command({ ping: 1 }).then(() => undefined) },
+  ]);
+  res.status(readiness.ready ? 200 : 503).json({
+    status: readiness.ready ? 'ready' : 'not_ready',
+    service: 'chats',
+    checks: readiness.checks,
   });
 });
 
@@ -68,10 +77,26 @@ import {
 } from './routes/manage-members';
 import { updateChat } from './routes/update-chat';
 import { pinChat, unpinChat, archiveChat, unarchiveChat } from './routes/pin-archive';
+import {
+  createInviteLink,
+  getInviteLinkSettings,
+  joinInvite,
+  previewInvite,
+  regenerateInviteLink,
+  revokeInviteLink,
+} from './routes/invite-links';
 import { requireChatAdmin, requireGroupParticipant } from './middleware/rbac';
 import { summarizeChat } from './routes/summarize-chat';
 import { getChatSummary } from './routes/get-chat-summary';
-import { createChatAction, extractChatActions, getChatActions, getMyChatActions, updateChatAction } from './routes/chat-actions';
+import {
+  addChatActionUpdate,
+  createChatAction,
+  deleteChatAction,
+  extractChatActions,
+  getChatActions,
+  getMyChatActions,
+  updateChatAction,
+} from './routes/chat-actions';
 import {
   deleteChatDecision,
   extractChatDecisions,
@@ -89,12 +114,21 @@ import {
   getIntelligenceAvailability,
   requireChatIntelligenceEnabled,
 } from './middleware/user-settings';
+import { clearMyAiHistory, updateGroupIntelligenceSettings } from './routes/group-intelligence-settings';
 import { listCallHistory, recordCallEvent } from './routes/call-history';
-import { createGroupCallToken } from './routes/group-call-token';
+import { createGroupCallToken, getActiveGroupCall } from './routes/group-call-token';
+import {
+  listModerationActivity,
+  moderationRemoveMember,
+  restrictMember,
+  unrestrictMember,
+  updateModerationSettings,
+} from './routes/group-moderation';
 
 app.post('/', authMiddleware, createChat);
 app.get('/', authMiddleware, listChats);
 app.get('/intelligence/availability', authMiddleware, getIntelligenceAvailability);
+app.delete('/intelligence/history/me', authMiddleware, clearMyAiHistory);
 app.post('/intelligence/chats/:chatId/summarize', authMiddleware, requireChatIntelligenceEnabled, summarizeChat);
 app.get('/intelligence/chats/:chatId/summary', authMiddleware, requireChatIntelligenceEnabled, getChatSummary);
 app.post('/intelligence/chats/:chatId/actions/extract', authMiddleware, requireChatIntelligenceEnabled, extractChatActions);
@@ -102,6 +136,8 @@ app.post('/intelligence/chats/:chatId/actions', authMiddleware, requireChatIntel
 app.get('/intelligence/chats/:chatId/actions', authMiddleware, requireChatIntelligenceEnabled, getChatActions);
 app.get('/intelligence/actions/mine', authMiddleware, requireChatIntelligenceEnabled, getMyChatActions);
 app.patch('/intelligence/actions/:actionId', authMiddleware, requireChatIntelligenceEnabled, updateChatAction);
+app.post('/intelligence/actions/:actionId/updates', authMiddleware, requireChatIntelligenceEnabled, addChatActionUpdate);
+app.delete('/intelligence/actions/:actionId', authMiddleware, requireChatIntelligenceEnabled, deleteChatAction);
 app.post('/intelligence/chats/:chatId/decisions/extract', authMiddleware, requireChatIntelligenceEnabled, extractChatDecisions);
 app.get('/intelligence/chats/:chatId/decisions', authMiddleware, requireChatIntelligenceEnabled, getChatDecisions);
 app.patch('/intelligence/decisions/:decisionId', authMiddleware, requireChatIntelligenceEnabled, updateChatDecision);
@@ -114,7 +150,20 @@ app.get('/intelligence/chats/:chatId/brain', authMiddleware, requireChatIntellig
 app.post('/intelligence/chats/:chatId/brain/ask', authMiddleware, requireChatIntelligenceEnabled, askGroupBrain);
 app.get('/calls', authMiddleware, listCallHistory);
 app.post('/calls/events', authMiddleware, recordCallEvent);
+app.get('/invites/:token/preview', authMiddleware, previewInvite);
+app.post('/invites/:token/join', authMiddleware, joinInvite);
+app.get('/:id/calls/active', authMiddleware, getActiveGroupCall);
 app.post('/:id/calls/group-token', authMiddleware, createGroupCallToken);
+app.get('/:id/invite-link', authMiddleware, getInviteLinkSettings);
+app.post('/:id/invite-link', authMiddleware, createInviteLink);
+app.post('/:id/invite-link/regenerate', authMiddleware, regenerateInviteLink);
+app.post('/:id/invite-link/revoke', authMiddleware, revokeInviteLink);
+app.patch('/:id/intelligence/settings', authMiddleware, requireChatAdmin, updateGroupIntelligenceSettings);
+app.patch('/:id/moderation/settings', authMiddleware, updateModerationSettings);
+app.post('/:id/moderation/members/:userId/restrict', authMiddleware, restrictMember);
+app.delete('/:id/moderation/members/:userId/restrict', authMiddleware, unrestrictMember);
+app.delete('/:id/moderation/members/:userId', authMiddleware, moderationRemoveMember);
+app.get('/:id/moderation/activity', authMiddleware, listModerationActivity);
 app.get('/:id', authMiddleware, getChat);
 app.patch('/:id', authMiddleware, requireChatAdmin, updateChat);
 app.post('/:id/members', authMiddleware, requireChatAdmin, addMember);
@@ -130,40 +179,9 @@ app.post('/:id/archive', authMiddleware, archiveChat);
 app.post('/:id/unarchive', authMiddleware, unarchiveChat);
 
 // 404 handler
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Route ${req.method} ${req.path} not found`,
-  });
-});
+app.use(notFoundHandler);
 
 // Error handling middleware
-app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-  logger.error(
-    {
-      error: err.message,
-      stack: err.stack,
-      path: req.path,
-      method: req.method,
-      statusCode: err.statusCode,
-    },
-    'Error occurred'
-  );
-
-  // Handle AppError instances
-  if (err.statusCode) {
-    return res.status(err.statusCode).json({
-      error: err.name || 'Error',
-      message: err.message,
-      code: err.code,
-    });
-  }
-
-  // Handle unknown errors
-  return res.status(500).json({
-    error: 'Internal Server Error',
-    message: commonConfig.NODE_ENV === 'development' ? err.message : 'An unexpected error occurred',
-  });
-});
+app.use(errorHandler('chats', commonConfig.NODE_ENV));
 
 export default app;

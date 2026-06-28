@@ -5,26 +5,25 @@ import Avatar from './Avatar';
 describe('Avatar', () => {
   it('renders with image when src is provided', () => {
     render(<Avatar src="https://example.com/avatar.jpg" alt="User Avatar" />);
-    const img = screen.getByAlt('User Avatar');
+    const img = screen.getByAltText('User Avatar');
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute('src', 'https://example.com/avatar.jpg');
   });
 
   it('renders default icon when no src is provided', () => {
-    const { container } = render(<Avatar alt="User Avatar" />);
-    const svg = container.querySelector('svg');
-    expect(svg).toBeInTheDocument();
+    render(<Avatar alt="User Avatar" />);
+    expect(screen.getByText('UA')).toBeInTheDocument();
   });
 
   it('renders online indicator when online is true', () => {
     const { container } = render(<Avatar alt="User Avatar" online={true} />);
-    const indicator = container.querySelector('.bg-green-500');
+    const indicator = container.querySelector('.bg-emerald-500');
     expect(indicator).toBeInTheDocument();
   });
 
   it('renders offline indicator when online is false', () => {
     const { container } = render(<Avatar alt="User Avatar" online={false} />);
-    const indicator = container.querySelector('.bg-gray-400');
+    const indicator = container.querySelector('.bg-slate-400');
     expect(indicator).toBeInTheDocument();
   });
 
@@ -36,12 +35,12 @@ describe('Avatar', () => {
 
   it('applies correct size classes', () => {
     const { container, rerender } = render(<Avatar alt="User Avatar" size="sm" />);
-    expect(container.querySelector('.w-8')).toBeInTheDocument();
+    expect(container.querySelector('.h-8.w-8')).toBeInTheDocument();
 
     rerender(<Avatar alt="User Avatar" size="md" />);
-    expect(container.querySelector('.w-12')).toBeInTheDocument();
+    expect(container.querySelector('.h-10.w-10')).toBeInTheDocument();
 
     rerender(<Avatar alt="User Avatar" size="lg" />);
-    expect(container.querySelector('.w-16')).toBeInTheDocument();
+    expect(container.querySelector('.h-12.w-12')).toBeInTheDocument();
   });
 });

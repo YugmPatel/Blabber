@@ -17,24 +17,54 @@ import {
   ArrowLeft,
   Sun,
   ExternalLink,
+  Mail,
+  Laptop,
+  Download,
+  LogOut,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
 import { useTheme } from '@/hooks/useTheme';
 import Avatar from '@/components/Avatar';
 import CameraModal from '@/components/CameraModal';
-import { apiClient, getAccessToken, normalizeMediaUrl } from '@/api/client';
+import {
+  apiClient,
+  approveFollowRequest,
+  blockUser,
+  declineFollowRequest,
+  downloadDataExport,
+  fetchBlockedUsers,
+  fetchAccountStatus,
+  fetchDataExports,
+  fetchDeviceSessions,
+  fetchIncomingFollowRequests,
+  fetchMyProfile,
+  fetchMyReports,
+  getAccessToken,
+  logoutOtherDeviceSessions,
+  normalizeMediaUrl,
+  requestAccountDeletion,
+  requestDataExport,
+  requestEmailChange,
+  resendEmailVerification,
+  revokeDeviceSession,
+  unblockUser,
+  updateProfileHandle,
+  updateSocialProfile,
+} from '@/api/client';
 
 // ── Section registry ────────────────────────────────────────────────────────
 
-type SectionKey = 'profile' | 'privacy' | 'notifications' | 'appearance' | 'ai' | 'help';
+type SectionKey = 'profile' | 'account' | 'privacy' | 'notifications' | 'appearance' | 'ai' | 'help';
 
 const SECTIONS: { key: SectionKey; label: string; icon: typeof User }[] = [
   { key: 'profile',       label: 'Profile',        icon: User       },
+  { key: 'account',       label: 'Account',        icon: Shield     },
   { key: 'privacy',       label: 'Privacy',         icon: Shield     },
   { key: 'notifications', label: 'Notifications',   icon: Bell       },
   { key: 'appearance',    label: 'Appearance',      icon: Moon       },
-  { key: 'ai',            label: 'AI Engine',       icon: Sparkles   },
+  { key: 'ai',            label: 'AI privacy',      icon: Sparkles   },
   { key: 'help',          label: 'Help',            icon: HelpCircle },
 ];
 
@@ -68,6 +98,8 @@ interface UserSettings {
   incomingCallsEnabled: boolean;
   themePreference: ThemePreference;
   chatIntelligenceEnabled: boolean;
+  momentArchiveEnabled: boolean;
+  timezone?: string;
   updatedAt?: string;
 }
 
@@ -97,6 +129,12 @@ function useUpdateUserSettings() {
       queryClient.setQueryData(settingsKey, settings);
     },
   });
+}
+
+interface MomentContact {
+  _id: string;
+  name: string;
+  avatarUrl?: string | null;
 }
 
 // ── Toggle component ─────────────────────────────────────────────────────────
@@ -129,6 +167,87 @@ function Toggle({
   );
 }
 
+function CloseFriendsSettings() {
+  const queryClient = useQueryClient();
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const contacts = useQuery({
+    queryKey: ['moment-contacts'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ contacts: MomentContact[] }>('/api/moments/contacts');
+      return data.contacts;
+    },
+  });
+  const closeFriends = useQuery({
+    queryKey: ['moment-close-friends'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ closeFriends: MomentContact[] }>('/api/moments/close-friends');
+      return data.closeFriends;
+    },
+  });
+  const addFriend = useMutation({
+    mutationFn: async (userId: string) => apiClient.post('/api/moments/close-friends', { userId }),
+    onSuccess: () => {
+      setSelectedUserId('');
+      queryClient.invalidateQueries({ queryKey: ['moment-close-friends'] });
+    },
+  });
+  const removeFriend = useMutation({
+    mutationFn: async (userId: string) => apiClient.delete(`/api/moments/close-friends/${userId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['moment-close-friends'] }),
+  });
+  const closeFriendIds = new Set((closeFriends.data ?? []).map((friend) => friend._id));
+  const availableContacts = (contacts.data ?? []).filter((contact) => !closeFriendIds.has(contact._id));
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Close Friends Moments</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Choose contacts who can receive Close Friends Moments.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <select
+          value={selectedUserId}
+          onChange={(event) => setSelectedUserId(event.target.value)}
+          className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+        >
+          <option value="">Select a contact</option>
+          {availableContacts.map((contact) => (
+            <option key={contact._id} value={contact._id}>{contact.name}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => selectedUserId && addFriend.mutate(selectedUserId)}
+          disabled={!selectedUserId || addFriend.isPending}
+          className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:bg-slate-300"
+        >
+          Add
+        </button>
+      </div>
+      <div className="mt-4 space-y-2">
+        {closeFriends.isLoading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading Close Friends...</p>
+        ) : (closeFriends.data ?? []).length === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">No Close Friends selected.</p>
+        ) : (
+          closeFriends.data!.map((friend) => (
+            <div key={friend._id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 px-3 py-2 dark:border-slate-700">
+              <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{friend.name}</span>
+              <button
+                onClick={() => removeFriend.mutate(friend._id)}
+                className="text-sm font-semibold text-rose-600 transition hover:text-rose-700"
+              >
+                Remove
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ── Section: Profile ─────────────────────────────────────────────────────────
 
 function ProfileSection() {
@@ -151,9 +270,68 @@ function ProfileSection() {
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [showCameraCapture, setShowCameraCapture] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [profileHandle, setProfileHandle] = useState('');
+  const [profileBio, setProfileBio] = useState('');
+  const [profileWebsite, setProfileWebsite] = useState('');
+  const [profileVisibility, setProfileVisibility] = useState<'private' | 'public'>('private');
+  const [profileNotice, setProfileNotice] = useState('');
+  const [profileError, setProfileError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const displayedAvatar = normalizeMediaUrl(localPreview || savedAvatarUrl);
+  const socialProfileQuery = useQuery({
+    queryKey: ['profiles', 'me'],
+    queryFn: fetchMyProfile,
+  });
+  const followRequestsQuery = useQuery({
+    queryKey: ['profiles', 'requests', 'incoming'],
+    queryFn: fetchIncomingFollowRequests,
+  });
+  const saveSocialProfile = useMutation({
+    mutationFn: updateSocialProfile,
+    onSuccess: async (profile) => {
+      setProfileBio(profile.bio || '');
+      setProfileWebsite(profile.website || '');
+      setProfileVisibility(profile.visibility || 'private');
+      setProfileNotice('Profile saved.');
+      setProfileError('');
+      await socialProfileQuery.refetch();
+      if (refreshUser) refreshUser();
+    },
+    onError: (err) => {
+      const message = axios.isAxiosError(err) ? err.response?.data?.message || 'Unable to save profile.' : 'Unable to save profile.';
+      setProfileError(message);
+      setProfileNotice('');
+    },
+  });
+  const saveHandle = useMutation({
+    mutationFn: updateProfileHandle,
+    onSuccess: async (profile) => {
+      setProfileHandle(profile.handle || '');
+      setProfileNotice('Handle saved.');
+      setProfileError('');
+      await socialProfileQuery.refetch();
+    },
+    onError: (err) => {
+      const message = axios.isAxiosError(err) ? err.response?.data?.message || 'Unable to save handle.' : 'Unable to save handle.';
+      setProfileError(message);
+      setProfileNotice('');
+    },
+  });
+  const approveRequest = useMutation({
+    mutationFn: approveFollowRequest,
+    onSuccess: async () => {
+      await followRequestsQuery.refetch();
+      await socialProfileQuery.refetch();
+    },
+  });
+  const declineRequest = useMutation({
+    mutationFn: declineFollowRequest,
+    onSuccess: async () => {
+      await followRequestsQuery.refetch();
+      await socialProfileQuery.refetch();
+    },
+  });
 
   useEffect(() => {
     setName(user?.name || '');
@@ -162,6 +340,15 @@ function ProfileSection() {
     setDepartment(profileUser?.department || '');
     setSavedAvatarUrl(persistedAvatarUrl);
   }, [user?._id, user?.name, profileUser?.about, profileUser?.role, profileUser?.department, persistedAvatarUrl]);
+
+  useEffect(() => {
+    const profile = socialProfileQuery.data;
+    if (!profile) return;
+    setProfileHandle(profile.handle || '');
+    setProfileBio(profile.bio || '');
+    setProfileWebsite(profile.website || '');
+    setProfileVisibility(profile.visibility || 'private');
+  }, [socialProfileQuery.data]);
 
   const uploadAvatar = async (
     file: File
@@ -225,6 +412,19 @@ function ProfileSection() {
     setSavedAvatarUrl(persistedAvatarUrl);
     setLocalPreview('');
     setUploadError('');
+  };
+
+  const handleSocialSave = async () => {
+    await saveSocialProfile.mutateAsync({
+      name,
+      bio: profileBio,
+      website: profileWebsite,
+      visibility: profileVisibility,
+    });
+  };
+
+  const handleHandleSave = async () => {
+    await saveHandle.mutateAsync(profileHandle);
   };
 
   const handleAvatarFile = async (file: File) => {
@@ -426,7 +626,7 @@ function ProfileSection() {
           </div>
           <div>
             <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-              Status Message
+              Profile note
             </label>
             <textarea
               value={about}
@@ -437,6 +637,146 @@ function ProfileSection() {
               maxLength={140}
             />
             <p className="mt-1 text-right text-xs text-slate-400">{about.length}/140</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white">Social Profile</h2>
+            <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+              Control your handle, profile details, and follow requests.
+            </p>
+          </div>
+          <div className="flex gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span>{socialProfileQuery.data?.counts?.followers ?? 0} followers</span>
+            <span>{socialProfileQuery.data?.counts?.following ?? 0} following</span>
+          </div>
+        </div>
+
+        {(profileNotice || profileError) && (
+          <div
+            className={`mt-4 rounded-xl border px-3 py-2 text-sm ${
+              profileError
+                ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
+            }`}
+          >
+            {profileError || profileNotice}
+          </div>
+        )}
+
+        <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
+          <div>
+            <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
+              Profile handle
+            </label>
+            <div className="flex rounded-xl border border-slate-200 bg-slate-50 focus-within:border-teal-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:focus:border-teal-500">
+              <span className="px-3.5 py-2.5 text-sm text-slate-400">@</span>
+              <input
+                type="text"
+                value={profileHandle}
+                onChange={(e) => setProfileHandle(e.target.value.replace(/^@/, '').toLowerCase())}
+                placeholder="your_handle"
+                className="min-w-0 flex-1 bg-transparent py-2.5 pr-3.5 text-sm text-slate-900 outline-none dark:text-white"
+                maxLength={30}
+              />
+            </div>
+          </div>
+          <button
+            onClick={handleHandleSave}
+            disabled={saveHandle.isPending || !profileHandle}
+            className="self-end rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 dark:bg-white dark:text-slate-950"
+          >
+            {saveHandle.isPending ? 'Saving...' : 'Save handle'}
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">Website</label>
+            <input
+              type="url"
+              value={profileWebsite}
+              onChange={(e) => setProfileWebsite(e.target.value)}
+              placeholder="https://example.com"
+              className={INPUT}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">Visibility</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['private', 'public'] as const).map((value) => (
+                <button
+                  key={value}
+                  onClick={() => setProfileVisibility(value)}
+                  className={`rounded-xl border px-3 py-2.5 text-sm font-semibold capitalize ${
+                    profileVisibility === value
+                      ? 'border-teal-400 bg-teal-50 text-teal-700 dark:border-teal-500 dark:bg-teal-950/40 dark:text-teal-200'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60'
+                  }`}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">Bio</label>
+          <textarea
+            value={profileBio}
+            onChange={(e) => setProfileBio(e.target.value)}
+            className={`${INPUT} resize-none`}
+            rows={3}
+            maxLength={160}
+          />
+          <p className="mt-1 text-right text-xs text-slate-400">{profileBio.length}/160</p>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={handleSocialSave}
+            disabled={saveSocialProfile.isPending}
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 dark:bg-white dark:text-slate-950"
+          >
+            {saveSocialProfile.isPending && <Loader2 size={15} className="animate-spin" />}
+            Save social profile
+          </button>
+        </div>
+
+        <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-700">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+            Follow requests ({followRequestsQuery.data?.requests.length ?? 0})
+          </h3>
+          <div className="mt-3 space-y-2">
+            {(followRequestsQuery.data?.requests || []).map((request) => (
+              <div key={request.requester.handle || request.requestedAt} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900/50">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{request.requester.name}</p>
+                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">{request.requester.displayHandle}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => request.requester.handle && approveRequest.mutate(request.requester.handle)}
+                    className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white dark:bg-white dark:text-slate-950"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => request.requester.handle && declineRequest.mutate(request.requester.handle)}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300"
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            ))}
+            {followRequestsQuery.data?.requests.length === 0 && (
+              <p className="text-sm text-slate-500 dark:text-slate-400">No pending requests.</p>
+            )}
           </div>
         </div>
       </section>
@@ -476,11 +816,342 @@ function ProfileSection() {
   );
 }
 
+// ── Section: Account ────────────────────────────────────────────────────────
+
+function formatDateTime(value?: string) {
+  if (!value) return 'Not available';
+  return new Date(value).toLocaleString();
+}
+
+function AccountSection() {
+  const { user, refreshUser, logout } = useAuth();
+  const queryClient = useQueryClient();
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [emailPassword, setEmailPassword] = useState('');
+  const [exportPassword, setExportPassword] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+
+  const statusQuery = useQuery({
+    queryKey: ['account-status'],
+    queryFn: fetchAccountStatus,
+  });
+
+  const sessionsQuery = useQuery({
+    queryKey: ['account-sessions'],
+    queryFn: fetchDeviceSessions,
+  });
+
+  const exportsQuery = useQuery({
+    queryKey: ['account-exports'],
+    queryFn: fetchDataExports,
+  });
+
+  const showError = (err: unknown, fallback: string) => {
+    const message = axios.isAxiosError(err) ? err.response?.data?.message || fallback : fallback;
+    setError(message);
+    setMessage('');
+  };
+
+  const verification = useMutation({
+    mutationFn: resendEmailVerification,
+    onSuccess: async () => {
+      setMessage('Verification email sent.');
+      setError('');
+      await queryClient.invalidateQueries({ queryKey: ['account-status'] });
+    },
+    onError: (err) => showError(err, 'Unable to send verification email.'),
+  });
+
+  const emailChange = useMutation({
+    mutationFn: requestEmailChange,
+    onSuccess: () => {
+      setMessage('Check your new email to confirm the change.');
+      setError('');
+      setNewEmail('');
+      setEmailPassword('');
+    },
+    onError: (err) => showError(err, 'Unable to request email change.'),
+  });
+
+  const revokeSession = useMutation({
+    mutationFn: revokeDeviceSession,
+    onSuccess: async (result) => {
+      setMessage(result.currentRevoked ? 'This device was logged out.' : 'Device session revoked.');
+      setError('');
+      await queryClient.invalidateQueries({ queryKey: ['account-sessions'] });
+      if (result.currentRevoked) await logout();
+    },
+    onError: (err) => showError(err, 'Unable to revoke device session.'),
+  });
+
+  const logoutOthers = useMutation({
+    mutationFn: logoutOtherDeviceSessions,
+    onSuccess: async (result) => {
+      setMessage(`${result.revoked} other device session${result.revoked === 1 ? '' : 's'} logged out.`);
+      setError('');
+      await queryClient.invalidateQueries({ queryKey: ['account-sessions'] });
+    },
+    onError: (err) => showError(err, 'Unable to log out other devices.'),
+  });
+
+  const dataExport = useMutation({
+    mutationFn: requestDataExport,
+    onSuccess: async () => {
+      setMessage('Data export requested.');
+      setError('');
+      setExportPassword('');
+      await queryClient.invalidateQueries({ queryKey: ['account-exports'] });
+      window.setTimeout(() => queryClient.invalidateQueries({ queryKey: ['account-exports'] }), 1500);
+    },
+    onError: (err) => showError(err, 'Unable to request data export.'),
+  });
+
+  const deletion = useMutation({
+    mutationFn: requestAccountDeletion,
+    onSuccess: async (result) => {
+      setMessage(`Account deletion scheduled for ${formatDateTime(result.deletion.scheduledFor)}.`);
+      setError('');
+      await refreshUser().catch(() => undefined);
+      await logout();
+    },
+    onError: (err) => showError(err, 'Unable to schedule account deletion.'),
+  });
+
+  const accountUser = statusQuery.data?.user || user;
+  const latestExport = exportsQuery.data?.exports[0] || statusQuery.data?.export;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Account</h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Manage sign-in, devices, exports, and account deletion.
+        </p>
+      </div>
+
+      {(message || error) && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            error
+              ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
+          }`}
+        >
+          {error || message}
+        </div>
+      )}
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white">
+              <Mail size={17} />
+              Email
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{accountUser?.email}</p>
+          </div>
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+              accountUser?.emailVerified
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+            }`}
+          >
+            {accountUser?.emailVerified ? 'Verified' : 'Unverified'}
+          </span>
+        </div>
+        {!accountUser?.emailVerified && (
+          <button
+            onClick={() => verification.mutate()}
+            disabled={verification.isPending}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 dark:bg-white dark:text-slate-950"
+          >
+            {verification.isPending && <Loader2 size={15} className="animate-spin" />}
+            Resend verification
+          </button>
+        )}
+        <div className="mt-5 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            placeholder="New email address"
+            className={INPUT}
+          />
+          <input
+            type="password"
+            value={emailPassword}
+            onChange={(e) => setEmailPassword(e.target.value)}
+            placeholder="Current password"
+            className={INPUT}
+          />
+          <button
+            onClick={() => emailChange.mutate({ newEmail, currentPassword: emailPassword })}
+            disabled={emailChange.isPending || !newEmail || !emailPassword || !accountUser?.emailVerified}
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700/60"
+          >
+            Change email
+          </button>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white">
+              <Laptop size={17} />
+              Devices
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Active browser sessions on your account.</p>
+          </div>
+          <button
+            onClick={() => logoutOthers.mutate()}
+            disabled={logoutOthers.isPending}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+          >
+            <LogOut size={15} />
+            Logout others
+          </button>
+        </div>
+        <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-700">
+          {sessionsQuery.isLoading ? (
+            <p className="py-3 text-sm text-slate-500">Loading devices...</p>
+          ) : (
+            (sessionsQuery.data?.sessions || []).map((session) => (
+              <div key={session.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                    {session.label}
+                    {session.current && <span className="ml-2 text-xs text-teal-600 dark:text-teal-300">Current</span>}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Last active {formatDateTime(session.lastActiveAt || session.createdAt)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => revokeSession.mutate(session.id)}
+                  disabled={revokeSession.isPending}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                >
+                  Revoke
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white">
+          <Download size={17} />
+          Data Export
+        </h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Export your profile, settings, messages authored by you, saved references, and eligible actions.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto]">
+          <input
+            type="password"
+            value={exportPassword}
+            onChange={(e) => setExportPassword(e.target.value)}
+            placeholder="Current password"
+            className={INPUT}
+          />
+          <button
+            onClick={() => dataExport.mutate(exportPassword)}
+            disabled={dataExport.isPending || !exportPassword || !accountUser?.emailVerified}
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+          >
+            Request export
+          </button>
+          <button
+            onClick={() => latestExport?.id && downloadDataExport(latestExport.id)}
+            disabled={latestExport?.status !== 'ready'}
+            className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950"
+          >
+            Download
+          </button>
+        </div>
+        {latestExport && (
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+            Latest export: {latestExport.status}
+            {latestExport.expiresAt ? `, expires ${formatDateTime(latestExport.expiresAt)}` : ''}
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-rose-200 bg-white p-5 dark:border-rose-900/60 dark:bg-slate-800">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-rose-700 dark:text-rose-300">
+          <AlertTriangle size={17} />
+          Delete Account
+        </h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Deletion disables sign-in immediately and can be cancelled from the email link before final removal.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+          <input
+            type="password"
+            value={deletePassword}
+            onChange={(e) => setDeletePassword(e.target.value)}
+            placeholder="Current password"
+            className={INPUT}
+          />
+          <input
+            type="text"
+            value={deleteConfirmation}
+            onChange={(e) => setDeleteConfirmation(e.target.value)}
+            placeholder="Type DELETE"
+            className={INPUT}
+          />
+          <button
+            onClick={() => deletion.mutate({ currentPassword: deletePassword, confirmation: 'DELETE' })}
+            disabled={deletion.isPending || deleteConfirmation !== 'DELETE' || !deletePassword || !accountUser?.emailVerified}
+            className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+          >
+            Delete account
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // ── Section: Privacy ─────────────────────────────────────────────────────────
 
 function PrivacySection() {
   const settingsQuery = useUserSettings();
   const updateSettings = useUpdateUserSettings();
+  const queryClient = useQueryClient();
+  const [blockUserId, setBlockUserId] = useState('');
+  const [blockNotice, setBlockNotice] = useState('');
+  const blockedUsers = useQuery({
+    queryKey: ['blocked-users'],
+    queryFn: fetchBlockedUsers,
+  });
+  const myReports = useQuery({
+    queryKey: ['my-reports'],
+    queryFn: fetchMyReports,
+  });
+  const blockMutation = useMutation({
+    mutationFn: blockUser,
+    onSuccess: () => {
+      setBlockUserId('');
+      setBlockNotice('User blocked.');
+      queryClient.invalidateQueries({ queryKey: ['blocked-users'] });
+    },
+    onError: (error: any) => setBlockNotice(error?.response?.data?.message || 'Unable to block user.'),
+  });
+  const unblockMutation = useMutation({
+    mutationFn: unblockUser,
+    onSuccess: () => {
+      setBlockNotice('User unblocked.');
+      queryClient.invalidateQueries({ queryKey: ['blocked-users'] });
+    },
+    onError: (error: any) => setBlockNotice(error?.response?.data?.message || 'Unable to unblock user.'),
+  });
   const settings = settingsQuery.data;
   const rows = settings
     ? [
@@ -507,6 +1178,12 @@ function PrivacySection() {
           label: 'Incoming calls',
           desc: 'Allow direct voice and video call invites to reach you.',
           value: settings.incomingCallsEnabled,
+        },
+        {
+          key: 'momentArchiveEnabled' as const,
+          label: 'Moment archive',
+          desc: 'Save your expired Moments in your private archive.',
+          value: settings.momentArchiveEnabled,
         },
       ]
     : [];
@@ -550,6 +1227,69 @@ function PrivacySection() {
       <p className="text-xs text-slate-500 dark:text-slate-400">
         Turning off read receipts does not affect message delivery or unread counts.
       </p>
+      <CloseFriendsSettings />
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Blocked Users</h2>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <input
+            value={blockUserId}
+            onChange={(event) => setBlockUserId(event.target.value)}
+            placeholder="User ID"
+            className={INPUT}
+          />
+          <button
+            onClick={() => blockMutation.mutate(blockUserId.trim())}
+            disabled={!blockUserId.trim() || blockMutation.isPending}
+            className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-950"
+          >
+            Block
+          </button>
+        </div>
+        {blockNotice && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{blockNotice}</p>}
+        <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-700">
+          {blockedUsers.data?.blockedUsers?.length ? (
+            blockedUsers.data.blockedUsers.map((item) => (
+              <div key={item.userId} className="flex items-center justify-between gap-3 py-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
+                    {item.user?.name || item.user?.username || item.userId}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Blocked {new Date(item.blockedAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => unblockMutation.mutate(item.userId)}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700/60"
+                >
+                  Unblock
+                </button>
+              </div>
+            ))
+          ) : (
+            <p className="py-3 text-sm text-slate-500 dark:text-slate-400">No blocked users.</p>
+          )}
+        </div>
+      </section>
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Report History</h2>
+        <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-700">
+          {myReports.data?.reports?.length ? (
+            myReports.data.reports.map((report) => (
+              <div key={report.id} className="py-3">
+                <p className="text-sm font-medium text-slate-900 dark:text-white">
+                  {report.targetType} report · {report.status}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {report.reason} · {new Date(report.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+            ))
+          ) : (
+            <p className="py-3 text-sm text-slate-500 dark:text-slate-400">No reports submitted.</p>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -561,6 +1301,17 @@ interface NotificationPreferences {
   messageNotificationsEnabled: boolean;
   callNotificationsEnabled: boolean;
   notificationPreviewsEnabled: boolean;
+  mentionNotificationsEnabled: boolean;
+  actionRemindersEnabled: boolean;
+  actionReminderDueTomorrowEnabled: boolean;
+  actionReminderDueTodayEnabled: boolean;
+  actionReminderOverdueEnabled: boolean;
+  actionReminderStaleEnabled: boolean;
+  eventRemindersEnabled: boolean;
+  eventReminderDayBeforeEnabled: boolean;
+  eventReminderHourBeforeEnabled: boolean;
+  momentUpdatesEnabled: boolean;
+  momentActivityEnabled: boolean;
   updatedAt: string;
 }
 
@@ -574,6 +1325,17 @@ function permissionLabel(permission: NotificationPermission | 'unsupported') {
   if (permission === 'denied') return 'Denied';
   if (permission === 'unsupported') return 'Unsupported';
   return 'Not asked';
+}
+
+function getBrowserTimezone() {
+  try {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!timezone) return null;
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date());
+    return timezone;
+  } catch {
+    return null;
+  }
 }
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -625,12 +1387,20 @@ async function ensurePushSubscription(userId: string) {
 function NotificationsSection() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const settingsQuery = useUserSettings();
+  const updateUserSettings = useUpdateUserSettings();
   const [browserPermission, setBrowserPermission] = useState(() => getBrowserPermission());
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     setBrowserPermission(getBrowserPermission());
   }, []);
+
+  useEffect(() => {
+    const timezone = getBrowserTimezone();
+    if (!timezone || !settingsQuery.data || settingsQuery.data.timezone === timezone) return;
+    updateUserSettings.mutate({ timezone });
+  }, [settingsQuery.data, updateUserSettings]);
 
   const preferencesQuery = useQuery({
     queryKey: ['notification-preferences', user?._id],
@@ -661,8 +1431,19 @@ function NotificationsSection() {
   const togglePreference = async (
     key:
       | 'messageNotificationsEnabled'
+      | 'mentionNotificationsEnabled'
       | 'callNotificationsEnabled'
       | 'notificationPreviewsEnabled'
+      | 'actionRemindersEnabled'
+      | 'actionReminderDueTomorrowEnabled'
+      | 'actionReminderDueTodayEnabled'
+      | 'actionReminderOverdueEnabled'
+      | 'actionReminderStaleEnabled'
+      | 'eventRemindersEnabled'
+      | 'eventReminderDayBeforeEnabled'
+      | 'eventReminderHourBeforeEnabled'
+      | 'momentUpdatesEnabled'
+      | 'momentActivityEnabled'
   ) => {
     if (!user?._id || !preferences) return;
     setErrorMessage('');
@@ -672,7 +1453,13 @@ function NotificationsSection() {
     try {
       if (
         nextValue &&
-        (key === 'messageNotificationsEnabled' || key === 'callNotificationsEnabled')
+        (key === 'messageNotificationsEnabled' ||
+          key === 'mentionNotificationsEnabled' ||
+          key === 'callNotificationsEnabled' ||
+          key === 'actionRemindersEnabled' ||
+          key === 'eventRemindersEnabled' ||
+          key === 'momentUpdatesEnabled' ||
+          key === 'momentActivityEnabled')
       ) {
         await ensurePushSubscription(user._id);
         setBrowserPermission(getBrowserPermission());
@@ -700,6 +1487,12 @@ function NotificationsSection() {
           toggle: () => void togglePreference('messageNotificationsEnabled'),
         },
         {
+          label: 'Mention alerts',
+          desc: 'Browser alerts when someone mentions you in a group',
+          value: preferences.mentionNotificationsEnabled,
+          toggle: () => void togglePreference('mentionNotificationsEnabled'),
+        },
+        {
           label: 'Call alerts',
           desc: 'Browser alerts for incoming calls',
           value: preferences.callNotificationsEnabled,
@@ -713,6 +1506,59 @@ function NotificationsSection() {
         },
       ]
     : [];
+  const reminderRows: {
+    label: string;
+    desc: string;
+    key: keyof Pick<
+      NotificationPreferences,
+      | 'actionReminderDueTomorrowEnabled'
+      | 'actionReminderDueTodayEnabled'
+      | 'actionReminderOverdueEnabled'
+      | 'actionReminderStaleEnabled'
+    >;
+  }[] = [
+    {
+      label: 'Due tomorrow',
+      desc: 'Remind me the morning before an Action is due.',
+      key: 'actionReminderDueTomorrowEnabled',
+    },
+    {
+      label: 'Due today',
+      desc: 'Remind me the morning an Action is due.',
+      key: 'actionReminderDueTodayEnabled',
+    },
+    {
+      label: 'Overdue',
+      desc: 'Remind me about Actions that are past due.',
+      key: 'actionReminderOverdueEnabled',
+    },
+    {
+      label: 'Stale Actions',
+      desc: 'Remind me when an Action has had no progress for a while.',
+      key: 'actionReminderStaleEnabled',
+    },
+  ];
+  const eventReminderRows: {
+    label: string;
+    desc: string;
+    key: keyof Pick<
+      NotificationPreferences,
+      'eventReminderDayBeforeEnabled' | 'eventReminderHourBeforeEnabled'
+    >;
+  }[] = [
+    {
+      label: 'Day before',
+      desc: 'Remind me roughly a day before events I RSVP to.',
+      key: 'eventReminderDayBeforeEnabled',
+    },
+    {
+      label: 'Hour before',
+      desc: 'Remind me roughly one hour before events I RSVP to.',
+      key: 'eventReminderHourBeforeEnabled',
+    },
+  ];
+  const browserNotificationsUnavailable =
+    browserPermission === 'unsupported' || browserPermission === 'denied';
 
   return (
     <div className="space-y-5">
@@ -768,6 +1614,148 @@ function NotificationsSection() {
         )}
       </section>
 
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Moments</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Choose how Blabber notifies you about Moment updates and activity.
+          </p>
+        </div>
+        {preferencesQuery.isLoading ? (
+          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading Moment notification settings...</p>
+        ) : preferencesQuery.isError || !preferences ? (
+          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
+            Unable to load Moment notification settings.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 dark:border-slate-700">
+              <div>
+                <p className="text-[14px] font-medium text-slate-900 dark:text-white">New Moment updates</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Browser alerts when contacts share new Moments.</p>
+              </div>
+              <Toggle
+                checked={preferences.momentUpdatesEnabled}
+                onChange={updatePreferences.isPending ? noop : () => void togglePreference('momentUpdatesEnabled')}
+                label="New Moment updates"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+              <div>
+                <p className="text-[14px] font-medium text-slate-900 dark:text-white">Activity on my Moments</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Browser alerts when someone reacts to your Moment.</p>
+              </div>
+              <Toggle
+                checked={preferences.momentActivityEnabled}
+                onChange={updatePreferences.isPending ? noop : () => void togglePreference('momentActivityEnabled')}
+                label="Activity on my Moments"
+              />
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Event Reminders</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Choose which reminders Blabber can send for chat events you RSVP to.
+          </p>
+        </div>
+        {preferencesQuery.isLoading ? (
+          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading event reminder settings...</p>
+        ) : preferencesQuery.isError || !preferences ? (
+          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
+            Unable to load event reminder settings.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 dark:border-slate-700">
+              <div>
+                <p className="text-[14px] font-medium text-slate-900 dark:text-white">Event reminders</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Allow Blabber to remind you about chat events.</p>
+              </div>
+              <Toggle
+                checked={preferences.eventRemindersEnabled}
+                onChange={updatePreferences.isPending ? noop : () => void togglePreference('eventRemindersEnabled')}
+                label="Event reminders"
+              />
+            </div>
+            {preferences.eventRemindersEnabled && eventReminderRows.map((row, index) => (
+              <div
+                key={row.key}
+                className={`flex items-center justify-between gap-4 px-5 py-3.5 ${
+                  index < eventReminderRows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
+                }`}
+              >
+                <div>
+                  <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
+                </div>
+                <Toggle
+                  checked={Boolean(preferences[row.key])}
+                  onChange={updatePreferences.isPending ? noop : () => void togglePreference(row.key)}
+                  label={row.label}
+                />
+              </div>
+            ))}
+          </>
+        )}
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Action Reminders</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Choose which reminders Blabber can send for Actions assigned to you.
+          </p>
+          {browserNotificationsUnavailable && (
+            <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+              Browser notifications are currently unavailable. Enable notifications for Blabber in your browser settings to receive reminders.
+            </p>
+          )}
+        </div>
+        {preferencesQuery.isLoading ? (
+          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading Action reminder settings...</p>
+        ) : preferencesQuery.isError || !preferences ? (
+          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
+            Unable to load Action reminder settings.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 dark:border-slate-700">
+              <div>
+                <p className="text-[14px] font-medium text-slate-900 dark:text-white">Action reminders</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Allow Blabber to remind you about assigned Actions.</p>
+              </div>
+              <Toggle
+                checked={preferences.actionRemindersEnabled}
+                onChange={updatePreferences.isPending ? noop : () => void togglePreference('actionRemindersEnabled')}
+                label="Action reminders"
+              />
+            </div>
+            {preferences.actionRemindersEnabled && reminderRows.map((row, index) => (
+              <div
+                key={row.key}
+                className={`flex items-center justify-between gap-4 px-5 py-3.5 ${
+                  index < reminderRows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
+                }`}
+              >
+                <div>
+                  <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
+                </div>
+                <Toggle
+                  checked={Boolean(preferences[row.key])}
+                  onChange={updatePreferences.isPending ? noop : () => void togglePreference(row.key)}
+                  label={row.label}
+                />
+              </div>
+            ))}
+          </>
+        )}
+      </section>
+
       <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Turning off alerts does not stop you from receiving messages in Blabber.
@@ -782,7 +1770,6 @@ function NotificationsSection() {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-empty-function
 function noop() {}
 
 // ── Section: Appearance ──────────────────────────────────────────────────────
@@ -849,11 +1836,17 @@ function AppearanceSection() {
   );
 }
 
-// ── Section: AI Engine ───────────────────────────────────────────────────────
+// ── Section: AI privacy ──────────────────────────────────────────────────────
 
 function AISection() {
   const settingsQuery = useUserSettings();
   const updateSettings = useUpdateUserSettings();
+  const clearHistory = useMutation({
+    mutationFn: async () => {
+      const { data } = await apiClient.delete('/api/intelligence/history/me');
+      return data;
+    },
+  });
   const availabilityQuery = useQuery({
     queryKey: ['intelligence-availability'],
     queryFn: async () => {
@@ -877,9 +1870,9 @@ function AISection() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">AI Engine</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">AI privacy</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Configure AI intelligence features for your chats.
+          Control whether your account can request AI intelligence features.
         </p>
       </div>
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
@@ -896,7 +1889,7 @@ function AISection() {
         </div>
         <div className="flex items-center justify-between gap-4 px-5 py-4">
           <div>
-            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Chat Intelligence</p>
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Allow AI requests</p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Show the intelligence drawer and allow your AI requests.
             </p>
@@ -906,6 +1899,21 @@ function AISection() {
             onChange={() => updateSettings.mutate({ chatIntelligenceEnabled: !enabled })}
             label="Chat Intelligence"
           />
+        </div>
+        <div className="flex items-center justify-between gap-4 border-t border-slate-100 px-5 py-4 dark:border-slate-700">
+          <div>
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Clear my AI history</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Remove private generated AI artifacts tied to your account.
+            </p>
+          </div>
+          <button
+            onClick={() => clearHistory.mutate()}
+            disabled={clearHistory.isPending}
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            {clearHistory.isPending ? 'Clearing...' : 'Clear'}
+          </button>
         </div>
       </section>
       <p className="text-xs text-slate-400 dark:text-slate-500">
@@ -928,8 +1936,8 @@ function HelpSection() {
       desc: 'Open Intelligence from a chat when you want summaries, actions, decisions, waiting-on items, or group memory.',
     },
     {
-      label: 'Status',
-      desc: 'Share short-lived workspace updates from the Status item in the main navigation.',
+      label: 'Moments',
+      desc: 'Share short-lived text or photo updates from the Moments item in the main navigation.',
     },
     {
       label: 'Voice and video calls',
@@ -997,6 +2005,7 @@ export default function SettingsPage() {
 
   const sectionContent: Record<SectionKey, React.ReactNode> = {
     profile:       <ProfileSection />,
+    account:       <AccountSection />,
     privacy:       <PrivacySection />,
     notifications: <NotificationsSection />,
     appearance:    <AppearanceSection />,
@@ -1047,7 +2056,12 @@ export default function SettingsPage() {
           {/* User card at bottom */}
           <div className="border-t border-slate-200 p-3 dark:border-slate-800">
             <div className="flex items-center gap-2.5 rounded-xl p-2">
-              <Avatar src={(user as any)?.avatarUrl || user?.avatar} alt={user?.name || 'User'} size="sm" online={true} />
+              <Avatar
+                src={(user as typeof user & { avatarUrl?: string; avatar?: string })?.avatarUrl || user?.avatar}
+                alt={user?.name || 'User'}
+                size="sm"
+                online={true}
+              />
               <div className="min-w-0">
                 <p className="truncate text-[13px] font-medium text-slate-800 dark:text-slate-200">
                   {user?.name || user?.username}

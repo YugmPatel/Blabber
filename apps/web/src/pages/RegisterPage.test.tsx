@@ -47,21 +47,21 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByText('Create your account')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Create Account' })).toBeInTheDocument();
     });
 
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/work email/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/full name/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
   });
 
   it('shows link to login page', async () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByText(/sign in to existing account/i)).toBeInTheDocument();
+      expect(screen.getByText(/Sign In/i)).toBeInTheDocument();
     });
   });
 
@@ -70,11 +70,11 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
-    const submitButton = screen.getByRole('button', { name: /create account/i });
-    const emailInput = screen.getByLabelText(/email address/i);
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
 
@@ -82,6 +82,7 @@ describe('RegisterPage', () => {
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.type(nameInput, 'Test User');
+    await user.click(screen.getByRole('checkbox'));
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -94,19 +95,20 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'ab');
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.type(nameInput, 'Test User');
+    await user.click(screen.getByRole('checkbox'));
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -119,19 +121,20 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'invalid-username!');
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.type(nameInput, 'Test User');
+    await user.click(screen.getByRole('checkbox'));
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -146,13 +149,13 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'testuser');
     await user.type(passwordInput, 'password123');
@@ -169,14 +172,14 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'testuser');
     await user.type(emailInput, 'invalid-email');
@@ -194,13 +197,13 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'testuser');
     await user.type(emailInput, 'test@example.com');
@@ -219,14 +222,14 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'testuser');
     await user.type(emailInput, 'test@example.com');
@@ -244,13 +247,13 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'testuser');
     await user.type(emailInput, 'test@example.com');
@@ -260,7 +263,7 @@ describe('RegisterPage', () => {
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/name is required/i);
+      expect(screen.getByRole('alert')).toHaveTextContent(/full name is required/i);
     });
   });
 
@@ -273,9 +276,7 @@ describe('RegisterPage', () => {
       name: 'Test User',
     };
 
-    // First call is the initial auth check (fails), second is the register call (succeeds)
     vi.mocked(apiClient.apiClient.post)
-      .mockRejectedValueOnce(new Error('Not authenticated'))
       .mockResolvedValueOnce({
         data: {
           accessToken: 'mock-token',
@@ -286,19 +287,20 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'testuser');
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.type(nameInput, 'Test User');
+    await user.click(screen.getByRole('checkbox'));
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -318,9 +320,7 @@ describe('RegisterPage', () => {
   it('displays error message on registration failure', async () => {
     const user = userEvent.setup();
 
-    // First call is the initial auth check (fails), second is the register call (fails)
     vi.mocked(apiClient.apiClient.post)
-      .mockRejectedValueOnce(new Error('Not authenticated'))
       .mockRejectedValueOnce({
         response: {
           data: {
@@ -332,19 +332,20 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'existinguser');
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.type(nameInput, 'Test User');
+    await user.click(screen.getByRole('checkbox'));
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -355,9 +356,8 @@ describe('RegisterPage', () => {
   it('disables form during submission', async () => {
     const user = userEvent.setup();
 
-    // Mock a delayed response - first for auth check, second for register
+    // Mock a delayed response after the initial auth check
     vi.mocked(apiClient.apiClient.post)
-      .mockRejectedValueOnce(new Error('Not authenticated'))
       .mockImplementation(
         () =>
           new Promise((resolve) =>
@@ -368,24 +368,25 @@ describe('RegisterPage', () => {
     renderRegisterPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Create Account$/i })).toBeInTheDocument();
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const emailInput = screen.getByLabelText(/email address/i);
+    const emailInput = screen.getByLabelText(/work email/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const nameInput = screen.getByLabelText(/full name/i);
-    const submitButton = screen.getByRole('button', { name: /create account/i });
+    const submitButton = screen.getByRole('button', { name: /^Create Account$/i });
 
     await user.type(usernameInput, 'testuser');
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.type(nameInput, 'Test User');
+    await user.click(screen.getByRole('checkbox'));
     await user.click(submitButton);
 
     // Check that button shows loading state
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /creating account\.\.\./i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Creating Account…$/i })).toBeInTheDocument();
     });
 
     // Check that inputs are disabled

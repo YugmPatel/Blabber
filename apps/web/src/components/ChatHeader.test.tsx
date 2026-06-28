@@ -1,7 +1,67 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { BrowserRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import ChatHeader from './ChatHeader';
 import type { Chat } from '@repo/types';
+
+vi.mock('@/api/client', () => ({
+  apiClient: {
+    get: vi.fn((url: string) => {
+      if (url.includes('/calls/active')) {
+        return Promise.resolve({ data: { activeCall: null } });
+      }
+      const userId = url.split('/').pop() || 'user';
+      return Promise.resolve({
+        data: {
+          user: {
+            _id: userId,
+            username: userId,
+            email: `${userId}@example.com`,
+            name: userId === 'user2' ? 'Alice' : userId,
+          },
+        },
+      });
+    }),
+  },
+  searchChatMessages: vi.fn(() => Promise.resolve({ results: [] })),
+  normalizeMediaUrl: vi.fn((url?: string) => url),
+}));
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: { _id: 'user1', username: 'testuser', email: 'test@example.com', name: 'Test User' },
+    accessToken: 'test-token',
+    isLoading: false,
+    isAuthenticated: true,
+    login: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: vi.fn(),
+  }),
+}));
+
+vi.mock('@/hooks/useUsers', () => ({
+  useUser: vi.fn(() => ({ data: undefined })),
+  useUserPresence: vi.fn(() => ({ data: undefined })),
+  useSearchUsers: vi.fn(() => ({ data: [], isFetching: false })),
+}));
+
+vi.mock('@/hooks/useChats', () => ({
+  useAddMember: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useCreateInviteLink: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useDeleteGroup: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useDemoteMember: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useInviteLinkSettings: vi.fn(() => ({ data: null, isLoading: false })),
+  useLeaveGroup: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  usePromoteMember: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useRegenerateInviteLink: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useRemoveMember: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useRevokeInviteLink: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useTransferOwnership: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useUpdateChat: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+}));
 
 const mockDirectChat: Chat = {
   _id: 'chat1',
@@ -31,9 +91,20 @@ const mockGetChatAvatar = (chat: Chat) => {
   return chat.avatarUrl;
 };
 
+const renderHeader = (ui: ReactElement) => {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>{ui}</BrowserRouter>
+    </QueryClientProvider>
+  );
+};
+
 describe('ChatHeader', () => {
   it('renders chat title', () => {
-    render(
+    renderHeader(
       <ChatHeader
         chat={mockDirectChat}
         getChatTitle={mockGetChatTitle}
@@ -45,7 +116,7 @@ describe('ChatHeader', () => {
   });
 
   it('shows online status for direct chats', () => {
-    render(
+    renderHeader(
       <ChatHeader
         chat={mockDirectChat}
         getChatTitle={mockGetChatTitle}
@@ -61,7 +132,7 @@ describe('ChatHeader', () => {
     const lastSeen = new Date();
     lastSeen.setMinutes(lastSeen.getMinutes() - 30);
 
-    render(
+    renderHeader(
       <ChatHeader
         chat={mockDirectChat}
         getChatTitle={mockGetChatTitle}
@@ -74,7 +145,7 @@ describe('ChatHeader', () => {
   });
 
   it('shows participant count for group chats', () => {
-    render(
+    renderHeader(
       <ChatHeader
         chat={mockGroupChat}
         getChatTitle={mockGetChatTitle}
@@ -82,11 +153,11 @@ describe('ChatHeader', () => {
         isGroupChat={true}
       />
     );
-    expect(screen.getByText('3 participants')).toBeInTheDocument();
+    expect(screen.getByText('3 members')).toBeInTheDocument();
   });
 
   it('opens menu when clicking options button', () => {
-    render(
+    renderHeader(
       <ChatHeader
         chat={mockDirectChat}
         getChatTitle={mockGetChatTitle}
@@ -95,16 +166,16 @@ describe('ChatHeader', () => {
       />
     );
 
-    const optionsButton = screen.getByLabelText('Chat options');
+    const optionsButton = screen.getByLabelText('More options');
     fireEvent.click(optionsButton);
 
-    expect(screen.getByText('View Profile')).toBeInTheDocument();
-    expect(screen.getByText('Search in Chat')).toBeInTheDocument();
-    expect(screen.getByText('Mute Notifications')).toBeInTheDocument();
+    expect(screen.getByText('View profile')).toBeInTheDocument();
+    expect(screen.getByText('Search in chat')).toBeInTheDocument();
+    expect(screen.getByText('Mute notifications')).toBeInTheDocument();
   });
 
   it('shows group-specific options for group chats', () => {
-    render(
+    renderHeader(
       <ChatHeader
         chat={mockGroupChat}
         getChatTitle={mockGetChatTitle}
@@ -113,15 +184,15 @@ describe('ChatHeader', () => {
       />
     );
 
-    const optionsButton = screen.getByLabelText('Chat options');
+    const optionsButton = screen.getByLabelText('More options');
     fireEvent.click(optionsButton);
 
-    expect(screen.getByText('Group Info')).toBeInTheDocument();
-    expect(screen.getByText('Leave Group')).toBeInTheDocument();
+    expect(screen.getByText('View profile')).toBeInTheDocument();
+    expect(screen.getByText('Shared')).toBeInTheDocument();
   });
 
-  it('closes menu when clicking outside', () => {
-    render(
+  it('closes menu when clicking outside', async () => {
+    renderHeader(
       <ChatHeader
         chat={mockDirectChat}
         getChatTitle={mockGetChatTitle}
@@ -130,22 +201,20 @@ describe('ChatHeader', () => {
       />
     );
 
-    const optionsButton = screen.getByLabelText('Chat options');
+    const optionsButton = screen.getByLabelText('More options');
     fireEvent.click(optionsButton);
 
-    expect(screen.getByText('View Profile')).toBeInTheDocument();
+    expect(screen.getByText('View profile')).toBeInTheDocument();
 
-    // Click the backdrop
-    const backdrop = document.querySelector('.fixed.inset-0');
-    if (backdrop) {
-      fireEvent.click(backdrop);
-    }
+    fireEvent.mouseDown(document.body);
 
-    expect(screen.queryByText('View Profile')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText('View profile')).not.toBeInTheDocument();
+    });
   });
 
   it('renders avatar with online indicator', () => {
-    const { container } = render(
+    const { container } = renderHeader(
       <ChatHeader
         chat={mockDirectChat}
         getChatTitle={mockGetChatTitle}
@@ -156,7 +225,7 @@ describe('ChatHeader', () => {
     );
 
     // Avatar should be rendered
-    const avatar = container.querySelector('.relative.inline-block');
+    const avatar = container.querySelector('.relative.inline-flex');
     expect(avatar).toBeInTheDocument();
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Video, VideoOff, Users } from 'lucide-react';
+import axios from 'axios';
 import {
   createLocalTracks,
   LocalTrack,
@@ -11,6 +12,7 @@ import {
   Track,
 } from 'livekit-client';
 import { apiClient } from '@/api/client';
+import { useAppStore } from '@/store/app-store';
 import type { Chat } from '@repo/types';
 
 interface GroupCallModalProps {
@@ -18,6 +20,7 @@ interface GroupCallModalProps {
   title: string;
   callType: 'audio' | 'video';
   callId: string;
+  isInitiator?: boolean;
   onClose: () => void;
 }
 
@@ -32,6 +35,55 @@ interface TrackTile {
 
 function createCallId(chatId: string) {
   return `group-${chatId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createClientSessionId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getGroupCallErrorMessage(err: unknown) {
+  if (axios.isAxiosError<{ message?: string }>(err)) {
+    const message = err.response?.data?.message;
+    if (message) return message;
+
+    const status = err.response?.status;
+    if (status === 403) return 'You no longer have access to this group.';
+    if (status === 404 || status === 410) return 'This group call is no longer active.';
+    if (status === 503) return 'Group calling is not configured on this server.';
+    return 'We could not connect you to the call. Try again.';
+  }
+
+  if (err instanceof DOMException) {
+    if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+      return 'Camera or microphone permission is required to join.';
+    }
+    if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      return 'Camera or microphone was not found on this device.';
+    }
+    if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+      return 'Camera or microphone is already in use by another app.';
+    }
+  }
+
+  if (err instanceof Error) {
+    const message = err.message.toLowerCase();
+    if (
+      message.includes('pc connection') ||
+      message.includes('peerconnection') ||
+      message.includes('ice') ||
+      message.includes('signal')
+    ) {
+      return 'We could not connect to the call service. Try again.';
+    }
+    if (message.includes('permission') || message.includes('notallowed')) {
+      return 'Camera or microphone permission is required to join.';
+    }
+  }
+
+  return 'We could not connect you to the call. Try again.';
 }
 
 function TrackAttachment({ tile }: { tile: TrackTile }) {
@@ -50,6 +102,9 @@ function TrackAttachment({ tile }: { tile: TrackTile }) {
       element.playsInline = true;
       element.muted = Boolean(tile.local);
     }
+    if (element instanceof HTMLMediaElement) {
+      element.autoplay = true;
+    }
     container.replaceChildren(element);
 
     return () => {
@@ -61,15 +116,18 @@ function TrackAttachment({ tile }: { tile: TrackTile }) {
   return <div ref={containerRef} className="h-full w-full" />;
 }
 
-export default function GroupCallModal({ chat, title, callType, callId, onClose }: GroupCallModalProps) {
+export default function GroupCallModal({ chat, title, callType, callId, isInitiator = false, onClose }: GroupCallModalProps) {
+  const socket = useAppStore((state) => state.socket);
   const [room] = useState(() => new Room({ adaptiveStream: true, dynacast: true }));
   const [status, setStatus] = useState('Joining...');
   const [error, setError] = useState<string | null>(null);
   const [localTracks, setLocalTracks] = useState<LocalTrack[]>([]);
   const [remoteTiles, setRemoteTiles] = useState<TrackTile[]>([]);
+  const [participantCount, setParticipantCount] = useState(1);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(callType === 'video');
   const localTracksRef = useRef<LocalTrack[]>([]);
+  const clientSessionIdRef = useRef(createClientSessionId());
 
   const visibleTiles = useMemo(() => {
     const localVideo = localTracks.find((track) => track.kind === Track.Kind.Video);
@@ -118,24 +176,6 @@ export default function GroupCallModal({ chat, title, callType, callId, onClose 
 
     const connect = async () => {
       try {
-        const { data } = await apiClient.post<{
-          token: string;
-          wsUrl?: string;
-          callId: string;
-        }>(`/api/chats/${chat._id}/calls/group-token`, { callType, callId });
-        const wsUrl = data.wsUrl || import.meta.env.VITE_LIVEKIT_WS_URL;
-        if (!wsUrl) throw new Error('Group call server is not configured.');
-
-        room
-          .on(RoomEvent.TrackSubscribed, upsertRemoteTrack)
-          .on(RoomEvent.TrackUnsubscribed, removeRemoteTrack)
-          .on(RoomEvent.ParticipantConnected, () => setStatus('Connected'))
-          .on(RoomEvent.ParticipantDisconnected, () => setStatus('Connected'))
-          .on(RoomEvent.Disconnected, () => setStatus('Call ended'));
-
-        await room.connect(wsUrl, data.token);
-        if (cancelled) return;
-
         const tracks = await createLocalTracks({
           audio: true,
           video: callType === 'video',
@@ -144,15 +184,50 @@ export default function GroupCallModal({ chat, title, callType, callId, onClose 
           tracks.forEach((track) => track.stop());
           return;
         }
+        localTracksRef.current = tracks;
+        setLocalTracks(tracks);
+
+        const { data } = await apiClient.post<{
+          token: string;
+          wsUrl?: string;
+          callId: string;
+        }>(`/api/chats/${chat._id}/calls/group-token`, {
+          callType,
+          callId,
+          isInitiator,
+          clientSessionId: clientSessionIdRef.current,
+        });
+        const wsUrl = data.wsUrl || import.meta.env.VITE_LIVEKIT_WS_URL;
+        if (!wsUrl) throw new Error('Group call server is not configured.');
+
+        const updateParticipantCount = () => setParticipantCount(1 + room.remoteParticipants.size);
+
+        room
+          .on(RoomEvent.TrackSubscribed, upsertRemoteTrack)
+          .on(RoomEvent.TrackUnsubscribed, removeRemoteTrack)
+          .on(RoomEvent.ParticipantConnected, () => {
+            updateParticipantCount();
+            setStatus('Connected');
+          })
+          .on(RoomEvent.ParticipantDisconnected, () => {
+            updateParticipantCount();
+            setStatus('Connected');
+          })
+          .on(RoomEvent.Disconnected, () => setStatus('Call ended'));
+
+        await room.connect(wsUrl, data.token);
+        if (cancelled) return;
 
         for (const track of tracks) {
           await room.localParticipant.publishTrack(track);
         }
-        setLocalTracks(tracks);
-        localTracksRef.current = tracks;
+        updateParticipantCount();
         setStatus('Connected');
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not start group call.');
+        localTracksRef.current.forEach((track) => track.stop());
+        localTracksRef.current = [];
+        setLocalTracks([]);
+        setError(getGroupCallErrorMessage(err));
         setStatus('Could not join');
       }
     };
@@ -164,13 +239,15 @@ export default function GroupCallModal({ chat, title, callType, callId, onClose 
       localTracksRef.current.forEach((track) => track.stop());
       localTracksRef.current = [];
       room.disconnect();
-      apiClient
-        .post('/api/chats/calls/events', { callId, chatId: chat._id, event: 'end' })
-        .catch(() => undefined);
+      socket?.emit('group-call:leave', {
+        callId,
+        chatId: chat._id,
+        clientSessionId: clientSessionIdRef.current,
+      });
     };
     // The room lifecycle is intentionally tied to this modal instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callId, callType, chat._id, room]);
+  }, [callId, callType, chat._id, room, socket]);
 
   const toggleMic = async () => {
     const audioTrack = localTracks.find((track) => track.kind === Track.Kind.Audio);
@@ -196,7 +273,6 @@ export default function GroupCallModal({ chat, title, callType, callId, onClose 
     }
   };
 
-  const participantCount = 1 + room.remoteParticipants.size;
   const videoTiles = visibleTiles.videoTiles;
 
   return (

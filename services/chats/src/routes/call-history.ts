@@ -5,6 +5,22 @@ import { getChatsCollection } from '../models/chat';
 import { getCallHistoryCollection, type CallOutcome } from '../models/call-history';
 import { getDatabase } from '../db';
 
+function normalizeClientSessionId(value: unknown) {
+  if (typeof value !== 'string') return 'default';
+  const normalized = value.trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
+  return normalized || 'default';
+}
+
+function userIdFromParticipantKey(key: string) {
+  const separatorIndex = key.indexOf(':');
+  return separatorIndex > 0 ? key.slice(0, separatorIndex) : key;
+}
+
+function activeIdsFromKeys(keys: string[]) {
+  const userIds = Array.from(new Set(keys.map(userIdFromParticipantKey).filter(ObjectId.isValid)));
+  return userIds.map((id) => new ObjectId(id));
+}
+
 function serializeCall(doc: any, chatTitle?: string, participantProfiles: any[] = []) {
   return {
     id: doc._id.toString(),
@@ -116,6 +132,8 @@ export const recordCallEvent = asyncHandler(async (req: Request, res: Response) 
           callType,
           callerId: callerObjectId,
           participantIds,
+          activeParticipantIds: [],
+          activeParticipantKeys: [],
           outcome: 'ringing',
           startedAt: now,
           createdAt: now,
@@ -129,6 +147,42 @@ export const recordCallEvent = asyncHandler(async (req: Request, res: Response) 
 
   const existing = await collection.findOne({ callId });
   if (!existing) return res.status(200).json({ success: true });
+
+  if (event === 'group-leave') {
+    const clientSessionId = normalizeClientSessionId(req.body?.clientSessionId);
+    const activeParticipantKey = `${userId}:${clientSessionId}`;
+    const existingActiveKeys = existing.activeParticipantKeys || [];
+    const remainingActiveKeys = existingActiveKeys.filter((key) => key !== activeParticipantKey);
+    const remainingActiveIds = existingActiveKeys.length > 0
+      ? activeIdsFromKeys(remainingActiveKeys)
+      : (existing.activeParticipantIds || []).filter((participantId) => !participantId.equals(callerObjectId));
+    const nextUpdate: any = {
+      activeParticipantIds: remainingActiveIds,
+      activeParticipantKeys: remainingActiveKeys,
+      updatedAt: now,
+    };
+
+    let ended = false;
+    if (!existing.endedAt && remainingActiveIds.length === 0) {
+      ended = true;
+      nextUpdate.outcome = existing.outcome === 'answered' ? 'ended' : 'missed';
+      nextUpdate.endedAt = now;
+      const start = existing.answeredAt || existing.startedAt;
+      nextUpdate.durationSeconds = Math.max(0, Math.round((now.getTime() - new Date(start).getTime()) / 1000));
+    }
+
+    await collection.updateOne({ callId }, { $set: nextUpdate });
+    return res.status(200).json({
+      success: true,
+      ended,
+      activeParticipantIds: remainingActiveIds.map((id) => id.toString()),
+    });
+  }
+
+  if (existing.chatType === 'group' && event === 'decline') {
+    await collection.updateOne({ callId }, { $set: { updatedAt: now } });
+    return res.status(200).json({ success: true });
+  }
 
   const outcomeByEvent: Record<string, CallOutcome> = {
     accept: 'answered',

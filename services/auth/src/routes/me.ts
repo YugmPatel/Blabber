@@ -14,7 +14,7 @@ export const getMe = asyncHandler(async (req: Request, res: Response) => {
   // Fetch user from database
   const user = await usersCollection.findOne({ _id: new ObjectId(req.user.userId) });
 
-  if (!user) {
+  if (!user || user.deactivatedAt) {
     throw new NotFoundError('User not found');
   }
 
@@ -30,6 +30,10 @@ export const getMe = asyncHandler(async (req: Request, res: Response) => {
       about: user.about,
       role: user.role,
       department: user.department,
+      authProvider: user.authProvider || 'password',
+      emailVerified: Boolean(user.emailVerified),
+      deactivatedAt: user.deactivatedAt,
+      deletionScheduledAt: user.deletionScheduledAt,
       lastSeen: user.lastSeen,
       createdAt: user.createdAt,
     },

@@ -1,9 +1,23 @@
 import { z } from 'zod';
 
+export const SourceReferenceSchema = z.object({
+  messageId: z.string(),
+  chatId: z.string(),
+  senderId: z.string(),
+  senderDisplayName: z.string(),
+  createdAt: z.string(),
+  snippet: z.string(),
+  label: z.string().optional(),
+  relevance: z.number().min(0).max(1).optional(),
+});
+
+export type SourceReference = z.infer<typeof SourceReferenceSchema>;
+
 export const ChatSummaryDecisionSchema = z.object({
   title: z.string().min(1),
   status: z.enum(['proposed', 'final', 'reverted']),
   sourceMessageIds: z.array(z.string()),
+  sources: z.array(SourceReferenceSchema).optional(),
 });
 
 export type ChatSummaryDecision = z.infer<typeof ChatSummaryDecisionSchema>;
@@ -11,9 +25,11 @@ export type ChatSummaryDecision = z.infer<typeof ChatSummaryDecisionSchema>;
 export const ChatSummaryTaskSchema = z.object({
   title: z.string().min(1),
   assignedTo: z.string().nullable(),
+  assignedToUserId: z.string().nullable().optional(),
   dueDate: z.string().nullable(),
   status: z.enum(['pending', 'in_progress', 'done', 'blocked']),
   sourceMessageId: z.string(),
+  sources: z.array(SourceReferenceSchema).optional(),
 });
 
 export type ChatSummaryTask = z.infer<typeof ChatSummaryTaskSchema>;
@@ -21,6 +37,7 @@ export type ChatSummaryTask = z.infer<typeof ChatSummaryTaskSchema>;
 export const ChatSummaryQuestionSchema = z.object({
   question: z.string().min(1),
   sourceMessageId: z.string(),
+  sources: z.array(SourceReferenceSchema).optional(),
 });
 
 export type ChatSummaryQuestion = z.infer<typeof ChatSummaryQuestionSchema>;
@@ -29,6 +46,7 @@ export const ChatSummaryImportantLinkSchema = z.object({
   url: z.string().url(),
   label: z.string().nullable(),
   sourceMessageId: z.string(),
+  sources: z.array(SourceReferenceSchema).optional(),
 });
 
 export type ChatSummaryImportantLink = z.infer<typeof ChatSummaryImportantLinkSchema>;
@@ -39,6 +57,7 @@ export const ChatSummaryWaitingOnItemSchema = z.object({
   dueDate: z.string().nullable(),
   status: z.enum(['waiting', 'done', 'blocked']),
   sourceMessageId: z.string(),
+  sources: z.array(SourceReferenceSchema).optional(),
 });
 
 export type ChatSummaryWaitingOnItem = z.infer<typeof ChatSummaryWaitingOnItemSchema>;
@@ -46,6 +65,7 @@ export type ChatSummaryWaitingOnItem = z.infer<typeof ChatSummaryWaitingOnItemSc
 export const ChatSummaryNoiseItemSchema = z.object({
   text: z.string().min(1),
   sourceMessageId: z.string(),
+  sources: z.array(SourceReferenceSchema).optional(),
 });
 
 export type ChatSummaryNoiseItem = z.infer<typeof ChatSummaryNoiseItemSchema>;
@@ -66,6 +86,7 @@ export const ChatIntelligenceSummarySchema = z.object({
   waitingOn: z.array(ChatSummaryWaitingOnItemSchema),
   noise: z.array(ChatSummaryNoiseItemSchema),
   sourceMessageIds: z.array(z.string()),
+  sources: z.array(SourceReferenceSchema).optional(),
   generatedAt: z.string(),
 });
 
@@ -104,12 +125,35 @@ export const ChatActionPrioritySchema = z.enum(['low', 'medium', 'high']);
 
 export type ChatActionPriority = z.infer<typeof ChatActionPrioritySchema>;
 
+export const ChatActionVisibilitySchema = z.enum(['chat', 'personal']);
+
+export type ChatActionVisibility = z.infer<typeof ChatActionVisibilitySchema>;
+
 export const ChatActionPersonSchema = z.object({
   userId: z.string().optional(),
   name: z.string().optional(),
 });
 
 export type ChatActionPerson = z.infer<typeof ChatActionPersonSchema>;
+
+export const ChatActionUpdateSchema = z.object({
+  id: z.string(),
+  body: z.string().min(1),
+  author: ChatActionPersonSchema,
+  createdAt: z.string(),
+});
+
+export type ChatActionUpdate = z.infer<typeof ChatActionUpdateSchema>;
+
+export const ChatActionActivitySchema = z.object({
+  id: z.string(),
+  type: z.enum(['created', 'edited', 'status_changed', 'commented', 'completed', 'reopened']),
+  actor: ChatActionPersonSchema,
+  message: z.string(),
+  createdAt: z.string(),
+});
+
+export type ChatActionActivity = z.infer<typeof ChatActionActivitySchema>;
 
 export const ChatActionItemSchema = z.object({
   id: z.string().optional(),
@@ -120,14 +164,29 @@ export const ChatActionItemSchema = z.object({
   assignedTo: ChatActionPersonSchema.optional(),
   createdBy: ChatActionPersonSchema.optional(),
   dueDate: z.string().optional(),
+  dueAt: z.string().optional(),
   eventStart: z.string().optional(),
   eventEnd: z.string().optional(),
   status: ChatActionStatusSchema,
   priority: ChatActionPrioritySchema.optional(),
+  visibility: ChatActionVisibilitySchema.optional(),
+  personalOwnerUserId: z.string().optional(),
   confidence: z.number().min(0).max(1).optional(),
-  sourceMessageIds: z.array(z.string()).min(1),
+  sourceMessageIds: z.array(z.string()).default([]),
   sourceText: z.string().optional(),
+  sources: z.array(SourceReferenceSchema).optional(),
+  updates: z.array(ChatActionUpdateSchema).optional(),
+  activity: z.array(ChatActionActivitySchema).optional(),
+  completedAt: z.string().optional(),
+  completedBy: ChatActionPersonSchema.optional(),
+  lastActivityAt: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
+  permissions: z.object({
+    canUpdateStatus: z.boolean().optional(),
+    canEdit: z.boolean().optional(),
+    canDelete: z.boolean().optional(),
+  }).optional(),
+  deletedAt: z.string().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
@@ -151,7 +210,13 @@ export const ExtractChatActionsDTOSchema = z.object({
 export type ExtractChatActionsDTO = z.infer<typeof ExtractChatActionsDTOSchema>;
 
 export const UpdateChatActionDTOSchema = z.object({
-  status: z.enum(['open', 'in_progress', 'completed']),
+  title: z.string().min(1).max(240).optional(),
+  description: z.string().max(1000).optional(),
+  ownerUserId: z.string().optional(),
+  ownerName: z.string().optional(),
+  dueDate: z.string().optional(),
+  dueAt: z.string().optional(),
+  status: z.enum(['open', 'in_progress', 'completed']).optional(),
 });
 
 export type UpdateChatActionDTO = z.infer<typeof UpdateChatActionDTOSchema>;
@@ -162,17 +227,48 @@ export const CreateChatActionDTOSchema = z.object({
   ownerUserId: z.string().optional(),
   ownerName: z.string().optional(),
   dueDate: z.string().optional(),
-  sourceMessageIds: z.array(z.string()).min(1),
+  dueAt: z.string().optional(),
+  sourceMessageIds: z.array(z.string()).default([]),
   sourceText: z.string().optional(),
 });
 
 export type CreateChatActionDTO = z.infer<typeof CreateChatActionDTOSchema>;
 
+export const AddChatActionUpdateDTOSchema = z.object({
+  body: z.string().min(1).max(1000),
+});
+
+export type AddChatActionUpdateDTO = z.infer<typeof AddChatActionUpdateDTOSchema>;
+
+export const DeleteChatActionDTOSchema = z.object({
+  reason: z.string().max(240).optional(),
+});
+
+export type DeleteChatActionDTO = z.infer<typeof DeleteChatActionDTOSchema>;
+
 export const GroupBrainAnswerSchema = z.object({
+  question: z.string().optional(),
   answer: z.string(),
+  answerState: z.enum(['grounded', 'insufficient_evidence', 'conflicting_evidence']).optional(),
+  answerCategory: z.enum([
+    'decision',
+    'ownership',
+    'pending',
+    'link',
+    'change_summary',
+    'factual_lookup',
+    'unknown',
+  ]).optional(),
   confidence: z.enum(['grounded', 'uncertain']),
   sourceMessageIds: z.array(z.string()),
+  sources: z.array(SourceReferenceSchema).optional(),
   sourceDates: z.array(z.string()).optional(),
+  relevantDateRange: z.object({
+    start: z.string().optional(),
+    end: z.string().optional(),
+    label: z.string().optional(),
+  }).optional(),
+  caveat: z.string().optional(),
 });
 
 export type GroupBrainAnswer = z.infer<typeof GroupBrainAnswerSchema>;
@@ -210,6 +306,7 @@ export const ChatDecisionSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
   sourceMessageIds: z.array(z.string()).min(1),
   sourceText: z.string().optional(),
+  sources: z.array(SourceReferenceSchema).optional(),
   relatedActionIds: z.array(z.string()).optional(),
   category: ChatDecisionCategorySchema.optional(),
   metadata: z.record(z.unknown()).optional(),
@@ -273,6 +370,7 @@ export const WaitingOnItemSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
   sourceMessageIds: z.array(z.string()).min(1),
   sourceText: z.string().optional(),
+  sources: z.array(SourceReferenceSchema).optional(),
   relatedActionIds: z.array(z.string()).optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
@@ -310,6 +408,7 @@ export const GroupBrainLinkSchema = z.object({
   title: z.string().optional(),
   url: z.string().url(),
   sourceMessageId: z.string().optional(),
+  sources: z.array(SourceReferenceSchema).optional(),
   addedAt: z.string().optional(),
 });
 
@@ -321,6 +420,7 @@ export const GroupBrainFileSchema = z.object({
   url: z.string().optional(),
   type: z.string().optional(),
   sourceMessageId: z.string().optional(),
+  sources: z.array(SourceReferenceSchema).optional(),
   addedAt: z.string().optional(),
 });
 
@@ -330,6 +430,7 @@ export const GroupBrainQuestionSchema = z.object({
   text: z.string().min(1),
   askedBy: z.string().optional(),
   sourceMessageId: z.string().optional(),
+  sources: z.array(SourceReferenceSchema).optional(),
   status: z.enum(['open', 'answered', 'dismissed']).optional(),
 });
 
@@ -340,6 +441,7 @@ export const GroupBrainPlanSchema = z.object({
   description: z.string().optional(),
   date: z.string().optional(),
   sourceMessageIds: z.array(z.string()).optional(),
+  sources: z.array(SourceReferenceSchema).optional(),
 });
 
 export type GroupBrainPlan = z.infer<typeof GroupBrainPlanSchema>;
@@ -349,6 +451,7 @@ export const GroupBrainDeadlineSchema = z.object({
   dueDate: z.string().optional(),
   relatedActionId: z.string().optional(),
   sourceMessageIds: z.array(z.string()).optional(),
+  sources: z.array(SourceReferenceSchema).optional(),
 });
 
 export type GroupBrainDeadline = z.infer<typeof GroupBrainDeadlineSchema>;
@@ -369,6 +472,7 @@ export const GroupBrainSchema = z.object({
     id: z.string().optional(),
     text: z.string().optional(),
     generatedAt: z.string().optional(),
+    sources: z.array(SourceReferenceSchema).optional(),
   }).optional(),
   decisions: z.array(ChatDecisionSchema),
   actions: z.array(ChatActionItemSchema),

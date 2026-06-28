@@ -49,10 +49,19 @@ export async function serializeChat(chat: Chat, options: { includeParticipants?:
   const ownerId = activeChat.ownerId || activeChat.admins[0];
   if (ownerId) serialized.ownerId = ownerId.toString();
   if (activeChat.title) serialized.title = activeChat.title;
-  if (activeChat.description) serialized.description = activeChat.description;
+  if (activeChat.description || activeChat.groupContext) {
+    serialized.description = activeChat.description || activeChat.groupContext;
+  }
   if (activeChat.groupContext) serialized.groupContext = activeChat.groupContext;
   if (activeChat.avatarUrl) serialized.avatarUrl = activeChat.avatarUrl;
   if (activeChat.groupKind) serialized.groupKind = activeChat.groupKind;
+  serialized.sendMode = activeChat.sendMode || 'everyone';
+  serialized.aiEnabled = activeChat.aiEnabled !== false;
+  serialized.memberRestrictions = (activeChat.memberRestrictions || []).map((restriction) => ({
+    userId: restriction.userId.toString(),
+    restrictedBy: restriction.restrictedBy.toString(),
+    restrictedAt: restriction.restrictedAt,
+  }));
   if (activeChat.expiresAt) serialized.expiresAt = activeChat.expiresAt;
   if (activeChat.endedAt) serialized.endedAt = activeChat.endedAt;
   if (activeChat.deletedAt) serialized.deletedAt = activeChat.deletedAt;

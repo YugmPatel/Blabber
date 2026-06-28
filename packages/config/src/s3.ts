@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { requireSafeParse } from './safe';
 
 const S3ConfigSchema = z.object({
   S3_MEDIA_BUCKET: z.string().min(1, 'S3_MEDIA_BUCKET is required'),
@@ -12,12 +13,5 @@ const S3ConfigSchema = z.object({
 export type S3Config = z.infer<typeof S3ConfigSchema>;
 
 export function loadS3Config(): S3Config {
-  const result = S3ConfigSchema.safeParse(process.env);
-  
-  if (!result.success) {
-    console.error('❌ Invalid S3/CloudFront configuration:', result.error.format());
-    throw new Error('Invalid S3/CloudFront configuration');
-  }
-  
-  return result.data;
+  return requireSafeParse('s3', S3ConfigSchema, process.env);
 }

@@ -2,8 +2,8 @@ import axios, { AxiosError } from 'axios';
 import type {
   ChatActionExtractionResult,
   ChatActionItem,
-  ChatActionStatus,
   CreateChatActionDTO,
+  UpdateChatActionDTO,
   GroupBrainAnswer,
   ChatDecision,
   ChatDecisionStatus,
@@ -17,6 +17,8 @@ import type {
   WaitingOnExtractionResult,
   WaitingOnItem,
   WaitingOnStatus,
+  Message,
+  UpdateEventDTO,
 } from '@repo/types';
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -64,6 +66,456 @@ export const normalizeMediaUrl = (url?: string | null): string | undefined => {
   }
 };
 
+export interface MessageSearchResult {
+  messageId: string;
+  chatId: string;
+  senderId: string;
+  senderDisplayName: string;
+  createdAt: string;
+  snippet: string;
+  type: Message['type'];
+  attachmentLabel?: string;
+  chatKind?: 'direct' | 'group';
+}
+
+export interface MessageSearchResponse {
+  results: MessageSearchResult[];
+  nextCursor: string | null;
+}
+
+export async function searchChatMessages(params: {
+  chatId: string;
+  q: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<MessageSearchResponse> {
+  const { data } = await apiClient.get<MessageSearchResponse>('/api/messages/search', {
+    params: {
+      chatId: params.chatId,
+      q: params.q,
+      cursor: params.cursor || undefined,
+      limit: params.limit,
+    },
+  });
+  return data;
+}
+
+export async function searchGlobalMessages(params: {
+  q: string;
+  type?: Message['type'] | 'all';
+  chatKind?: 'direct' | 'group' | 'all';
+  cursor?: string | null;
+  limit?: number;
+}): Promise<MessageSearchResponse> {
+  const { data } = await apiClient.get<MessageSearchResponse>('/api/messages/search/global', {
+    params: {
+      q: params.q,
+      type: params.type && params.type !== 'all' ? params.type : undefined,
+      chatKind: params.chatKind && params.chatKind !== 'all' ? params.chatKind : undefined,
+      cursor: params.cursor || undefined,
+      limit: params.limit,
+    },
+  });
+  return data;
+}
+
+export async function forwardMessage(
+  messageId: string,
+  destinationChatIds: string[]
+): Promise<{ messages: Message[] }> {
+  const { data } = await apiClient.post<{ messages: Message[] }>(
+    `/api/messages/${messageId}/forward`,
+    { destinationChatIds }
+  );
+  return data;
+}
+
+export async function closePoll(messageId: string): Promise<Message> {
+  const { data } = await apiClient.post<Message>(`/api/messages/${messageId}/poll/close`);
+  return data;
+}
+
+export async function rsvpEvent(messageId: string, status: 'going' | 'maybe' | 'declined'): Promise<Message> {
+  const { data } = await apiClient.post<Message>(`/api/messages/${messageId}/event/rsvp`, { status });
+  return data;
+}
+
+export async function cancelEvent(messageId: string): Promise<Message> {
+  const { data } = await apiClient.post<Message>(`/api/messages/${messageId}/event/cancel`);
+  return data;
+}
+
+export async function updateEvent(messageId: string, patch: UpdateEventDTO): Promise<Message> {
+  const { data } = await apiClient.patch<Message>(`/api/messages/${messageId}/event`, patch);
+  return data;
+}
+
+export async function downloadEventIcs(messageId: string, filename = 'blabber-event.ics') {
+  const { data, headers } = await apiClient.get<Blob>(`/api/messages/${messageId}/event.ics`, {
+    responseType: 'blob',
+  });
+  const disposition = String(headers['content-disposition'] || '');
+  const match = disposition.match(/filename="([^"]+)"/);
+  const resolvedFilename = match?.[1] || filename;
+  const url = URL.createObjectURL(data);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = resolvedFilename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+export interface MessagePin {
+  id: string;
+  chatId: string;
+  messageId: string;
+  pinnedBy: string;
+  pinnedAt: string;
+  preview: {
+    senderId: string;
+    senderDisplayName: string;
+    type?: string;
+    snippet: string;
+    attachmentLabel?: string;
+    createdAt: string;
+  };
+}
+
+export interface SavedMessageItem {
+  id: string;
+  chatId: string;
+  messageId: string;
+  savedAt: string;
+  available: boolean;
+  unavailableReason?: string;
+  chatTitle?: string;
+  preview?: MessagePin['preview'];
+}
+
+export type SharedContentType = 'media' | 'documents' | 'links';
+
+export interface SharedContentItem {
+  id: string;
+  kind: 'media' | 'document' | 'link';
+  messageId: string;
+  chatId: string;
+  senderDisplayName: string;
+  createdAt: string;
+  messageType?: Message['type'];
+  snippet: string;
+  source: { chatId: string; messageId: string };
+  attachment?: {
+    type?: string;
+    url?: string;
+    thumbnailUrl?: string;
+    fileName?: string;
+    mimeType?: string;
+    size?: number;
+    label?: string;
+    available?: boolean;
+  };
+  link?: {
+    url: string;
+    hostname: string;
+  };
+}
+
+export interface SharedContentResponse {
+  items: SharedContentItem[];
+  nextCursor: string | null;
+}
+
+export async function fetchSharedContent(params: {
+  chatId: string;
+  type: SharedContentType;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<SharedContentResponse> {
+  const { data } = await apiClient.get<SharedContentResponse>('/api/messages/shared', {
+    params: {
+      chatId: params.chatId,
+      type: params.type,
+      cursor: params.cursor || undefined,
+      limit: params.limit,
+    },
+  });
+  return data;
+}
+
+export async function fetchMessagePins(chatId: string): Promise<{ pins: MessagePin[]; canManagePins: boolean }> {
+  const { data } = await apiClient.get<{ pins: MessagePin[]; canManagePins: boolean }>(`/api/messages/pins/${chatId}`);
+  return data;
+}
+
+export async function pinMessage(messageId: string) {
+  const { data } = await apiClient.post<{ pin: MessagePin }>(`/api/messages/${messageId}/pin`);
+  return data.pin;
+}
+
+export async function unpinMessage(messageId: string) {
+  await apiClient.delete(`/api/messages/${messageId}/pin`);
+}
+
+export interface BlockedUserItem {
+  userId: string;
+  blockedAt: string;
+  user?: {
+    _id: string;
+    name?: string;
+    username?: string;
+    avatarUrl?: string;
+  };
+}
+
+export async function fetchBlockedUsers(): Promise<{ blockedUsers: BlockedUserItem[] }> {
+  const { data } = await apiClient.get<{ blockedUsers: BlockedUserItem[] }>('/api/users/blocked');
+  return data;
+}
+
+export async function blockUser(userId: string) {
+  await apiClient.post(`/api/users/${userId}/block`);
+}
+
+export async function unblockUser(userId: string) {
+  await apiClient.delete(`/api/users/${userId}/block`);
+}
+
+export interface SocialProfile {
+  name: string;
+  handle: string | null;
+  displayHandle: string | null;
+  avatarUrl: string | null;
+  bio?: string;
+  website?: string | null;
+  visibility?: 'private' | 'public';
+  relationship: 'self' | 'none' | 'following' | 'requested_outgoing' | 'requested_incoming';
+  locked?: boolean;
+  message?: string;
+  counts?: {
+    followers: number;
+    following: number;
+    pendingRequests?: number;
+  };
+  profileUpdatedAt?: string;
+  handleChangedAt?: string | null;
+}
+
+export interface ProfileListItem {
+  name: string;
+  handle: string | null;
+  displayHandle: string | null;
+  avatarUrl: string | null;
+}
+
+export async function fetchMyProfile(): Promise<SocialProfile> {
+  const { data } = await apiClient.get<{ profile: SocialProfile }>('/api/profiles/me');
+  return data.profile;
+}
+
+export async function updateSocialProfile(payload: {
+  name?: string;
+  bio?: string;
+  website?: string;
+  visibility?: 'private' | 'public';
+}): Promise<SocialProfile> {
+  const { data } = await apiClient.patch<{ profile: SocialProfile }>('/api/profiles/me', payload);
+  return data.profile;
+}
+
+export async function updateProfileHandle(handle: string): Promise<SocialProfile> {
+  const { data } = await apiClient.patch<{ profile: SocialProfile }>('/api/profiles/me/handle', { handle });
+  return data.profile;
+}
+
+export async function fetchProfileByHandle(handle: string): Promise<SocialProfile> {
+  const { data } = await apiClient.get<{ profile: SocialProfile }>(`/api/profiles/${encodeURIComponent(handle)}`);
+  return data.profile;
+}
+
+export async function followProfile(handle: string): Promise<SocialProfile> {
+  const { data } = await apiClient.post<{ profile: SocialProfile }>(`/api/profiles/${encodeURIComponent(handle)}/follow`);
+  return data.profile;
+}
+
+export async function unfollowProfile(handle: string): Promise<SocialProfile> {
+  const { data } = await apiClient.delete<{ profile: SocialProfile }>(`/api/profiles/${encodeURIComponent(handle)}/follow`);
+  return data.profile;
+}
+
+export async function cancelFollowRequest(handle: string): Promise<SocialProfile> {
+  const { data } = await apiClient.post<{ profile: SocialProfile }>(`/api/profiles/${encodeURIComponent(handle)}/cancel`);
+  return data.profile;
+}
+
+export async function fetchIncomingFollowRequests(): Promise<{ requests: Array<{ requester: ProfileListItem; requestedAt: string }>; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ requests: Array<{ requester: ProfileListItem; requestedAt: string }>; nextCursor: string | null }>('/api/profiles/requests/incoming');
+  return data;
+}
+
+export async function approveFollowRequest(handle: string) {
+  await apiClient.post(`/api/profiles/requests/${encodeURIComponent(handle)}/approve`);
+}
+
+export async function declineFollowRequest(handle: string) {
+  await apiClient.post(`/api/profiles/requests/${encodeURIComponent(handle)}/decline`);
+}
+
+export async function removeFollower(handle: string) {
+  await apiClient.delete(`/api/profiles/${encodeURIComponent(handle)}/follower`);
+}
+
+export interface TrustReport {
+  id: string;
+  targetType: 'user' | 'message' | 'group';
+  status: 'open' | 'reviewing' | 'resolved' | 'dismissed';
+  reason: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function createReport(payload: {
+  targetType: 'user' | 'message' | 'group';
+  targetId: string;
+  reason: string;
+  details?: string;
+}) {
+  const { data } = await apiClient.post<{ report: TrustReport; duplicate?: boolean }>('/api/reports', payload);
+  return data;
+}
+
+export async function fetchMyReports(): Promise<{ reports: TrustReport[] }> {
+  const { data } = await apiClient.get<{ reports: TrustReport[] }>('/api/reports/mine');
+  return data;
+}
+
+export interface GroupModerationActivityItem {
+  id: string;
+  action: string;
+  actor: { _id: string; name?: string; username?: string; avatarUrl?: string };
+  target?: { _id: string; name?: string; username?: string; avatarUrl?: string };
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export async function updateGroupModerationSettings(chatId: string, sendMode: 'everyone' | 'admins_only') {
+  const { data } = await apiClient.patch<{ sendMode: 'everyone' | 'admins_only' }>(
+    `/api/chats/${chatId}/moderation/settings`,
+    { sendMode }
+  );
+  return data;
+}
+
+export async function updateGroupIntelligenceSettings(chatId: string, aiEnabled: boolean) {
+  const { data } = await apiClient.patch<{ chat: { aiEnabled: boolean }; purge?: Record<string, number> | null }>(
+    `/api/chats/${chatId}/intelligence/settings`,
+    { aiEnabled }
+  );
+  return data;
+}
+
+export async function restrictGroupMember(chatId: string, userId: string) {
+  const { data } = await apiClient.post<{ restricted: boolean }>(
+    `/api/chats/${chatId}/moderation/members/${userId}/restrict`
+  );
+  return data;
+}
+
+export async function unrestrictGroupMember(chatId: string, userId: string) {
+  const { data } = await apiClient.delete<{ restricted: boolean }>(
+    `/api/chats/${chatId}/moderation/members/${userId}/restrict`
+  );
+  return data;
+}
+
+export async function moderationRemoveGroupMember(chatId: string, userId: string) {
+  const { data } = await apiClient.delete<{ removed: boolean }>(
+    `/api/chats/${chatId}/moderation/members/${userId}`
+  );
+  return data;
+}
+
+export async function fetchGroupModerationActivity(chatId: string) {
+  const { data } = await apiClient.get<{ activity: GroupModerationActivityItem[] }>(
+    `/api/chats/${chatId}/moderation/activity`
+  );
+  return data;
+}
+
+export async function fetchSavedMessages(): Promise<{ savedMessages: SavedMessageItem[] }> {
+  const { data } = await apiClient.get<{ savedMessages: SavedMessageItem[] }>('/api/messages/saved');
+  return data;
+}
+
+export async function saveMessage(messageId: string) {
+  await apiClient.post(`/api/messages/${messageId}/save`);
+}
+
+export async function unsaveMessage(messageId: string) {
+  await apiClient.delete(`/api/messages/${messageId}/save`);
+}
+
+export type InviteExpiry = 'never' | '1d' | '7d' | '30d';
+export type InviteMaxUses = 'unlimited' | 10 | 50 | 100;
+
+export interface InviteLinkSettings {
+  id: string;
+  chatId: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string | null;
+  maxUses: number | null;
+  useCount: number;
+  revokedAt: string | null;
+  active: boolean;
+}
+
+export interface InviteSettingsPayload {
+  expiresIn?: InviteExpiry;
+  maxUses?: InviteMaxUses;
+}
+
+export interface InvitePreview {
+  groupName: string;
+  groupAvatarUrl?: string;
+  alreadyMember: boolean;
+  chatId?: string;
+  expiresAt: string | null;
+  maxUses: number | null;
+  useCount: number;
+}
+
+export async function fetchInviteLinkSettings(chatId: string): Promise<{ invite: InviteLinkSettings | null }> {
+  const { data } = await apiClient.get<{ invite: InviteLinkSettings | null }>(`/api/chats/${chatId}/invite-link`);
+  return data;
+}
+
+export async function createInviteLink(chatId: string, payload: InviteSettingsPayload) {
+  const { data } = await apiClient.post<{ invite: InviteLinkSettings; token: string }>(`/api/chats/${chatId}/invite-link`, payload);
+  return data;
+}
+
+export async function regenerateInviteLink(chatId: string, payload: InviteSettingsPayload) {
+  const { data } = await apiClient.post<{ invite: InviteLinkSettings; token: string }>(`/api/chats/${chatId}/invite-link/regenerate`, payload);
+  return data;
+}
+
+export async function revokeInviteLink(chatId: string) {
+  const { data } = await apiClient.post<{ invite: null }>(`/api/chats/${chatId}/invite-link/revoke`);
+  return data;
+}
+
+export async function previewInvite(token: string): Promise<{ invite: InvitePreview }> {
+  const { data } = await apiClient.get<{ invite: InvitePreview }>(`/api/invites/${encodeURIComponent(token)}/preview`);
+  return data;
+}
+
+export async function joinInvite(token: string): Promise<{ chat: import('@repo/types').Chat; alreadyMember: boolean }> {
+  const { data } = await apiClient.post<{ chat: import('@repo/types').Chat; alreadyMember: boolean }>(`/api/invites/${encodeURIComponent(token)}/join`);
+  return data;
+}
+
 export interface PasswordActionResponse {
   success: boolean;
   message: string;
@@ -84,6 +536,112 @@ export async function resetPassword(
     token,
     newPassword,
   });
+  return data;
+}
+
+export interface AccountStatus {
+  user: {
+    _id: string;
+    username: string;
+    email: string;
+    name: string;
+    emailVerified: boolean;
+    authProvider?: 'password' | 'google' | 'both';
+    deletionScheduledAt?: string;
+  };
+  deletion: { status: string; scheduledFor: string } | null;
+  export: AccountExport | null;
+}
+
+export interface DeviceSession {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastActiveAt?: string;
+  expiresAt: string;
+  current: boolean;
+}
+
+export interface AccountExport {
+  id: string;
+  status: 'preparing' | 'ready' | 'failed' | 'expired';
+  requestedAt: string;
+  readyAt?: string;
+  expiresAt?: string;
+}
+
+export async function fetchAccountStatus(): Promise<AccountStatus> {
+  const { data } = await apiClient.get<AccountStatus>('/api/auth/account/status');
+  return data;
+}
+
+export async function resendEmailVerification(): Promise<{ success: boolean; emailVerified?: boolean }> {
+  const { data } = await apiClient.post<{ success: boolean; emailVerified?: boolean }>(
+    '/api/auth/account/email/verification/resend'
+  );
+  return data;
+}
+
+export async function requestEmailChange(payload: { newEmail: string; currentPassword: string }) {
+  const { data } = await apiClient.post<{ success: boolean; message: string }>(
+    '/api/auth/account/email/change/request',
+    payload
+  );
+  return data;
+}
+
+export async function fetchDeviceSessions(): Promise<{ sessions: DeviceSession[] }> {
+  const { data } = await apiClient.get<{ sessions: DeviceSession[] }>('/api/auth/account/sessions');
+  return data;
+}
+
+export async function revokeDeviceSession(sessionId: string): Promise<{ success: boolean; currentRevoked?: boolean }> {
+  const { data } = await apiClient.delete<{ success: boolean; currentRevoked?: boolean }>(
+    `/api/auth/account/sessions/${sessionId}`
+  );
+  return data;
+}
+
+export async function logoutOtherDeviceSessions(): Promise<{ success: boolean; revoked: number }> {
+  const { data } = await apiClient.post<{ success: boolean; revoked: number }>(
+    '/api/auth/account/sessions/logout-others'
+  );
+  return data;
+}
+
+export async function requestDataExport(currentPassword: string): Promise<{ export: AccountExport }> {
+  const { data } = await apiClient.post<{ export: AccountExport }>('/api/auth/account/export', {
+    currentPassword,
+  });
+  return data;
+}
+
+export async function fetchDataExports(): Promise<{ exports: AccountExport[] }> {
+  const { data } = await apiClient.get<{ exports: AccountExport[] }>('/api/auth/account/export');
+  return data;
+}
+
+export async function downloadDataExport(exportId: string) {
+  const { data, headers } = await apiClient.get<Blob>(`/api/auth/account/export/${exportId}/download`, {
+    responseType: 'blob',
+  });
+  const disposition = String(headers['content-disposition'] || '');
+  const match = disposition.match(/filename="([^"]+)"/);
+  const url = URL.createObjectURL(data);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = match?.[1] || 'blabber-data-export.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function requestAccountDeletion(payload: { currentPassword: string; confirmation: 'DELETE' }) {
+  const { data } = await apiClient.post<{ deletion: { id: string; status: string; scheduledFor: string } }>(
+    '/api/auth/account/deletion',
+    payload
+  );
   return data;
 }
 
@@ -136,11 +694,33 @@ export async function extractChatActions(
 
 export async function updateChatAction(
   actionId: string,
-  patch: { status: ChatActionStatus }
+  patch: UpdateChatActionDTO
 ): Promise<{ action: ChatActionItem }> {
   const { data } = await apiClient.patch<{ action: ChatActionItem }>(
     `/api/intelligence/actions/${actionId}`,
     patch
+  );
+  return data;
+}
+
+export async function deleteChatAction(
+  actionId: string,
+  reason?: string
+): Promise<{ action: ChatActionItem }> {
+  const { data } = await apiClient.delete<{ action: ChatActionItem }>(
+    `/api/intelligence/actions/${actionId}`,
+    { data: { reason } }
+  );
+  return data;
+}
+
+export async function addChatActionUpdate(
+  actionId: string,
+  body: string
+): Promise<{ action: ChatActionItem }> {
+  const { data } = await apiClient.post<{ action: ChatActionItem }>(
+    `/api/intelligence/actions/${actionId}/updates`,
+    { body }
   );
   return data;
 }
@@ -250,6 +830,17 @@ export async function askGroupBrain(
   const { data } = await apiClient.post<GroupBrainAnswer>(
     `/api/intelligence/chats/${chatId}/brain/ask`,
     { question }
+  );
+  return data;
+}
+
+export async function fetchMessageWindow(
+  chatId: string,
+  messageId: string
+): Promise<{ messages: Message[]; targetMessageId: string }> {
+  const { data } = await apiClient.get<{ messages: Message[]; targetMessageId: string }>(
+    `/api/messages/source/${messageId}/window`,
+    { params: { chatId, before: 20, after: 20 } }
   );
   return data;
 }

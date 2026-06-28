@@ -60,3 +60,4 @@ infra/terraform/**/.terraform.tfstate.lock.info
 .cache/
 temp/
 tmp/
+backups/

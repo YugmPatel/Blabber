@@ -1,8 +1,28 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
 import ChatList from './ChatList';
 import type { Chat } from '@repo/types';
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: { _id: 'user1', username: 'testuser', email: 'test@example.com', name: 'Test User' },
+    accessToken: 'test-token',
+    isLoading: false,
+    isAuthenticated: true,
+    login: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: vi.fn(),
+  }),
+}));
+
+vi.mock('@/hooks/useUsers', () => ({
+  useUser: vi.fn(() => ({ data: undefined })),
+  useUserPresence: vi.fn(() => ({ data: undefined })),
+}));
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -61,8 +81,15 @@ const mockChats: Chat[] = [
 ];
 
 describe('ChatList', () => {
+  const renderList = (ui: ReactElement) => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+  };
+
   it('renders all chats', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={mockChats} />
       </BrowserRouter>
@@ -74,7 +101,7 @@ describe('ChatList', () => {
   });
 
   it('sorts chats by last message time (most recent first)', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={mockChats} />
       </BrowserRouter>
@@ -88,7 +115,7 @@ describe('ChatList', () => {
   });
 
   it('shows pinned chats first', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={mockChats} pinnedChatIds={['chat1']} />
       </BrowserRouter>
@@ -100,7 +127,7 @@ describe('ChatList', () => {
   });
 
   it('filters archived chats when showArchived is false', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={mockChats} archivedChatIds={['chat2']} showArchived={false} />
       </BrowserRouter>
@@ -112,7 +139,7 @@ describe('ChatList', () => {
   });
 
   it('shows only archived chats when showArchived is true', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={mockChats} archivedChatIds={['chat2']} showArchived={true} />
       </BrowserRouter>
@@ -124,7 +151,7 @@ describe('ChatList', () => {
   });
 
   it('displays unread counts', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={mockChats} unreadCounts={{ chat1: 5, chat2: 10 }} />
       </BrowserRouter>
@@ -135,7 +162,7 @@ describe('ChatList', () => {
   });
 
   it('shows empty state when no chats', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={[]} />
       </BrowserRouter>
@@ -145,7 +172,7 @@ describe('ChatList', () => {
   });
 
   it('shows archived empty state when no archived chats', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={[]} showArchived={true} />
       </BrowserRouter>
@@ -155,7 +182,7 @@ describe('ChatList', () => {
   });
 
   it('highlights active chat', () => {
-    render(
+    renderList(
       <BrowserRouter>
         <ChatList chats={mockChats} />
       </BrowserRouter>

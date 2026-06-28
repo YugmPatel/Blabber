@@ -1,4 +1,6 @@
 import { Collection, ObjectId } from 'mongodb';
+import bcrypt from 'bcrypt';
+import { createHash } from 'crypto';
 import { getDatabase } from '../db';
 
 export interface DeviceSessionDocument {
@@ -9,11 +11,25 @@ export interface DeviceSessionDocument {
   ipAddress: string;
   expiresAt: Date;
   createdAt: Date;
+  lastActiveAt?: Date;
+  revokedAt?: Date;
 }
 
 export function getDeviceSessionsCollection(): Collection<DeviceSessionDocument> {
   const db = getDatabase();
   return db.collection<DeviceSessionDocument>('deviceSessions');
+}
+
+function digestRefreshToken(refreshToken: string): string {
+  return createHash('sha256').update(refreshToken).digest('hex');
+}
+
+export async function hashRefreshToken(refreshToken: string): Promise<string> {
+  return bcrypt.hash(digestRefreshToken(refreshToken), 10);
+}
+
+export async function compareRefreshToken(refreshToken: string, refreshTokenHash: string): Promise<boolean> {
+  return bcrypt.compare(digestRefreshToken(refreshToken), refreshTokenHash);
 }
 
 export async function createDeviceSessionIndexes(): Promise<void> {

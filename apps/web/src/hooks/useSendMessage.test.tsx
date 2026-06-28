@@ -70,7 +70,8 @@ describe('useSendMessage', () => {
       expect.objectContaining({
         chatId: 'chat-1',
         body: 'Hello world',
-        tempId: expect.stringMatching(/^temp-/),
+        tempId: expect.stringMatching(/^client-/),
+        clientMessageId: expect.stringMatching(/^client-/),
       })
     );
   });
@@ -90,7 +91,7 @@ describe('useSendMessage', () => {
         chatId: 'chat-1',
         body: 'Check this out',
         mediaId: 'media-123',
-        tempId: expect.stringMatching(/^temp-/),
+        tempId: expect.stringMatching(/^client-/),
       })
     );
   });
@@ -110,7 +111,7 @@ describe('useSendMessage', () => {
         chatId: 'chat-1',
         body: 'Reply message',
         replyToId: 'msg-456',
-        tempId: expect.stringMatching(/^temp-/),
+        tempId: expect.stringMatching(/^client-/),
       })
     );
   });
@@ -124,9 +125,9 @@ describe('useSendMessage', () => {
     });
 
     expect(mockAddPendingMessage).toHaveBeenCalledWith(
-      expect.stringMatching(/^temp-/),
+      expect.stringMatching(/^client-/),
       expect.objectContaining({
-        _id: expect.stringMatching(/^temp-/),
+        _id: expect.stringMatching(/^client-/),
         chatId: 'chat-1',
         senderId: 'user-123',
         body: 'Hello world',
@@ -147,7 +148,7 @@ describe('useSendMessage', () => {
     });
 
     expect(mockAddPendingMessage).toHaveBeenCalledWith(
-      expect.stringMatching(/^temp-/),
+      expect.stringMatching(/^client-/),
       expect.objectContaining({
         body: 'Image message',
         media: {
@@ -168,7 +169,7 @@ describe('useSendMessage', () => {
     });
 
     expect(mockAddPendingMessage).toHaveBeenCalledWith(
-      expect.stringMatching(/^temp-/),
+      expect.stringMatching(/^client-/),
       expect.objectContaining({
         body: 'Reply message',
         replyTo: {

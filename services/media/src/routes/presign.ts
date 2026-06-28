@@ -1,91 +1,106 @@
 import { Request, Response } from 'express';
 import { promises as fs } from 'fs';
 import { dirname, join } from 'path';
-import { z } from 'zod';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ObjectId } from 'mongodb';
-import { loadS3Config } from '@repo/config';
 import { asyncHandler } from '@repo/utils';
-import { getMediaCollection } from '../models/media';
+import { getDatabase } from '../db';
+import { getMediaCollection, Media } from '../models/media';
+import {
+  allowedMimeTypes,
+  maxBytesForCategory,
+  safeExtension,
+  sanitizeDisplayFileName,
+  validateMediaPolicy,
+} from '../media-policy';
+import { assertUserUploadQuota } from '../media-quota';
+import { scanBuffer } from '../media-scanner';
 
-// File type whitelist
-const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-const ALLOWED_AUDIO_TYPES = [
-  'audio/mpeg',
-  'audio/mp3',
-  'audio/ogg',
-  'audio/m4a',
-  'audio/x-m4a',
-  'audio/mp4',
-  'audio/aac',
-  'audio/wav',
-  'audio/webm',
-];
-const ALLOWED_DOCUMENT_TYPES = [
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/plain',
-  'text/csv',
-  'application/rtf',
-  'text/rtf',
-];
-
-const ALL_ALLOWED_TYPES = [
-  ...ALLOWED_IMAGE_TYPES,
-  ...ALLOWED_AUDIO_TYPES,
-  ...ALLOWED_DOCUMENT_TYPES,
-];
-
-// File size limits (in bytes)
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_AUDIO_SIZE = 20 * 1024 * 1024; // 20MB
-const MAX_DOCUMENT_SIZE = 50 * 1024 * 1024; // 50MB
 const LOCAL_MEDIA_DIR = process.env.LOCAL_MEDIA_DIR || '/tmp/blabber-media';
+const MULTIPART_FIELD_NAME = 'file';
+const MESSAGE_TOTAL_ATTACHMENT_BYTES = Number(process.env.MEDIA_MESSAGE_TOTAL_BYTES || 30 * 1024 * 1024);
+const GENERIC_UPLOAD_ERROR = 'This file could not be uploaded.';
 
-const PresignRequestSchema = z.object({
-  fileName: z.string().min(1, 'fileName is required'),
-  fileType: z.string().refine((type) => ALL_ALLOWED_TYPES.includes(type), {
-    message: `File type must be one of: ${ALL_ALLOWED_TYPES.join(', ')}`,
-  }),
-  fileSize: z.number().positive('fileSize must be positive'),
-});
-
-function getMaxSizeForType(fileType: string): number {
-  if (ALLOWED_IMAGE_TYPES.includes(fileType)) {
-    return MAX_IMAGE_SIZE;
-  }
-  if (ALLOWED_AUDIO_TYPES.includes(fileType)) {
-    return MAX_AUDIO_SIZE;
-  }
-  if (ALLOWED_DOCUMENT_TYPES.includes(fileType)) {
-    return MAX_DOCUMENT_SIZE;
-  }
-  return 0;
+function uploadValidationError(res: Response, status = 400) {
+  return res.status(status).json({ error: status === 404 ? 'Not Found' : 'Validation Error', message: GENERIC_UPLOAD_ERROR });
 }
 
-function validateFileSize(fileType: string, fileSize: number): void {
-  const maxSize = getMaxSizeForType(fileType);
-
-  if (fileSize > maxSize) {
-    const maxSizeMB = maxSize / (1024 * 1024);
-    throw new Error(`File size exceeds maximum allowed size of ${maxSizeMB}MB for this file type`);
-  }
+function getMultipartBoundary(req: Request): string | null {
+  const contentType = req.get('content-type') || '';
+  const match = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  return match?.[1] || match?.[2] || null;
 }
 
-function getFileExtension(fileName: string): string {
-  const extension = fileName.split('.').pop();
-  return extension && extension !== fileName ? `.${extension}` : '';
+function parseContentDisposition(value: string | undefined) {
+  const result: { name?: string; filename?: string } = {};
+  if (!value) return result;
+  for (const part of value.split(';')) {
+    const [rawKey, ...rawValue] = part.trim().split('=');
+    const key = rawKey.toLowerCase();
+    const joined = rawValue.join('=').trim();
+    if (key === 'name' || key === 'filename') result[key] = joined.replace(/^"|"$/g, '');
+  }
+  return result;
+}
+
+function parseMultipartUpload(req: Request) {
+  const body = req.body;
+  const boundary = getMultipartBoundary(req);
+
+  if (!boundary || !Buffer.isBuffer(body) || body.length === 0) return null;
+
+  const boundaryBuffer = Buffer.from(`--${boundary}`);
+  let cursor = body.indexOf(boundaryBuffer);
+  let file:
+    | {
+        fieldName: string;
+        fileName: string;
+        fileType: string;
+        data: Buffer;
+      }
+    | null = null;
+
+  while (cursor !== -1) {
+    cursor += boundaryBuffer.length;
+    if (body[cursor] === 45 && body[cursor + 1] === 45) break;
+    if (body[cursor] === 13 && body[cursor + 1] === 10) cursor += 2;
+
+    const headerEnd = body.indexOf(Buffer.from('\r\n\r\n'), cursor);
+    if (headerEnd === -1) break;
+
+    const rawHeaders = body.toString('utf8', cursor, headerEnd);
+    const headers = new Map<string, string>();
+    for (const line of rawHeaders.split('\r\n')) {
+      const separator = line.indexOf(':');
+      if (separator === -1) continue;
+      headers.set(line.slice(0, separator).trim().toLowerCase(), line.slice(separator + 1).trim());
+    }
+
+    const contentStart = headerEnd + 4;
+    const nextBoundary = body.indexOf(boundaryBuffer, contentStart);
+    if (nextBoundary === -1) break;
+
+    let contentEnd = nextBoundary;
+    if (body[contentEnd - 2] === 13 && body[contentEnd - 1] === 10) contentEnd -= 2;
+
+    const disposition = parseContentDisposition(headers.get('content-disposition'));
+    if (disposition.filename && disposition.name) {
+      file = {
+        fieldName: disposition.name,
+        fileName: sanitizeDisplayFileName(disposition.filename),
+        fileType: headers.get('content-type') || 'application/octet-stream',
+        data: body.subarray(contentStart, contentEnd),
+      };
+    }
+
+    cursor = nextBoundary;
+  }
+
+  return { file };
 }
 
 function getPublicMediaBaseUrl(req: Request): string {
   const configuredBaseUrl = process.env.PUBLIC_MEDIA_BASE_URL?.replace(/\/+$/, '');
-  if (configuredBaseUrl) {
-    return configuredBaseUrl;
-  }
+  if (configuredBaseUrl) return configuredBaseUrl;
 
   const forwardedHost = req.get('x-forwarded-host')?.split(',')[0]?.trim();
   if (forwardedHost) {
@@ -100,266 +115,305 @@ function getLocalUploadBaseUrl(req: Request): string {
   return process.env.LOCAL_MEDIA_UPLOAD_BASE_URL?.replace(/\/+$/, '') || getPublicMediaBaseUrl(req);
 }
 
-async function createLocalUpload(
-  req: Request,
-  res: Response,
-  userId: string,
-  fileName: string,
-  fileType: string,
-  fileSize: number
-) {
-  const mediaId = new ObjectId();
-  const fileExtension = getFileExtension(fileName);
-  const localPath = join(LOCAL_MEDIA_DIR, `${mediaId.toString()}${fileExtension}`);
-  const publicBaseUrl = getPublicMediaBaseUrl(req);
-  const mediaUrl = `${publicBaseUrl}/local/${mediaId.toString()}`;
-  const uploadUrl = `${getLocalUploadBaseUrl(req)}/local/${mediaId.toString()}`;
-
-  const mediaCollection = getMediaCollection();
-  const mediaDoc = {
-    _id: mediaId,
-    userId: new ObjectId(userId),
-    fileName,
-    fileType,
-    fileSize,
-    s3Key: `local/${userId}/${mediaId.toString()}${fileExtension}`,
-    url: mediaUrl,
-    storage: 'local' as const,
-    localPath,
-    createdAt: new Date(),
-  };
-
-  await mediaCollection.insertOne(mediaDoc);
-
-  return res.status(200).json({
-    uploadUrl,
-    mediaId: mediaId.toString(),
-    mediaUrl,
-    publicUrl: mediaUrl,
-    storageKey: mediaDoc.s3Key,
-    fileName,
-    mimeType: fileType,
-    size: fileSize,
-    uploadMethod: 'PUT',
-    uploadAuthRequired: true,
-    storage: 'local',
-  });
-}
-
-export const presign = asyncHandler(async (req: Request, res: Response) => {
-  // Validate request body
-  const parseResult = PresignRequestSchema.safeParse(req.body);
-
-  if (!parseResult.success) {
-    return res.status(400).json({
-      error: 'Validation Error',
-      message: parseResult.error.errors[0].message,
-      details: parseResult.error.errors,
-    });
-  }
-
-  const { fileName, fileType, fileSize } = parseResult.data;
-
-  // Validate file size against type-specific limits
-  try {
-    validateFileSize(fileType, fileSize);
-  } catch (error: any) {
-    return res.status(400).json({
-      error: 'Validation Error',
-      message: error.message,
-    });
-  }
-
-  // Get authenticated user ID from request (set by auth middleware)
-  const userId = (req as any).user?.userId;
-
-  if (!userId) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'User not authenticated',
-    });
-  }
-
-  const hasS3Config =
-    Boolean(process.env.S3_MEDIA_BUCKET) &&
-    Boolean(process.env.S3_REGION) &&
-    Boolean(process.env.MEDIA_BASE_URL);
-
-  if (!hasS3Config) {
-    return createLocalUpload(req, res, userId, fileName, fileType, fileSize);
-  }
-
-  const s3Config = loadS3Config();
-
-  // Generate unique S3 key
-  const timestamp = Date.now();
-  const randomString = Math.random().toString(36).substring(2, 15);
-  const fileExtension = getFileExtension(fileName);
-  const s3Key = `media/${userId}/${timestamp}-${randomString}${fileExtension}`;
-
-  // Create S3 client
-  const s3Client = new S3Client({
-    region: s3Config.S3_REGION,
-    credentials:
-      s3Config.AWS_ACCESS_KEY_ID && s3Config.AWS_SECRET_ACCESS_KEY
-        ? {
-            accessKeyId: s3Config.AWS_ACCESS_KEY_ID,
-            secretAccessKey: s3Config.AWS_SECRET_ACCESS_KEY,
-          }
-        : undefined, // Use default credential provider chain if not specified
-  });
-
-  // Create presigned PUT URL
-  const command = new PutObjectCommand({
-    Bucket: s3Config.S3_MEDIA_BUCKET,
-    Key: s3Key,
-    ContentType: fileType,
-  });
-
-  const expiresIn = 300; // 5 minutes
-  const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn });
-
-  // Create media document in MongoDB
-  const mediaCollection = getMediaCollection();
-  const mediaDoc = {
-    userId: new ObjectId(userId),
-    fileName,
-    fileType,
-    fileSize,
-    s3Key,
-    url: `${s3Config.MEDIA_BASE_URL}/${s3Key}`,
-    storage: 's3' as const,
-    createdAt: new Date(),
-  };
-
-  const result = await mediaCollection.insertOne(mediaDoc);
-
-  // Return presigned URL and media ID
-  return res.status(200).json({
-    uploadUrl,
-    mediaId: result.insertedId.toString(),
-    mediaUrl: mediaDoc.url,
-    publicUrl: mediaDoc.url,
-    storageKey: s3Key,
-    fileName,
-    mimeType: fileType,
-    size: fileSize,
-    expiresIn,
-    uploadMethod: 'PUT',
-    uploadAuthRequired: false,
-    storage: 's3',
-  });
-});
-
-export const uploadLocalMedia = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.userId;
-
-  if (!userId) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'User not authenticated',
-    });
-  }
-
-  if (!ObjectId.isValid(req.params.id) || !ObjectId.isValid(userId)) {
-    return res.status(404).json({
-      error: 'Not Found',
-      message: 'Media upload target not found',
-    });
-  }
-
-  const uploadBody = req.body;
-  if (!Buffer.isBuffer(uploadBody) || uploadBody.length === 0) {
-    return res.status(400).json({
-      error: 'Validation Error',
-      message: 'Upload body is required',
-    });
-  }
-
-  const mediaId = new ObjectId(req.params.id);
-  const mediaCollection = getMediaCollection();
-  const mediaDoc = await mediaCollection.findOne({
-    _id: mediaId,
-    userId: new ObjectId(userId),
-    storage: 'local',
-  });
-
-  if (!mediaDoc?.localPath) {
-    return res.status(404).json({
-      error: 'Not Found',
-      message: 'Media upload target not found',
-    });
-  }
-
-  if (uploadBody.length > mediaDoc.fileSize) {
-    return res.status(400).json({
-      error: 'Validation Error',
-      message: 'Uploaded file is larger than the presigned file size',
-    });
-  }
-
-  const contentType = req.get('content-type')?.split(';')[0]?.trim();
-  if (contentType && contentType !== mediaDoc.fileType) {
-    return res.status(400).json({
-      error: 'Validation Error',
-      message: 'Uploaded file type does not match the presigned file type',
-    });
-  }
-
-  await fs.mkdir(dirname(mediaDoc.localPath), { recursive: true });
-  await fs.writeFile(mediaDoc.localPath, uploadBody);
-  await mediaCollection.updateOne(
-    { _id: mediaId },
-    {
-      $set: {
-        uploadedAt: new Date(),
-      },
-    }
-  );
-
-  return res.status(200).json({
-    mediaId: mediaId.toString(),
+function publicResponse(mediaDoc: Media) {
+  return {
+    mediaId: mediaDoc._id?.toString(),
     mediaUrl: mediaDoc.url,
     publicUrl: mediaDoc.url,
     storageKey: mediaDoc.s3Key,
     fileName: mediaDoc.fileName,
     mimeType: mediaDoc.fileType,
+    detectedMimeType: mediaDoc.detectedFileType,
     size: mediaDoc.fileSize,
+    status: mediaDoc.status,
+    storage: mediaDoc.storage,
+  };
+}
+
+async function isMomentOnlyMedia(mediaId: ObjectId) {
+  const db = getDatabase();
+  const moment = await db.collection('moments').findOne({ mediaId, archiveState: { $ne: 'deleted' } });
+  if (!moment) return false;
+  const [messageReference, avatarReference] = await Promise.all([
+    db.collection('messages').findOne({
+      $or: [{ 'media.mediaId': mediaId.toString() }, { 'attachments.mediaId': mediaId.toString() }],
+    }),
+    db.collection('users').findOne({ avatarUrl: { $regex: mediaId.toString() } }),
+  ]);
+  return !messageReference && !avatarReference;
+}
+
+function hasMomentInternalAccess(req: Request) {
+  const token = process.env.MOMENT_INTERNAL_MEDIA_TOKEN;
+  return Boolean(token && req.get('x-moment-internal-token') === token);
+}
+
+async function approveLocalBuffer(params: {
+  req: Request;
+  res: Response;
+  userId: string;
+  mediaDoc?: Media;
+  mediaId?: ObjectId;
+  fileName: string;
+  declaredMimeType?: string;
+  buffer: Buffer;
+}) {
+  const { req, res, userId, buffer } = params;
+  const userObjectId = new ObjectId(userId);
+
+  if (buffer.length === 0 || buffer.length > MESSAGE_TOTAL_ATTACHMENT_BYTES) return uploadValidationError(res);
+
+  let policy;
+  try {
+    policy = validateMediaPolicy({ fileName: params.fileName, declaredMimeType: params.declaredMimeType, buffer });
+  } catch {
+    return uploadValidationError(res);
+  }
+
+  if (buffer.length > maxBytesForCategory(policy.category)) return uploadValidationError(res);
+
+  try {
+    await assertUserUploadQuota(userObjectId, buffer.length);
+  } catch {
+    return uploadValidationError(res, 429);
+  }
+
+  const mediaId = params.mediaId || new ObjectId();
+  const fileName = sanitizeDisplayFileName(params.fileName);
+  const localPath = params.mediaDoc?.localPath || join(LOCAL_MEDIA_DIR, `${mediaId.toString()}${policy.extension}`);
+  const publicBaseUrl = getPublicMediaBaseUrl(req);
+  const mediaUrl = params.mediaDoc?.url || `${publicBaseUrl}/local/${mediaId.toString()}`;
+  const s3Key = params.mediaDoc?.s3Key || `local/${userId}/${mediaId.toString()}${policy.extension}`;
+  const mediaCollection = getMediaCollection();
+  const now = new Date();
+
+  await mediaCollection.updateOne(
+    { _id: mediaId, userId: userObjectId },
+    {
+      $set: {
+        status: 'scanning',
+        scanResult: undefined,
+        scanErrorCategory: undefined,
+        detectedFileType: policy.mimeType,
+        fileType: policy.mimeType,
+        fileSize: buffer.length,
+        fileName,
+      },
+      $setOnInsert: {
+        _id: mediaId,
+        userId: userObjectId,
+        originalFileName: params.fileName,
+        s3Key,
+        url: mediaUrl,
+        storage: 'local',
+        localPath,
+        createdAt: now,
+      },
+    },
+    { upsert: true }
+  );
+
+  const scan = await scanBuffer(buffer);
+  if (!scan.ok) {
+    await mediaCollection.updateOne(
+      { _id: mediaId },
+      {
+        $set: {
+          status: scan.category === 'infected' ? 'quarantined' : 'rejected',
+          scanMode: scan.mode,
+          scanResult: scan.category === 'infected' ? 'infected' : 'error',
+          scanErrorCategory: scan.category,
+          rejectedAt: now,
+          quarantinedAt: scan.category === 'infected' ? now : undefined,
+        },
+      }
+    );
+    return uploadValidationError(res);
+  }
+
+  await fs.mkdir(dirname(localPath), { recursive: true });
+  await fs.writeFile(localPath, buffer, { flag: 'wx' }).catch(async (error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EEXIST') throw error;
+    await fs.writeFile(localPath, buffer);
+  });
+
+  const approvedAt = new Date();
+  const approvedDoc: Media = {
+    ...(params.mediaDoc || {}),
+    _id: mediaId,
+    userId: userObjectId,
+    fileName,
+    originalFileName: params.fileName,
+    fileType: policy.mimeType,
+    detectedFileType: policy.mimeType,
+    fileSize: buffer.length,
+    s3Key,
+    url: mediaUrl,
+    storage: 'local',
+    localPath,
+    status: 'approved',
+    scanMode: scan.mode,
+    scanResult: 'clean',
+    approvedAt,
+    uploadedAt: approvedAt,
+    createdAt: params.mediaDoc?.createdAt || now,
+  };
+
+  await mediaCollection.updateOne(
+    { _id: mediaId },
+    {
+      $set: {
+        fileName,
+        originalFileName: params.fileName,
+        fileType: policy.mimeType,
+        detectedFileType: policy.mimeType,
+        fileSize: buffer.length,
+        s3Key,
+        url: mediaUrl,
+        storage: 'local',
+        localPath,
+        status: 'approved',
+        scanMode: scan.mode,
+        scanResult: 'clean',
+        approvedAt,
+        uploadedAt: approvedAt,
+      },
+    }
+  );
+
+  return res.status(params.mediaDoc ? 200 : 201).json(publicResponse(approvedDoc));
+}
+
+export const uploadMultipartMedia = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId || !ObjectId.isValid(userId)) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const file = parseMultipartUpload(req)?.file;
+  if (!file || file.fieldName !== MULTIPART_FIELD_NAME) return uploadValidationError(res);
+
+  return approveLocalBuffer({
+    req,
+    res,
+    userId,
+    fileName: file.fileName,
+    declaredMimeType: file.fileType,
+    buffer: file.data,
+  });
+});
+
+export const presign = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId || !ObjectId.isValid(userId)) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const fileName = sanitizeDisplayFileName(String(req.body?.fileName || ''));
+  const declaredType = String(req.body?.fileType || '').split(';')[0].trim().toLowerCase();
+  const fileSize = Number(req.body?.fileSize || 0);
+  if (!fileName || !Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MESSAGE_TOTAL_ATTACHMENT_BYTES) {
+    return uploadValidationError(res);
+  }
+  if (declaredType && !allowedMimeTypes().includes(declaredType) && declaredType !== 'image/jpg') {
+    return uploadValidationError(res);
+  }
+
+  const extension = safeExtension(fileName);
+  const mediaId = new ObjectId();
+  const publicBaseUrl = getPublicMediaBaseUrl(req);
+  const mediaUrl = `${publicBaseUrl}/local/${mediaId.toString()}`;
+  const localPath = join(LOCAL_MEDIA_DIR, `${mediaId.toString()}${extension || '.bin'}`);
+  const uploadUrl = `${getLocalUploadBaseUrl(req)}/local/${mediaId.toString()}`;
+  const mediaDoc: Media = {
+    _id: mediaId,
+    userId: new ObjectId(userId),
+    fileName,
+    originalFileName: fileName,
+    fileType: declaredType || 'application/octet-stream',
+    fileSize,
+    s3Key: `local/${userId}/${mediaId.toString()}${extension || '.bin'}`,
+    url: mediaUrl,
+    storage: 'local',
+    localPath,
+    status: 'pending',
+    createdAt: new Date(),
+  };
+
+  await getMediaCollection().insertOne(mediaDoc);
+
+  return res.status(200).json({
+    uploadUrl,
+    ...publicResponse(mediaDoc),
+    uploadMethod: 'PUT',
+    uploadAuthRequired: true,
+  });
+});
+
+export const uploadLocalMedia = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId || !ObjectId.isValid(userId)) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+  if (!ObjectId.isValid(req.params.id)) return uploadValidationError(res, 404);
+
+  const uploadBody = req.body;
+  if (!Buffer.isBuffer(uploadBody) || uploadBody.length === 0) return uploadValidationError(res);
+
+  const mediaId = new ObjectId(req.params.id);
+  const mediaDoc = await getMediaCollection().findOne({
+    _id: mediaId,
+    userId: new ObjectId(userId),
+    storage: 'local',
+    status: { $in: ['pending', 'rejected'] },
+  });
+
+  if (!mediaDoc?.localPath) return uploadValidationError(res, 404);
+  if (uploadBody.length > mediaDoc.fileSize || uploadBody.length > MESSAGE_TOTAL_ATTACHMENT_BYTES) {
+    return uploadValidationError(res);
+  }
+
+  return approveLocalBuffer({
+    req,
+    res,
+    userId,
+    mediaDoc,
+    mediaId,
+    fileName: mediaDoc.fileName,
+    declaredMimeType: req.get('content-type') || mediaDoc.fileType,
+    buffer: uploadBody,
   });
 });
 
 export const getLocalMedia = asyncHandler(async (req: Request, res: Response) => {
   if (!ObjectId.isValid(req.params.id)) {
-    return res.status(404).json({
-      error: 'Not Found',
-      message: 'Media not found',
-    });
+    return res.status(404).json({ error: 'Not Found', message: 'Media not found' });
   }
 
-  const mediaCollection = getMediaCollection();
-  const mediaDoc = await mediaCollection.findOne({
+  const mediaDoc = await getMediaCollection().findOne({
     _id: new ObjectId(req.params.id),
     storage: 'local',
+    status: 'approved',
   });
 
   if (!mediaDoc?.localPath || !mediaDoc.uploadedAt) {
-    return res.status(404).json({
-      error: 'Not Found',
-      message: 'Media not found',
-    });
+    return res.status(404).json({ error: 'Not Found', message: 'Media not found' });
+  }
+
+  if (!hasMomentInternalAccess(req) && (await isMomentOnlyMedia(mediaDoc._id!))) {
+    return res.status(404).json({ error: 'Not Found', message: 'Media not found' });
   }
 
   try {
     await fs.access(mediaDoc.localPath);
   } catch {
-    return res.status(404).json({
-      error: 'Not Found',
-      message: 'Media file not found',
-    });
+    return res.status(404).json({ error: 'Not Found', message: 'Media not found' });
   }
 
   res.setHeader('Content-Type', mediaDoc.fileType);
-  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Disposition', `inline; filename="${sanitizeDisplayFileName(mediaDoc.fileName)}"`);
+  res.setHeader('Cache-Control', 'private, max-age=300');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   return res.sendFile(mediaDoc.localPath);
 });

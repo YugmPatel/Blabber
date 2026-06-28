@@ -31,7 +31,7 @@ export default function VideoCallModal({
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const callTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ICE servers for WebRTC (using public STUN servers)
   const iceServers = {
