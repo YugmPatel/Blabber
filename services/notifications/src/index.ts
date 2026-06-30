@@ -4,6 +4,8 @@ import app from './app';
 import { connectToDatabase, closeDatabase } from './db';
 import { createPushSubscriptionIndexes } from './models/push-subscription';
 import { createNotificationPreferenceIndexes } from './models/notification-preferences';
+import { createNotificationInboxIndexes } from './models/inbox';
+import { createMobilePushDeviceIndexes } from './models/mobile-push-device';
 import { validatePushStartupConfig } from './push-ops';
 
 const config = loadCommonConfig();
@@ -16,7 +18,9 @@ async function startServer() {
 
     // Create indexes
     await createPushSubscriptionIndexes();
+    await createMobilePushDeviceIndexes();
     await createNotificationPreferenceIndexes();
+    await createNotificationInboxIndexes();
     logger.info('Database indexes created');
 
     // Start Express server

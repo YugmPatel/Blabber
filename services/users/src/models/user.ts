@@ -6,6 +6,7 @@ export interface User {
   _id: ObjectId;
   username: string;
   email: string;
+  emailVerified?: boolean;
   passwordHash: string;
   name: string;
   avatarUrl?: string;
@@ -18,6 +19,10 @@ export interface User {
   profileVisibility?: 'private' | 'public';
   profileHandleChangedAt?: Date;
   profileUpdatedAt?: Date;
+  creatorDiscoveryEnabled?: boolean;
+  creatorTopicIds?: string[];
+  creatorDiscoveryEnabledAt?: Date;
+  creatorDiscoveryUpdatedAt?: Date;
   role?: string;
   platformRole?: 'user' | 'moderator' | 'admin';
   department?: string;
@@ -26,6 +31,8 @@ export interface User {
   lastSeen: Date;
   createdAt: Date;
   updatedAt: Date;
+  deactivatedAt?: Date;
+  deletedAt?: Date;
 }
 
 export function getUsersCollection() {
@@ -47,6 +54,10 @@ export async function createUserIndexes(): Promise<void> {
       { unique: true, sparse: true, name: 'profile_handle_unique' }
     );
     await collection.createIndex({ platformRole: 1 }, { sparse: true });
+    await collection.createIndex(
+      { creatorDiscoveryEnabled: 1, profileVisibility: 1, creatorDiscoveryEnabledAt: -1 },
+      { name: 'creator_discovery_browse' }
+    );
 
     // Text index on username and name for search. MongoDB rejects creating the
     // same text index under a new name, so reuse an equivalent existing index.

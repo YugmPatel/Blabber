@@ -18,6 +18,9 @@ import {
   Shield,
   Archive,
   Bookmark,
+  Newspaper,
+  Compass,
+  Clapperboard,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
@@ -78,6 +81,10 @@ export default function Sidebar({
 
   const intelligenceItems: Array<{ label: string; icon: typeof Users; path: string; badge?: number }> = [
     { label: 'Groups', icon: Users, path: '/chats' },
+    { label: 'Communities', icon: Users, path: '/communities' },
+    { label: 'Feed', icon: Newspaper, path: '/feed' },
+    { label: 'Reels', icon: Clapperboard, path: '/reels' },
+    { label: 'Discover', icon: Compass, path: '/discover' },
     { label: 'Archived', icon: Archive, path: '/archived' },
     { label: 'Saved', icon: Bookmark, path: '/saved' },
     { label: 'Calls', icon: Phone, path: '/calls' },
@@ -89,6 +96,10 @@ export default function Sidebar({
   const navItemPadding = collapsed ? 'justify-center px-0' : 'gap-2.5 px-2.5';
   const isChatsRoute = location.pathname === '/chats' || location.pathname.startsWith('/chats/');
   const isMomentsRoute = location.pathname === '/status' || location.pathname.startsWith('/moments');
+  const isFeedRoute = location.pathname === '/feed';
+  const isReelsRoute = location.pathname === '/reels' || location.pathname.startsWith('/reels/');
+  const isDiscoverRoute = location.pathname === '/discover';
+  const isCommunitiesRoute = location.pathname === '/communities' || location.pathname.startsWith('/c/');
   const isCallsRoute = location.pathname === '/calls';
   const isActionsRoute = location.pathname === '/actions';
   const isArchivedRoute = location.pathname === '/archived';
@@ -203,6 +214,14 @@ export default function Sidebar({
             aria-pressed={
               item.label === 'Groups'
                 ? activeChatFilter === 'groups'
+                : item.label === 'Communities'
+                  ? isCommunitiesRoute
+                : item.label === 'Feed'
+                  ? isFeedRoute
+                : item.label === 'Reels'
+                  ? isReelsRoute
+                : item.label === 'Discover'
+                  ? isDiscoverRoute
                 : item.label === 'Archived'
                   ? isArchivedRoute
                   : item.label === 'Saved'
@@ -216,6 +235,10 @@ export default function Sidebar({
             title={collapsed ? item.label : undefined}
             className={`${navItemBase} ${navItemPadding} w-full ${
               (item.label === 'Groups' && isChatsRoute && activeChatFilter === 'groups') ||
+              (item.label === 'Communities' && isCommunitiesRoute) ||
+              (item.label === 'Feed' && isFeedRoute) ||
+              (item.label === 'Reels' && isReelsRoute) ||
+              (item.label === 'Discover' && isDiscoverRoute) ||
               (item.label === 'Archived' && isArchivedRoute) ||
               (item.label === 'Saved' && isSavedRoute) ||
               (item.label === 'Calls' && isCallsRoute) ||

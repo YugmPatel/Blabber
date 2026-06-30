@@ -73,7 +73,9 @@ app.get('/readyz', async (_req: Request, res: Response) => {
 import { subscribe } from './routes/subscribe';
 import { unsubscribe } from './routes/unsubscribe';
 import { send } from './routes/send';
+import { listInbox, markInboxItemRead } from './routes/inbox';
 import { getPreferences, getVapidPublicKey, updatePreferences } from './routes/preferences';
+import { deregisterMobilePushDevice, getMobilePushStatus, registerMobilePushDevice, verifyMobilePushDevice } from './routes/mobile-push';
 app.get('/ops/push', (_req: Request, res: Response) => {
   const expected = process.env.OPS_DIAGNOSTIC_TOKEN;
   const provided = _req.get('x-ops-token');
@@ -85,8 +87,14 @@ app.get('/ops/push', (_req: Request, res: Response) => {
 app.post('/push/subscribe', subscribe);
 app.post('/push/unsubscribe', unsubscribe);
 app.get('/push/vapid-public-key', getVapidPublicKey);
+app.get('/', authMiddleware, listInbox);
+app.post('/:notificationId/read', authMiddleware, markInboxItemRead);
 app.get('/preferences/:userId', authMiddleware, getPreferences);
 app.patch('/preferences/:userId', authMiddleware, updatePreferences);
+app.get('/mobile-push/status', authMiddleware, getMobilePushStatus);
+app.post('/mobile-push/register', authMiddleware, registerMobilePushDevice);
+app.post('/mobile-push/verify', authMiddleware, verifyMobilePushDevice);
+app.post('/mobile-push/deregister', authMiddleware, deregisterMobilePushDevice);
 app.post('/send', send);
 
 // 404 handler

@@ -17,6 +17,7 @@ import {
   ProfileUpdatedEvent,
 } from '@repo/types';
 import { getUsersCollection, User } from '../models/user';
+import { getDatabase } from '../db';
 import { hasBlockBetween } from '../models/user-block';
 import {
   ProfileRelationship,
@@ -76,6 +77,7 @@ const UpdateProfileSchema = z.object({
     .optional()
     .transform((value) => (value ? value : undefined)),
   visibility: z.enum(['private', 'public']).optional(),
+  avatarMediaId: z.string().trim().optional(),
 });
 
 const UpdateHandleSchema = z.object({
@@ -176,6 +178,12 @@ function serializeFullProfile(user: User, relationship: string, counts: Awaited<
     counts,
     profileUpdatedAt: user.profileUpdatedAt || user.updatedAt,
     handleChangedAt: user.profileHandleChangedAt || null,
+    creatorDiscovery: {
+      enabled: Boolean(user.creatorDiscoveryEnabled),
+      topicIds: Array.isArray(user.creatorTopicIds) ? user.creatorTopicIds : [],
+      enabledAt: user.creatorDiscoveryEnabledAt || null,
+      updatedAt: user.creatorDiscoveryUpdatedAt || null,
+    },
   };
 }
 
@@ -255,6 +263,20 @@ async function ensureHandleAvailable(handle: string, currentUserId: ObjectId) {
   if (reservation) throw new ConflictError('That handle is not available.');
 }
 
+async function avatarUrlFromApprovedMedia(userId: ObjectId, mediaId?: string) {
+  if (!mediaId) return undefined;
+  if (!ObjectId.isValid(mediaId)) throw new ValidationError('Avatar image is unavailable.');
+  const media = await getDatabase().collection('media').findOne({
+    _id: new ObjectId(mediaId),
+    userId,
+    status: 'approved',
+  });
+  if (!media || typeof media.fileType !== 'string' || !media.fileType.startsWith('image/')) {
+    throw new ValidationError('Avatar image is unavailable.');
+  }
+  return `/api/media/local/${mediaId}`;
+}
+
 export const getMyProfile = asyncHandler(async (req: Request, res: Response) => {
   const user = await requireActiveUser(requireUserId(req));
   res.status(200).json({ profile: serializeFullProfile(user, 'self', await profileCounts(user._id)) });
@@ -269,9 +291,19 @@ export const updateMyProfile = asyncHandler(async (req: Request, res: Response) 
   if (parsed.bio !== undefined) update.profileBio = parsed.bio || undefined;
   if (parsed.website !== undefined) update.profileWebsite = validateWebsite(parsed.website);
   if (parsed.visibility !== undefined) update.profileVisibility = parsed.visibility;
+  const avatarUrl = await avatarUrlFromApprovedMedia(userId, parsed.avatarMediaId);
+  if (avatarUrl) {
+    update.avatarUrl = avatarUrl;
+    update.avatarSource = 'upload';
+  }
+  if (parsed.visibility === 'private') {
+    update.creatorDiscoveryEnabled = false;
+    update.creatorDiscoveryUpdatedAt = new Date();
+  }
   const unset: Record<string, ''> = {};
   if (parsed.bio === '') unset.profileBio = '';
   if (!parsed.website && 'website' in parsed) unset.profileWebsite = '';
+  if (parsed.visibility === 'private') unset.creatorDiscoveryEnabledAt = '';
   const result = await getUsersCollection().findOneAndUpdate(
     { _id: userId },
     { $set: update, ...(Object.keys(unset).length ? { $unset: unset } : {}) },

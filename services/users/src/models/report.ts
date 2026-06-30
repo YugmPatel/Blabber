@@ -1,7 +1,17 @@
 import { ObjectId } from 'mongodb';
 import { getDatabase } from '../db';
 
-export type ReportTargetType = 'user' | 'message' | 'group';
+export type ReportTargetType =
+  | 'user'
+  | 'message'
+  | 'group'
+  | 'post'
+  | 'post_comment'
+  | 'community'
+  | 'community_post'
+  | 'community_comment'
+  | 'reel'
+  | 'reel_comment';
 export type ReportStatus = 'open' | 'reviewing' | 'resolved' | 'dismissed';
 
 export interface TrustReport {
@@ -11,6 +21,13 @@ export interface TrustReport {
   targetUserId?: ObjectId;
   targetMessageId?: ObjectId;
   targetChatId?: ObjectId;
+  targetPostId?: ObjectId;
+  targetCommentId?: ObjectId;
+  targetCommunityId?: ObjectId;
+  targetCommunityPostId?: ObjectId;
+  targetCommunityCommentId?: ObjectId;
+  targetReelId?: ObjectId;
+  targetReelCommentId?: ObjectId;
   reason: string;
   details?: string;
   status: ReportStatus;

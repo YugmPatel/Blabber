@@ -73,6 +73,11 @@ test('01 health and readiness are available', async () => {
 });
 
 test('02 users start without public profile handles', async () => {
+  state.prefix = `reld_${Math.random().toString(36).slice(2, 8)}`;
+  state.ownerHandle = `${state.prefix}_owner`;
+  state.viewerHandle = `${state.prefix}_viewer`;
+  state.otherHandle = `${state.prefix}_other`;
+  state.blockedHandle = `${state.prefix}_blocked`;
   state.owner = await register('owner');
   state.viewer = await register('viewer');
   state.other = await register('other');
@@ -84,9 +89,9 @@ test('02 users start without public profile handles', async () => {
 
 test('03 handle validation rejects reserved and duplicate values', async () => {
   await api('PATCH', '/api/profiles/me/handle', { client: state.owner, body: { handle: 'admin' }, expected: 400 });
-  await setHandle(state.owner, 'reld_owner');
-  await setHandle(state.viewer, 'reld_viewer');
-  await api('PATCH', '/api/profiles/me/handle', { client: state.other, body: { handle: 'RELD_OWNER' }, expected: 409 });
+  await setHandle(state.owner, state.ownerHandle);
+  await setHandle(state.viewer, state.viewerHandle);
+  await api('PATCH', '/api/profiles/me/handle', { client: state.other, body: { handle: state.ownerHandle.toUpperCase() }, expected: 409 });
 });
 
 test('04 profile update stores safe public fields only', async () => {
@@ -103,53 +108,53 @@ test('04 profile update stores safe public fields only', async () => {
 });
 
 test('05 anonymous exact-handle profile access is denied', async () => {
-  await api('GET', '/api/profiles/reld_owner', { expected: 401 });
+  await api('GET', `/api/profiles/${state.ownerHandle}`, { expected: 401 });
 });
 
 test('06 private profile locks details for non-followers', async () => {
-  const response = await api('GET', '/api/profiles/reld_owner', { client: state.viewer });
+  const response = await api('GET', `/api/profiles/${state.ownerHandle}`, { client: state.viewer });
   assert.equal(response.data.profile.locked, true);
   assert.equal(response.data.profile.bio, undefined);
   assert.equal(response.data.profile.counts, undefined);
 });
 
 test('07 private follow request stays locked until owner approval', async () => {
-  const requested = await api('POST', '/api/profiles/reld_owner/follow', { client: state.viewer });
+  const requested = await api('POST', `/api/profiles/${state.ownerHandle}/follow`, { client: state.viewer });
   assert.equal(requested.data.profile.relationship, 'requested_outgoing');
   assert.equal(requested.data.profile.bio, undefined);
   const incoming = await api('GET', '/api/profiles/requests/incoming', { client: state.owner });
   assert.equal(incoming.data.requests.length, 1);
-  assert.equal(incoming.data.requests[0].requester.handle, 'reld_viewer');
-  await api('POST', '/api/profiles/requests/reld_viewer/approve', { client: state.owner });
-  const full = await api('GET', '/api/profiles/reld_owner', { client: state.viewer });
+  assert.equal(incoming.data.requests[0].requester.handle, state.viewerHandle);
+  await api('POST', `/api/profiles/requests/${state.viewerHandle}/approve`, { client: state.owner });
+  const full = await api('GET', `/api/profiles/${state.ownerHandle}`, { client: state.viewer });
   assert.equal(full.data.profile.relationship, 'following');
   assert.equal(full.data.profile.bio, 'release d profile bio');
 });
 
 test('08 public profile follows immediately and unfollows safely', async () => {
-  await setHandle(state.other, 'reld_other');
+  await setHandle(state.other, state.otherHandle);
   await updateProfile(state.other, { visibility: 'public', bio: 'public profile' });
-  const followed = await api('POST', '/api/profiles/reld_other/follow', { client: state.viewer });
+  const followed = await api('POST', `/api/profiles/${state.otherHandle}/follow`, { client: state.viewer });
   assert.equal(followed.data.profile.relationship, 'following');
-  const unfollowed = await api('DELETE', '/api/profiles/reld_other/follow', { client: state.viewer });
+  const unfollowed = await api('DELETE', `/api/profiles/${state.otherHandle}/follow`, { client: state.viewer });
   assert.equal(unfollowed.data.profile.relationship, 'none');
 });
 
 test('09 request cancellation and decline are idempotent-safe', async () => {
-  await api('POST', '/api/profiles/reld_viewer/follow', { client: state.other });
-  await api('POST', '/api/profiles/reld_viewer/cancel', { client: state.other });
-  await api('POST', '/api/profiles/reld_viewer/cancel', { client: state.other });
-  await api('POST', '/api/profiles/reld_owner/follow', { client: state.other });
-  await api('POST', '/api/profiles/requests/reld_other/decline', { client: state.owner });
-  const locked = await api('GET', '/api/profiles/reld_owner', { client: state.other });
+  await api('POST', `/api/profiles/${state.viewerHandle}/follow`, { client: state.other });
+  await api('POST', `/api/profiles/${state.viewerHandle}/cancel`, { client: state.other });
+  await api('POST', `/api/profiles/${state.viewerHandle}/cancel`, { client: state.other });
+  await api('POST', `/api/profiles/${state.ownerHandle}/follow`, { client: state.other });
+  await api('POST', `/api/profiles/requests/${state.otherHandle}/decline`, { client: state.owner });
+  const locked = await api('GET', `/api/profiles/${state.ownerHandle}`, { client: state.other });
   assert.equal(locked.data.profile.relationship, 'none');
 });
 
 test('10 block revokes follows and denies profile access', async () => {
-  await setHandle(state.blocked, 'reld_blocked');
-  await api('POST', '/api/profiles/reld_owner/follow', { client: state.blocked });
+  await setHandle(state.blocked, state.blockedHandle);
+  await api('POST', `/api/profiles/${state.ownerHandle}/follow`, { client: state.blocked });
   await api('POST', `/api/users/${state.blocked.user._id}/block`, { client: state.owner });
-  await api('GET', '/api/profiles/reld_owner', { client: state.blocked, expected: 404 });
+  await api('GET', `/api/profiles/${state.ownerHandle}`, { client: state.blocked, expected: 404 });
 });
 
 test('11 follow relationship does not grant Moment contact access', async () => {
@@ -163,7 +168,7 @@ test('11 follow relationship does not grant Moment contact access', async () => 
 });
 
 test('12 handle cooldown prevents immediate second change', async () => {
-  await api('PATCH', '/api/profiles/me/handle', { client: state.viewer, body: { handle: 'reld_viewer_next' }, expected: 429 });
+  await api('PATCH', '/api/profiles/me/handle', { client: state.viewer, body: { handle: `${state.prefix}_next` }, expected: 429 });
 });
 
 let passed = 0;

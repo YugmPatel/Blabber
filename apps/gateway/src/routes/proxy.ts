@@ -112,6 +112,25 @@ router.use(
 );
 
 router.use(
+  /^\/api\/profiles\/([^/]+)\/reels/,
+  createProxyMiddleware({
+    target: serviceUrls.media,
+    changeOrigin: true,
+    pathRewrite: (_path, req: any) => req.originalUrl.replace(/^\/api\//, '/').split('?')[0] + (req.url.includes('?') ? `?${req.url.split('?')[1]}` : ''),
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Profile Reels proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Reels service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
   '/api/profiles',
   createProxyMiddleware({
     target: serviceUrls.users,
@@ -127,6 +146,132 @@ router.use(
       console.error('Profiles service proxy error:', err);
       if (!res.headersSent) {
         res.status(502).json({ error: 'Profiles service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/reels',
+  createProxyMiddleware({
+    target: serviceUrls.media,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/reels': '/reels',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Reels service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Reels service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/feed',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/feed': '/feed',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Feed service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Feed service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/discovery',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/discovery': '/discovery',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Discovery service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Discovery service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/posts',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/posts': '/posts',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Posts service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Posts service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/communities',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/communities': '/communities',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Communities service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Communities service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/community-posts',
+  createProxyMiddleware({
+    target: serviceUrls.users,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/community-posts': '/community-posts',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Community posts service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Community posts service unavailable' });
       }
     },
   })

@@ -19,6 +19,32 @@ import { createMomentViewIndexes } from './models/moment-view';
 import { createMomentReactionIndexes } from './models/moment-reaction';
 import { createMomentNotificationCooldownIndexes } from './models/moment-notification-cooldown';
 import { createCloseFriendIndexes } from './models/close-friend';
+import { createPostIndexes } from './models/post';
+import { createPostReactionIndexes } from './models/post-reaction';
+import { createPostCommentIndexes } from './models/post-comment';
+import { createPostNotificationCooldownIndexes } from './models/post-notification-cooldown';
+import { createCommunityIndexes } from './models/community';
+import { createCommunityMembershipIndexes } from './models/community-membership';
+import { createCommunityJoinRequestIndexes } from './models/community-join-request';
+import { createCommunityBanIndexes } from './models/community-ban';
+import { createCommunityInviteIndexes } from './models/community-invite';
+import { createCommunityPostIndexes } from './models/community-post';
+import { createCommunityPostCommentIndexes } from './models/community-post-comment';
+import { createCommunityPostReactionIndexes } from './models/community-post-reaction';
+import {
+  cleanupExpiredCommunityHandleReservations,
+  createCommunityHandleReservationIndexes,
+} from './models/community-handle-reservation';
+import { createCommunityModerationActivityIndexes } from './models/community-moderation-activity';
+import { createDiscoveryPreferenceIndexes } from './models/discovery-preference';
+import { createDiscoveryFeedbackIndexes } from './models/discovery-feedback';
+import { createDiscoveryEventIndexes, cleanupExpiredDiscoveryEvents } from './models/discovery-event';
+import { createDiscoveryCandidateTokenIndexes } from './models/discovery-candidate-token';
+import { cleanupExpiredDiscoveryAffinities, createDiscoveryAffinityIndexes } from './models/discovery-affinity';
+import {
+  cleanupExpiredDiscoveryForYouSessions,
+  createDiscoveryForYouSessionIndexes,
+} from './models/discovery-for-you-session';
 import { startMomentExpiryProcessor } from './workers/moment-expiry-processor';
 
 const config = loadCommonConfig();
@@ -45,7 +71,31 @@ async function startServer() {
     await createMomentReactionIndexes();
     await createMomentNotificationCooldownIndexes();
     await createCloseFriendIndexes();
+    await createPostIndexes();
+    await createPostReactionIndexes();
+    await createPostCommentIndexes();
+    await createPostNotificationCooldownIndexes();
+    await createCommunityIndexes();
+    await createCommunityMembershipIndexes();
+    await createCommunityJoinRequestIndexes();
+    await createCommunityBanIndexes();
+    await createCommunityInviteIndexes();
+    await createCommunityPostIndexes();
+    await createCommunityPostCommentIndexes();
+    await createCommunityPostReactionIndexes();
+    await createCommunityHandleReservationIndexes();
+    await cleanupExpiredCommunityHandleReservations();
+    await createCommunityModerationActivityIndexes();
     await createUserSettingsIndexes();
+    await createDiscoveryPreferenceIndexes();
+    await createDiscoveryFeedbackIndexes();
+    await createDiscoveryEventIndexes();
+    await createDiscoveryCandidateTokenIndexes();
+    await createDiscoveryAffinityIndexes();
+    await createDiscoveryForYouSessionIndexes();
+    await cleanupExpiredDiscoveryEvents();
+    await cleanupExpiredDiscoveryAffinities();
+    await cleanupExpiredDiscoveryForYouSessions();
     logger.info('Database indexes created');
 
     const stopMomentExpiryProcessor = startMomentExpiryProcessor();

@@ -31,6 +31,8 @@ const updatePreferencesSchema = z
     eventReminderHourBeforeEnabled: z.boolean().optional(),
     momentUpdatesEnabled: z.boolean().optional(),
     momentActivityEnabled: z.boolean().optional(),
+    postActivityEnabled: z.boolean().optional(),
+    reelActivityEnabled: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'At least one preference is required',

@@ -300,6 +300,40 @@ export interface SocialProfile {
   };
   profileUpdatedAt?: string;
   handleChangedAt?: string | null;
+  creatorDiscovery?: {
+    enabled: boolean;
+    topicIds: string[];
+    enabledAt?: string | null;
+    updatedAt?: string | null;
+  };
+}
+
+export interface FeedPost {
+  id: string;
+  author: ProfileListItem & { id: string };
+  body: string;
+  visibility?: 'public' | 'followers';
+  media: Array<{ mediaId: string; type: 'image'; url: string }>;
+  commentCount: number;
+  reactionCounts: Record<string, number>;
+  myReaction: string | null;
+  createdAt: string;
+  updatedAt: string;
+  editedAt: string | null;
+  canEdit: boolean;
+  canDelete: boolean;
+  discovery?: {
+    discoverable: boolean;
+    topicIds: string[];
+    updatedAt?: string | null;
+  };
+}
+
+export interface FeedComment {
+  id: string;
+  author: ProfileListItem & { id: string };
+  body: string;
+  createdAt: string;
 }
 
 export interface ProfileListItem {
@@ -354,6 +388,75 @@ export async function fetchIncomingFollowRequests(): Promise<{ requests: Array<{
   return data;
 }
 
+export async function fetchFeed(cursor?: string | null): Promise<{ posts: FeedPost[]; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ posts: FeedPost[]; nextCursor: string | null }>('/api/feed', {
+    params: { cursor: cursor || undefined },
+  });
+  return data;
+}
+
+export async function fetchProfilePosts(handle: string, cursor?: string | null): Promise<{ posts: FeedPost[]; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ posts: FeedPost[]; nextCursor: string | null }>(
+    `/api/profiles/${encodeURIComponent(handle)}/posts`,
+    { params: { cursor: cursor || undefined } }
+  );
+  return data;
+}
+
+export async function createPost(payload: {
+  body?: string;
+  visibility: 'public' | 'followers';
+  mediaIds?: string[];
+}): Promise<FeedPost> {
+  const { data } = await apiClient.post<{ post: FeedPost }>('/api/posts', payload);
+  return data.post;
+}
+
+export async function deletePost(postId: string) {
+  await apiClient.delete(`/api/posts/${postId}`);
+}
+
+export async function updatePostDiscovery(postId: string, payload: { discoverable: boolean; discoveryTopicIds: string[] }): Promise<FeedPost> {
+  const { data } = await apiClient.patch<{ post: FeedPost }>(`/api/posts/${postId}/discovery`, payload);
+  return data.post;
+}
+
+export async function setPostReaction(postId: string, emoji: string): Promise<{ reactionCounts: Record<string, number>; myReaction: string }> {
+  const { data } = await apiClient.post<{ reactionCounts: Record<string, number>; myReaction: string }>(
+    `/api/posts/${postId}/reaction`,
+    { emoji }
+  );
+  return data;
+}
+
+export async function removePostReaction(postId: string): Promise<{ reactionCounts: Record<string, number>; myReaction: null }> {
+  const { data } = await apiClient.delete<{ reactionCounts: Record<string, number>; myReaction: null }>(
+    `/api/posts/${postId}/reaction`
+  );
+  return data;
+}
+
+export async function fetchPostComments(postId: string, cursor?: string | null): Promise<{ comments: FeedComment[]; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ comments: FeedComment[]; nextCursor: string | null }>(
+    `/api/posts/${postId}/comments`,
+    { params: { cursor: cursor || undefined } }
+  );
+  return data;
+}
+
+export async function createPostComment(postId: string, body: string): Promise<{ comment: FeedComment; commentCount: number }> {
+  const { data } = await apiClient.post<{ comment: FeedComment; commentCount: number }>(
+    `/api/posts/${postId}/comments`,
+    { body }
+  );
+  return data;
+}
+
+export async function deletePostComment(postId: string, commentId: string): Promise<{ commentCount: number }> {
+  const { data } = await apiClient.delete<{ commentCount: number }>(`/api/posts/${postId}/comments/${commentId}`);
+  return data;
+}
+
 export async function approveFollowRequest(handle: string) {
   await apiClient.post(`/api/profiles/requests/${encodeURIComponent(handle)}/approve`);
 }
@@ -368,15 +471,201 @@ export async function removeFollower(handle: string) {
 
 export interface TrustReport {
   id: string;
-  targetType: 'user' | 'message' | 'group';
+  targetType: 'user' | 'message' | 'group' | 'post' | 'post_comment' | 'community' | 'community_post' | 'community_comment';
   status: 'open' | 'reviewing' | 'resolved' | 'dismissed';
   reason: string;
   createdAt: string;
   updatedAt: string;
 }
 
+export interface CommunityUser {
+  id: string;
+  name: string;
+  handle: string | null;
+  avatarUrl: string | null;
+}
+
+export interface Community {
+  id: string;
+  name: string;
+  handle: string;
+  description: string;
+  avatarUrl: string | null;
+  membershipMode: 'open' | 'approval_required' | 'private';
+  postingPolicy?: 'everyone' | 'mods_admins' | 'admins_only';
+  memberCount: number;
+  membership: null | { role: 'owner' | 'admin' | 'moderator' | 'member'; postingRestricted: boolean; joinedAt: string };
+  joinRequest: null | { status: 'pending'; requestedAt: string };
+  canManage: boolean;
+  canModerate: boolean;
+  canPost: boolean;
+  discovery?: {
+    communityDiscoverable: boolean;
+    topicIds: string[];
+    updatedAt?: string | null;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommunityPost {
+  id: string;
+  communityId: string;
+  author: CommunityUser;
+  body: string;
+  media: Array<{ mediaId: string; type: 'image'; url: string }>;
+  commentCount: number;
+  reactionCounts: Record<string, number>;
+  myReaction: string | null;
+  canEdit: boolean;
+  canDelete: boolean;
+  createdAt: string;
+  updatedAt: string;
+  editedAt: string | null;
+}
+
+export interface CommunityComment {
+  id: string;
+  author: CommunityUser;
+  body: string;
+  canDelete: boolean;
+  createdAt: string;
+}
+
+export async function fetchCommunities(): Promise<{ communities: Community[]; pending: Community[] }> {
+  const { data } = await apiClient.get<{ communities: Community[]; pending: Community[] }>('/api/communities');
+  return data;
+}
+
+export async function createCommunity(payload: {
+  name: string;
+  handle: string;
+  description?: string;
+  membershipMode: 'open' | 'approval_required' | 'private';
+  postingPolicy: 'everyone' | 'mods_admins' | 'admins_only';
+  avatarMediaId?: string;
+}): Promise<Community> {
+  const { data } = await apiClient.post<{ community: Community }>('/api/communities', payload);
+  return data.community;
+}
+
+export async function fetchCommunity(handle: string): Promise<Community> {
+  const { data } = await apiClient.get<{ community: Community }>(`/api/communities/${encodeURIComponent(handle)}`);
+  return data.community;
+}
+
+export async function updateCommunity(handle: string, payload: Partial<Pick<Community, 'name' | 'description' | 'membershipMode' | 'postingPolicy'>>): Promise<Community> {
+  const { data } = await apiClient.patch<{ community: Community }>(`/api/communities/${encodeURIComponent(handle)}`, payload);
+  return data.community;
+}
+
+export async function updateCommunityDiscovery(handle: string, payload: { communityDiscoverable: boolean; communityTopicIds: string[] }) {
+  const { data } = await apiClient.patch<{ discovery: { communityDiscoverable: boolean; topics: DiscoveryTopic[] } }>(
+    `/api/communities/${encodeURIComponent(handle)}/discovery`,
+    payload
+  );
+  return data.discovery;
+}
+
+export async function joinCommunity(handle: string): Promise<Community> {
+  const { data } = await apiClient.post<{ community: Community }>(`/api/communities/${encodeURIComponent(handle)}/join`);
+  return data.community;
+}
+
+export async function requestCommunityJoin(handle: string): Promise<Community> {
+  const { data } = await apiClient.post<{ community: Community }>(`/api/communities/${encodeURIComponent(handle)}/request`);
+  return data.community;
+}
+
+export async function cancelCommunityJoinRequest(handle: string) {
+  await apiClient.delete(`/api/communities/${encodeURIComponent(handle)}/request`);
+}
+
+export async function fetchCommunityMembers(handle: string): Promise<{ members: Array<{ user: CommunityUser; role: string; postingRestricted: boolean; joinedAt: string }> }> {
+  const { data } = await apiClient.get<{ members: Array<{ user: CommunityUser; role: string; postingRestricted: boolean; joinedAt: string }> }>(
+    `/api/communities/${encodeURIComponent(handle)}/members`
+  );
+  return data;
+}
+
+export async function fetchCommunityRequests(handle: string): Promise<{ requests: Array<{ id: string; requester: CommunityUser; requestedAt: string }> }> {
+  const { data } = await apiClient.get<{ requests: Array<{ id: string; requester: CommunityUser; requestedAt: string }> }>(
+    `/api/communities/${encodeURIComponent(handle)}/requests`
+  );
+  return data;
+}
+
+export async function decideCommunityRequest(handle: string, requesterId: string, decision: 'approve' | 'decline') {
+  await apiClient.post(`/api/communities/${encodeURIComponent(handle)}/requests/${requesterId}/${decision}`);
+}
+
+export async function updateCommunityMemberRole(handle: string, memberUserId: string, role: 'admin' | 'moderator' | 'member') {
+  await apiClient.patch(`/api/communities/${encodeURIComponent(handle)}/members/${memberUserId}/role`, { role });
+}
+
+export async function updateCommunityMemberRestriction(handle: string, memberUserId: string, restricted: boolean) {
+  await apiClient.patch(`/api/communities/${encodeURIComponent(handle)}/members/${memberUserId}/restriction`, { restricted });
+}
+
+export async function removeCommunityMember(handle: string, memberUserId: string) {
+  await apiClient.delete(`/api/communities/${encodeURIComponent(handle)}/members/${memberUserId}`);
+}
+
+export async function createCommunityInvite(handle: string, payload: { expiresIn: 'never' | '1d' | '7d' | '30d'; maxUses: 'unlimited' | 10 | 50 | 100 }) {
+  const { data } = await apiClient.post<{ invite: unknown; token: string }>(`/api/communities/${encodeURIComponent(handle)}/invite`, payload);
+  return data;
+}
+
+export async function previewCommunityInvite(token: string): Promise<Community> {
+  const { data } = await apiClient.get<{ community: Community }>(`/api/communities/invite/${encodeURIComponent(token)}`);
+  return data.community;
+}
+
+export async function acceptCommunityInvite(token: string): Promise<Community> {
+  const { data } = await apiClient.post<{ community: Community }>(`/api/communities/invite/${encodeURIComponent(token)}/accept`);
+  return data.community;
+}
+
+export async function fetchCommunityPosts(handle: string): Promise<{ posts: CommunityPost[]; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ posts: CommunityPost[]; nextCursor: string | null }>(`/api/communities/${encodeURIComponent(handle)}/posts`);
+  return data;
+}
+
+export async function createCommunityPost(handle: string, payload: { body?: string; mediaIds?: string[] }): Promise<CommunityPost> {
+  const { data } = await apiClient.post<{ post: CommunityPost }>(`/api/communities/${encodeURIComponent(handle)}/posts`, payload);
+  return data.post;
+}
+
+export async function deleteCommunityPost(postId: string) {
+  await apiClient.delete(`/api/community-posts/${postId}`);
+}
+
+export async function setCommunityPostReaction(postId: string, emoji: string): Promise<{ reactionCounts: Record<string, number>; myReaction: string | null }> {
+  const { data } = await apiClient.post<{ reactionCounts: Record<string, number>; myReaction: string | null }>(`/api/community-posts/${postId}/reaction`, { emoji });
+  return data;
+}
+
+export async function removeCommunityPostReaction(postId: string): Promise<{ reactionCounts: Record<string, number>; myReaction: null }> {
+  const { data } = await apiClient.delete<{ reactionCounts: Record<string, number>; myReaction: null }>(`/api/community-posts/${postId}/reaction`);
+  return data;
+}
+
+export async function fetchCommunityPostComments(postId: string): Promise<{ comments: CommunityComment[] }> {
+  const { data } = await apiClient.get<{ comments: CommunityComment[] }>(`/api/community-posts/${postId}/comments`);
+  return data;
+}
+
+export async function createCommunityPostComment(postId: string, body: string): Promise<{ comment: CommunityComment }> {
+  const { data } = await apiClient.post<{ comment: CommunityComment }>(`/api/community-posts/${postId}/comments`, { body });
+  return data;
+}
+
+export async function deleteCommunityPostComment(postId: string, commentId: string) {
+  await apiClient.delete(`/api/community-posts/${postId}/comments/${commentId}`);
+}
+
 export async function createReport(payload: {
-  targetType: 'user' | 'message' | 'group';
+  targetType: 'user' | 'message' | 'group' | 'post' | 'post_comment';
   targetId: string;
   reason: string;
   details?: string;
@@ -387,6 +676,357 @@ export async function createReport(payload: {
 
 export async function fetchMyReports(): Promise<{ reports: TrustReport[] }> {
   const { data } = await apiClient.get<{ reports: TrustReport[] }>('/api/reports/mine');
+  return data;
+}
+
+export interface DiscoveryTopic {
+  id: string;
+  label: string;
+}
+
+export interface DiscoveryCreator {
+  name: string;
+  handle: string | null;
+  displayHandle: string | null;
+  avatarUrl: string | null;
+  topics: DiscoveryTopic[];
+  following: boolean;
+  candidateToken: string;
+}
+
+export interface DiscoveryPost {
+  id: string;
+  author: ProfileListItem & { id: string; topics: DiscoveryTopic[] };
+  body: string;
+  media: Array<{ type: 'image'; url: string }>;
+  topics: DiscoveryTopic[];
+  commentCount: number;
+  reactionCounts: Record<string, number>;
+  myReaction: string | null;
+  createdAt: string;
+  candidateToken: string;
+}
+
+export interface ForYouExplanation {
+  code: string;
+  text: string;
+  topicId: string | null;
+  topicLabel: string | null;
+  creatorHandle: string | null;
+}
+
+export interface ForYouPost extends DiscoveryPost {
+  explanation: ForYouExplanation;
+}
+
+export interface DiscoveryCommunity {
+  name: string;
+  handle: string;
+  description: string;
+  avatarUrl: string | null;
+  topics: DiscoveryTopic[];
+  memberCount: number;
+  membership: null | { role: string; joinedAt: string };
+  candidateToken: string;
+}
+
+export interface DiscoveryPreferences {
+  personalizedDiscoveryEnabled: boolean;
+  followedTopics: DiscoveryTopic[];
+  mutedTopics: DiscoveryTopic[];
+  mutedCreatorCount: number;
+  mutedCommunityCount: number;
+  hiddenPostCount: number;
+}
+
+export async function fetchDiscoveryTopics(): Promise<DiscoveryTopic[]> {
+  const { data } = await apiClient.get<{ topics: DiscoveryTopic[] }>('/api/discovery/topics');
+  return data.topics;
+}
+
+export async function fetchDiscoveryPreferences(): Promise<DiscoveryPreferences> {
+  const { data } = await apiClient.get<{ preferences: DiscoveryPreferences }>('/api/discovery/preferences');
+  return data.preferences;
+}
+
+export async function updateDiscoveryPreferences(payload: { personalizedDiscoveryEnabled: boolean }) {
+  const { data } = await apiClient.patch('/api/discovery/preferences', payload);
+  return data;
+}
+
+export async function updateCreatorDiscovery(payload: { creatorDiscoveryEnabled: boolean; creatorTopicIds: string[] }) {
+  const { data } = await apiClient.patch('/api/profiles/me/discovery', payload);
+  return data.discovery;
+}
+
+export async function fetchDiscoveryCreators(topic?: string) {
+  const { data } = await apiClient.get<{ creators: DiscoveryCreator[]; nextCursor: string | null }>('/api/discovery/creators', {
+    params: { topic: topic || undefined },
+  });
+  return data;
+}
+
+export async function fetchDiscoveryPosts(topic?: string) {
+  const { data } = await apiClient.get<{ posts: DiscoveryPost[]; nextCursor: string | null }>('/api/discovery/posts', {
+    params: { topic: topic || undefined },
+  });
+  return data;
+}
+
+export async function fetchDiscoveryCommunities(topic?: string) {
+  const { data } = await apiClient.get<{ communities: DiscoveryCommunity[]; nextCursor: string | null }>('/api/discovery/communities', {
+    params: { topic: topic || undefined },
+  });
+  return data;
+}
+
+export async function fetchForYou(cursor?: string | null) {
+  const { data } = await apiClient.get<{
+    posts: ForYouPost[];
+    nextCursor: string | null;
+    personalized: boolean;
+    rankingModelVersion: string;
+    message: string | null;
+  }>('/api/discovery/for-you', {
+    params: { cursor: cursor || undefined },
+  });
+  return data;
+}
+
+export async function refreshForYou() {
+  const { data } = await apiClient.post<{ cursor: string; rankingModelVersion: string }>('/api/discovery/for-you/refresh');
+  return data;
+}
+
+export async function fetchForYouExplanation(postId: string) {
+  const { data } = await apiClient.get<{ explanation: ForYouExplanation }>(`/api/discovery/for-you/explanations/${postId}`);
+  return data.explanation;
+}
+
+export async function followDiscoveryTopic(topicId: string) {
+  await apiClient.post(`/api/discovery/topics/${encodeURIComponent(topicId)}/follow`);
+}
+
+export async function unfollowDiscoveryTopic(topicId: string) {
+  await apiClient.delete(`/api/discovery/topics/${encodeURIComponent(topicId)}/follow`);
+}
+
+export async function muteDiscoveryTopic(topicId: string) {
+  await apiClient.post(`/api/discovery/topics/${encodeURIComponent(topicId)}/mute`);
+}
+
+export async function unmuteDiscoveryTopic(topicId: string) {
+  await apiClient.delete(`/api/discovery/topics/${encodeURIComponent(topicId)}/mute`);
+}
+
+export async function notInterestedDiscoveryPost(postId: string) {
+  await apiClient.post(`/api/discovery/posts/${postId}/not-interested`);
+}
+
+export async function muteDiscoveryCreator(handle: string) {
+  await apiClient.post(`/api/discovery/creators/${encodeURIComponent(handle)}/mute`);
+}
+
+export async function muteDiscoveryCommunity(handle: string) {
+  await apiClient.post(`/api/discovery/communities/${encodeURIComponent(handle)}/mute`);
+}
+
+export async function recordDiscoveryEvent(payload: { eventType: string; candidateToken: string; dwellBucket?: string }) {
+  const { data } = await apiClient.post<{ recorded: boolean }>('/api/discovery/events', payload);
+  return data;
+}
+
+export async function recordForYouEvent(payload: { eventType: string; candidateToken: string; dwellBucket?: string }) {
+  const { data } = await apiClient.post<{ recorded: boolean }>('/api/discovery/for-you/events', payload);
+  return data;
+}
+
+export async function clearDiscoveryPersonalization() {
+  const { data } = await apiClient.post<{
+    success: boolean;
+    deletedSignals: number;
+    deletedAffinities?: number;
+    deletedSessions?: number;
+    deletedCandidateTokens?: number;
+  }>('/api/discovery/personalization/clear');
+  return data;
+}
+
+export interface ReelItem {
+  id: string;
+  caption: string;
+  visibility: 'public' | 'followers';
+  topics: string[];
+  processingStatus?: string;
+  publishState: 'draft' | 'published' | 'deleted';
+  durationSeconds: number | null;
+  width: number | null;
+  height: number | null;
+  author?: { name: string; handle: string | null; displayHandle: string | null; avatarUrl?: string | null } | null;
+  reelDiscoverable?: boolean;
+  reelTopics?: DiscoveryTopic[];
+  reactionCounts?: Record<string, number>;
+  myReaction?: string | null;
+  commentCount?: number;
+  saved?: boolean;
+  eventToken?: string;
+  explanation?: { code: string; text: string; topicId?: string | null; topicLabel?: string | null; creatorHandle?: string | null };
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function initiateReelUpload(payload: { fileName: string; fileType: string; fileSize: number }) {
+  const { data } = await apiClient.post<{ reelId: string; uploadUrl: string; uploadMethod: 'PUT'; status: string }>('/api/reels/upload-init', payload);
+  return data;
+}
+
+export async function uploadReelSource(uploadUrl: string, file: File) {
+  const { data } = await apiClient.put<{ reelId: string; status: string }>(uploadUrl, file, {
+    headers: { 'Content-Type': file.type || 'video/mp4' },
+  });
+  return data;
+}
+
+export async function fetchReelStatus(reelId: string) {
+  const { data } = await apiClient.get<{ reel: ReelItem; message: string | null }>(`/api/reels/${reelId}/status`);
+  return data;
+}
+
+export async function publishReel(payload: { reelId: string; caption: string; visibility?: 'public' | 'followers'; topicIds?: string[] }) {
+  const { data } = await apiClient.post<{ reel: ReelItem }>('/api/reels', payload);
+  return data.reel;
+}
+
+export async function fetchReel(reelId: string) {
+  const { data } = await apiClient.get<{ reel: ReelItem }>(`/api/reels/${reelId}`);
+  return data.reel;
+}
+
+export async function fetchReelsBrowse(params: { cursor?: string | null; topic?: string | null } = {}) {
+  const { data } = await apiClient.get<{ reels: ReelItem[]; nextCursor: string | null }>('/api/reels/browse', {
+    params: { cursor: params.cursor || undefined, topic: params.topic || undefined },
+  });
+  return data;
+}
+
+export async function fetchReelsForYou(params: { cursor?: string | null } = {}) {
+  const { data } = await apiClient.get<{ reels: ReelItem[]; nextCursor: string | null; personalized: boolean; message: string | null }>('/api/reels/for-you', {
+    params: { cursor: params.cursor || undefined },
+  });
+  return data;
+}
+
+export async function refreshReelsForYou() {
+  const { data } = await apiClient.post<{ cursor: string }>('/api/reels/for-you/refresh');
+  return data;
+}
+
+export async function fetchReelsForYouExplanation(reelId: string) {
+  const { data } = await apiClient.get<{ explanation: NonNullable<ReelItem['explanation']> }>(`/api/reels/for-you/explanations/${reelId}`);
+  return data.explanation;
+}
+
+export async function updateReelDiscovery(reelId: string, payload: { reelDiscoverable: boolean; reelTopicIds: string[] }) {
+  const { data } = await apiClient.patch<{ reel: ReelItem }>(`/api/reels/${reelId}/discovery`, payload);
+  return data.reel;
+}
+
+export async function updateReel(reelId: string, payload: { caption: string }) {
+  const { data } = await apiClient.patch<{ reel: ReelItem }>(`/api/reels/${reelId}`, payload);
+  return data.reel;
+}
+
+export async function deleteReel(reelId: string) {
+  const { data } = await apiClient.delete<{ success: boolean }>(`/api/reels/${reelId}`);
+  return data;
+}
+
+export async function fetchProfileReels(handle: string) {
+  const { data } = await apiClient.get<{ reels: ReelItem[]; nextCursor: string | null; locked: boolean }>(`/api/profiles/${encodeURIComponent(handle)}/reels`);
+  return data;
+}
+
+export async function createReelPlaybackSession(reelId: string) {
+  const { data } = await apiClient.post<{ playback: { manifestUrl: string; fallbackUrl: string; posterUrl: string; expiresAt: string } }>(`/api/reels/${reelId}/playback-session`);
+  return data.playback;
+}
+
+export async function createReelEventToken(reelId: string) {
+  const { data } = await apiClient.post<{ eventToken: string; expiresInSeconds: number }>(`/api/reels/${reelId}/event-token`);
+  return data;
+}
+
+export async function recordReelEvent(reelId: string, payload: {
+  eventType: 'reel_open' | 'reel_watch_bucket' | 'reel_completion_bucket' | 'reel_quick_skip';
+  eventToken: string;
+  watchBucket?: string;
+  completionBucket?: string;
+  skipReason?: 'user_next_reel';
+}) {
+  const { data } = await apiClient.post<{ recorded: boolean }>(`/api/reels/${reelId}/events`, payload);
+  return data;
+}
+
+export async function setReelReaction(reelId: string, emoji: string) {
+  const { data } = await apiClient.post<{ myReaction: string | null; reactionCounts: Record<string, number> }>(`/api/reels/${reelId}/reaction`, { emoji });
+  return data;
+}
+
+export async function removeReelReaction(reelId: string) {
+  const { data } = await apiClient.delete<{ myReaction: null; reactionCounts: Record<string, number> }>(`/api/reels/${reelId}/reaction`);
+  return data;
+}
+
+export async function fetchReelComments(reelId: string, cursor?: string | null) {
+  const { data } = await apiClient.get<{ comments: Array<{ id: string; author: any; body: string; createdAt: string }>; nextCursor: string | null }>(`/api/reels/${reelId}/comments`, {
+    params: { cursor: cursor || undefined },
+  });
+  return data;
+}
+
+export async function createReelComment(reelId: string, body: string) {
+  const { data } = await apiClient.post<{ comment: { id: string; author: any; body: string; createdAt: string }; commentCount: number }>(`/api/reels/${reelId}/comments`, { body });
+  return data;
+}
+
+export async function deleteReelComment(reelId: string, commentId: string) {
+  const { data } = await apiClient.delete<{ success: boolean; commentCount: number }>(`/api/reels/${reelId}/comments/${commentId}`);
+  return data;
+}
+
+export async function saveReel(reelId: string) {
+  const { data } = await apiClient.post<{ saved: boolean }>(`/api/reels/${reelId}/save`);
+  return data;
+}
+
+export async function unsaveReel(reelId: string) {
+  const { data } = await apiClient.delete<{ saved: boolean }>(`/api/reels/${reelId}/save`);
+  return data;
+}
+
+export async function fetchSavedReels(cursor?: string | null) {
+  const { data } = await apiClient.get<{ reels: ReelItem[]; nextCursor: string | null }>('/api/reels/saved', {
+    params: { cursor: cursor || undefined },
+  });
+  return data;
+}
+
+export async function notInterestedReel(reelId: string) {
+  await apiClient.post(`/api/reels/${reelId}/not-interested`);
+}
+
+export async function muteReelCreator(reelId: string) {
+  await apiClient.post(`/api/reels/${reelId}/mute-creator`);
+}
+
+export async function reportReelComment(reelId: string, commentId: string, payload: { reason: string; details?: string }) {
+  const { data } = await apiClient.post(`/api/reels/${reelId}/comments/${commentId}/report`, payload);
+  return data;
+}
+
+export async function reportReel(reelId: string, payload: { reason: string; details?: string }) {
+  const { data } = await apiClient.post(`/api/reels/${reelId}/report`, payload);
   return data;
 }
 

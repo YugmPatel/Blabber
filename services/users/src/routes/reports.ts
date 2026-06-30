@@ -3,9 +3,11 @@ import { ObjectId } from 'mongodb';
 import { z } from 'zod';
 import { getDatabase } from '../db';
 import { getReportsCollection, ReportStatus, ReportTargetType, TrustReport } from '../models/report';
+import { loadReadablePost } from './posts';
+import { loadReadableCommunityPost } from './communities';
 
 const reportSchema = z.object({
-  targetType: z.enum(['user', 'message', 'group']),
+  targetType: z.enum(['user', 'message', 'group', 'post', 'post_comment', 'community', 'community_post', 'community_comment']),
   targetId: z.string().refine(ObjectId.isValid, 'Invalid target ID'),
   reason: z.string().trim().min(3).max(120),
   details: z.string().trim().max(1000).optional(),
@@ -49,6 +51,94 @@ async function buildEvidence(targetType: ReportTargetType, targetId: ObjectId, r
       adminCount: chat.admins?.length || 0,
       participantCount: chat.participants?.length || 0,
       chatCreatedAt: chat.createdAt,
+    };
+  }
+
+  if (targetType === 'post') {
+    const post = await loadReadablePost(targetId, reporterUserId);
+    if (!post) return null;
+    return {
+      targetPostId: targetId.toString(),
+      authorUserId: post.authorUserId.toString(),
+      visibility: post.visibility,
+      textSnapshot: (post.body || '').slice(0, 240),
+      mediaType: post.mediaIds.length ? 'image' : null,
+      mediaCount: post.mediaIds.length,
+      createdAt: post.createdAt,
+      availability: post.deletedAt ? 'deleted' : 'available',
+    };
+  }
+
+  if (targetType === 'post_comment') {
+    const comment = await db.collection('post_comments').findOne(
+      { _id: targetId, deletedAt: { $exists: false } },
+      { projection: { postId: 1, postAuthorUserId: 1, authorUserId: 1, body: 1, createdAt: 1 } }
+    );
+    if (!comment) return null;
+    const post = await loadReadablePost(comment.postId, reporterUserId);
+    if (!post) return null;
+    return {
+      targetCommentId: targetId.toString(),
+      targetPostId: comment.postId.toString(),
+      commentAuthorUserId: comment.authorUserId.toString(),
+      postAuthorUserId: comment.postAuthorUserId.toString(),
+      postVisibility: post.visibility,
+      textSnapshot: String(comment.body || '').slice(0, 240),
+      createdAt: comment.createdAt,
+      availability: 'available',
+    };
+  }
+
+  if (targetType === 'community') {
+    const membership = await db.collection('community_memberships').findOne({ communityId: targetId, userId: reporterUserId });
+    const community = membership
+      ? await db.collection('communities').findOne(
+          { _id: targetId, deletedAt: { $exists: false } },
+          { projection: { name: 1, handle: 1, membershipMode: 1, postingPolicy: 1, ownerUserId: 1, memberCount: 1, createdAt: 1 } }
+        )
+      : null;
+    if (!community) return null;
+    return {
+      targetCommunityId: targetId.toString(),
+      handle: community.handle,
+      membershipMode: community.membershipMode,
+      postingPolicy: community.postingPolicy,
+      ownerUserId: community.ownerUserId?.toString(),
+      memberCount: community.memberCount || 0,
+      createdAt: community.createdAt,
+    };
+  }
+
+  if (targetType === 'community_post') {
+    const post = await loadReadableCommunityPost(targetId, reporterUserId);
+    if (!post) return null;
+    return {
+      targetCommunityPostId: targetId.toString(),
+      targetCommunityId: post.communityId.toString(),
+      authorUserId: post.authorUserId.toString(),
+      textSnapshot: (post.body || '').slice(0, 240),
+      mediaCount: post.mediaIds.length,
+      createdAt: post.createdAt,
+      availability: post.deletedAt ? 'deleted' : 'available',
+    };
+  }
+
+  if (targetType === 'community_comment') {
+    const comment = await db.collection('community_post_comments').findOne(
+      { _id: targetId, deletedAt: { $exists: false } },
+      { projection: { communityId: 1, communityPostId: 1, authorUserId: 1, body: 1, createdAt: 1 } }
+    );
+    if (!comment) return null;
+    const post = await loadReadableCommunityPost(comment.communityPostId, reporterUserId);
+    if (!post) return null;
+    return {
+      targetCommunityCommentId: targetId.toString(),
+      targetCommunityPostId: comment.communityPostId.toString(),
+      targetCommunityId: comment.communityId.toString(),
+      commentAuthorUserId: comment.authorUserId.toString(),
+      textSnapshot: String(comment.body || '').slice(0, 240),
+      createdAt: comment.createdAt,
+      availability: 'available',
     };
   }
 
@@ -96,6 +186,13 @@ function serializeModerator(report: TrustReport) {
     targetUserId: report.targetUserId?.toString(),
     targetMessageId: report.targetMessageId?.toString(),
     targetChatId: report.targetChatId?.toString(),
+    targetPostId: report.targetPostId?.toString(),
+    targetCommentId: report.targetCommentId?.toString(),
+    targetCommunityId: report.targetCommunityId?.toString(),
+    targetCommunityPostId: report.targetCommunityPostId?.toString(),
+    targetCommunityCommentId: report.targetCommunityCommentId?.toString(),
+    targetReelId: report.targetReelId?.toString(),
+    targetReelCommentId: report.targetReelCommentId?.toString(),
     details: report.details,
     evidence: report.evidencePurgedAt ? { purged: true, purgedAt: report.evidencePurgedAt } : report.evidence,
     internalNote: report.internalNote,
@@ -143,6 +240,28 @@ export async function createReport(req: Request, res: Response, next: NextFuncti
       targetUserId: parsed.data.targetType === 'user' ? targetId : undefined,
       targetMessageId: parsed.data.targetType === 'message' ? targetId : undefined,
       targetChatId: parsed.data.targetType === 'group' ? targetId : undefined,
+      targetPostId:
+        parsed.data.targetType === 'post'
+          ? targetId
+          : parsed.data.targetType === 'post_comment'
+            ? (evidence as any).targetPostId
+              ? new ObjectId(String((evidence as any).targetPostId))
+              : undefined
+            : undefined,
+      targetCommentId: parsed.data.targetType === 'post_comment' ? targetId : undefined,
+      targetCommunityId:
+        parsed.data.targetType === 'community'
+          ? targetId
+          : (evidence as any).targetCommunityId
+            ? new ObjectId(String((evidence as any).targetCommunityId))
+            : undefined,
+      targetCommunityPostId:
+        parsed.data.targetType === 'community_post'
+          ? targetId
+          : (evidence as any).targetCommunityPostId
+            ? new ObjectId(String((evidence as any).targetCommunityPostId))
+            : undefined,
+      targetCommunityCommentId: parsed.data.targetType === 'community_comment' ? targetId : undefined,
       reason: parsed.data.reason,
       details: parsed.data.details,
       status: 'open',

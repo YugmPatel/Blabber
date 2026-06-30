@@ -1,0 +1,14 @@
+export const REEL_ERROR_MESSAGE = 'This video cannot be processed. Upload an MP4 video that is 3 to 90 seconds long.';
+export const REEL_UNAVAILABLE_MESSAGE = 'This Reel is unavailable.';
+export const REEL_CAPTION_LIMIT = 2000;
+export const REEL_MIN_DURATION_SECONDS = 3;
+export const REEL_MAX_DURATION_SECONDS = 90;
+export const REEL_MAX_SOURCE_BYTES = 100 * 1024 * 1024;
+export const REEL_MAX_DIMENSION = 1920;
+export const REEL_MAX_FRAME_RATE = 60;
+export const REEL_MAX_BITRATE = 20_000_000;
+export const REEL_PLAYBACK_SESSION_TTL_MS = 5 * 60 * 1000;
+export const REEL_EDIT_WINDOW_MS = 15 * 60 * 1000;
+export const REEL_PROCESSING_TIMEOUT_MS = Number(process.env.REEL_PROCESSING_TIMEOUT_MS || 120_000);
+export const REEL_PROCESSOR_INTERVAL_MS = Number(process.env.REEL_PROCESSOR_INTERVAL_MS || 2000);
+export const REEL_PROCESSOR_BATCH_SIZE = Number(process.env.REEL_PROCESSOR_BATCH_SIZE || 1);

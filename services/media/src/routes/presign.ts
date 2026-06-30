@@ -130,17 +130,27 @@ function publicResponse(mediaDoc: Media) {
   };
 }
 
-async function isMomentOnlyMedia(mediaId: ObjectId) {
+async function isPrivateSocialMedia(mediaId: ObjectId) {
   const db = getDatabase();
-  const moment = await db.collection('moments').findOne({ mediaId, archiveState: { $ne: 'deleted' } });
-  if (!moment) return false;
-  const [messageReference, avatarReference] = await Promise.all([
+  const [momentReference, postReference, communityReference, communityPostReference, reelReference, messageReference, avatarReference] = await Promise.all([
+    db.collection('moments').findOne({ mediaId, archiveState: { $ne: 'deleted' } }),
+    db.collection('posts').findOne({ mediaIds: mediaId, deletedAt: { $exists: false } }),
+    db.collection('communities').findOne({ avatarMediaId: mediaId, deletedAt: { $exists: false } }),
+    db.collection('community_posts').findOne({ mediaIds: mediaId, deletedAt: { $exists: false } }),
+    db.collection('reels').findOne({
+      $or: [
+        { sourceMediaId: mediaId },
+        { fallbackMediaId: mediaId },
+        { posterMediaId: mediaId },
+      ],
+      deletedAt: { $exists: false },
+    }),
     db.collection('messages').findOne({
       $or: [{ 'media.mediaId': mediaId.toString() }, { 'attachments.mediaId': mediaId.toString() }],
     }),
     db.collection('users').findOne({ avatarUrl: { $regex: mediaId.toString() } }),
   ]);
-  return !messageReference && !avatarReference;
+  return Boolean((momentReference || postReference || communityReference || communityPostReference || reelReference) && !messageReference && !avatarReference);
 }
 
 function hasMomentInternalAccess(req: Request) {
@@ -169,6 +179,7 @@ async function approveLocalBuffer(params: {
   } catch {
     return uploadValidationError(res);
   }
+  if (policy.category === 'video' && params.mediaDoc?.purpose !== 'reel_source') return uploadValidationError(res);
 
   if (buffer.length > maxBytesForCategory(policy.category)) return uploadValidationError(res);
 
@@ -318,6 +329,7 @@ export const presign = asyncHandler(async (req: Request, res: Response) => {
   if (declaredType && !allowedMimeTypes().includes(declaredType) && declaredType !== 'image/jpg') {
     return uploadValidationError(res);
   }
+  if (declaredType === 'video/mp4') return uploadValidationError(res);
 
   const extension = safeExtension(fileName);
   const mediaId = new ObjectId();
@@ -400,7 +412,7 @@ export const getLocalMedia = asyncHandler(async (req: Request, res: Response) =>
     return res.status(404).json({ error: 'Not Found', message: 'Media not found' });
   }
 
-  if (!hasMomentInternalAccess(req) && (await isMomentOnlyMedia(mediaDoc._id!))) {
+  if (!hasMomentInternalAccess(req) && (await isPrivateSocialMedia(mediaDoc._id!))) {
     return res.status(404).json({ error: 'Not Found', message: 'Media not found' });
   }
 

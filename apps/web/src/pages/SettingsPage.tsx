@@ -22,6 +22,7 @@ import {
   Download,
   LogOut,
   AlertTriangle,
+  Compass,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
@@ -41,6 +42,8 @@ import {
   fetchIncomingFollowRequests,
   fetchMyProfile,
   fetchMyReports,
+  fetchDiscoveryPreferences,
+  fetchDiscoveryTopics,
   getAccessToken,
   logoutOtherDeviceSessions,
   normalizeMediaUrl,
@@ -50,13 +53,17 @@ import {
   resendEmailVerification,
   revokeDeviceSession,
   unblockUser,
+  clearDiscoveryPersonalization,
+  updateCreatorDiscovery,
+  updateDiscoveryPreferences,
   updateProfileHandle,
   updateSocialProfile,
 } from '@/api/client';
+import type { DiscoveryTopic } from '@/api/client';
 
 // ── Section registry ────────────────────────────────────────────────────────
 
-type SectionKey = 'profile' | 'account' | 'privacy' | 'notifications' | 'appearance' | 'ai' | 'help';
+type SectionKey = 'profile' | 'account' | 'privacy' | 'notifications' | 'appearance' | 'ai' | 'discovery' | 'help';
 
 const SECTIONS: { key: SectionKey; label: string; icon: typeof User }[] = [
   { key: 'profile',       label: 'Profile',        icon: User       },
@@ -65,6 +72,7 @@ const SECTIONS: { key: SectionKey; label: string; icon: typeof User }[] = [
   { key: 'notifications', label: 'Notifications',   icon: Bell       },
   { key: 'appearance',    label: 'Appearance',      icon: Moon       },
   { key: 'ai',            label: 'AI privacy',      icon: Sparkles   },
+  { key: 'discovery',     label: 'Discovery',       icon: Compass    },
   { key: 'help',          label: 'Help',            icon: HelpCircle },
 ];
 
@@ -1312,6 +1320,7 @@ interface NotificationPreferences {
   eventReminderHourBeforeEnabled: boolean;
   momentUpdatesEnabled: boolean;
   momentActivityEnabled: boolean;
+  postActivityEnabled: boolean;
   updatedAt: string;
 }
 
@@ -1444,6 +1453,7 @@ function NotificationsSection() {
       | 'eventReminderHourBeforeEnabled'
       | 'momentUpdatesEnabled'
       | 'momentActivityEnabled'
+      | 'postActivityEnabled'
   ) => {
     if (!user?._id || !preferences) return;
     setErrorMessage('');
@@ -1459,7 +1469,8 @@ function NotificationsSection() {
           key === 'actionRemindersEnabled' ||
           key === 'eventRemindersEnabled' ||
           key === 'momentUpdatesEnabled' ||
-          key === 'momentActivityEnabled')
+          key === 'momentActivityEnabled' ||
+          key === 'postActivityEnabled')
       ) {
         await ensurePushSubscription(user._id);
         setBrowserPermission(getBrowserPermission());
@@ -1581,6 +1592,34 @@ function NotificationsSection() {
             {permissionLabel(browserPermission)}
           </span>
         </div>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Posts</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Choose how Blabber notifies you about post interactions.
+          </p>
+        </div>
+        {preferencesQuery.isLoading ? (
+          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading post notification settings...</p>
+        ) : preferencesQuery.isError || !preferences ? (
+          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
+            Unable to load post notification settings.
+          </p>
+        ) : (
+          <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+            <div>
+              <p className="text-[14px] font-medium text-slate-900 dark:text-white">Post activity</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Get notified when someone comments on or reacts to your posts.</p>
+            </div>
+            <Toggle
+              checked={preferences.postActivityEnabled}
+              onChange={updatePreferences.isPending ? noop : () => void togglePreference('postActivityEnabled')}
+              label="Post activity"
+            />
+          </div>
+        )}
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
@@ -1990,6 +2029,171 @@ function HelpSection() {
   );
 }
 
+function DiscoverySection() {
+  const queryClient = useQueryClient();
+  const profile = useQuery({ queryKey: ['my-profile'], queryFn: fetchMyProfile });
+  const topics = useQuery({ queryKey: ['discovery-topics'], queryFn: fetchDiscoveryTopics });
+  const prefs = useQuery({ queryKey: ['discovery-preferences'], queryFn: fetchDiscoveryPreferences });
+  const [creatorEnabled, setCreatorEnabled] = useState(false);
+  const [creatorTopicIds, setCreatorTopicIds] = useState<string[]>([]);
+  const [personalizedEnabled, setPersonalizedEnabled] = useState(true);
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    if (profile.data?.creatorDiscovery) {
+      setCreatorEnabled(profile.data.creatorDiscovery.enabled);
+      setCreatorTopicIds(profile.data.creatorDiscovery.topicIds || []);
+    }
+  }, [profile.data?.creatorDiscovery]);
+
+  useEffect(() => {
+    if (prefs.data) setPersonalizedEnabled(prefs.data.personalizedDiscoveryEnabled);
+  }, [prefs.data]);
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['my-profile'] });
+    queryClient.invalidateQueries({ queryKey: ['discovery-preferences'] });
+    queryClient.invalidateQueries({ queryKey: ['discovery'] });
+  };
+
+  const saveCreator = useMutation({
+    mutationFn: () => updateCreatorDiscovery({ creatorDiscoveryEnabled: creatorEnabled, creatorTopicIds }),
+    onSuccess: () => {
+      setNotice('Creator discovery settings saved.');
+      refresh();
+    },
+    onError: (error: any) => setNotice(error?.response?.data?.message || 'Complete your public profile details to enable Creator discovery.'),
+  });
+
+  const savePersonalization = useMutation({
+    mutationFn: () => updateDiscoveryPreferences({ personalizedDiscoveryEnabled: personalizedEnabled }),
+    onSuccess: () => {
+      setNotice('Discovery personalization settings saved.');
+      refresh();
+    },
+    onError: () => setNotice('Unable to save personalization settings.'),
+  });
+
+  const clearPersonalization = useMutation({
+    mutationFn: clearDiscoveryPersonalization,
+    onSuccess: () => {
+      setNotice('Personalized discovery activity cleared.');
+      refresh();
+    },
+    onError: () => setNotice('Unable to clear personalization data.'),
+  });
+
+  const toggleTopic = (topic: DiscoveryTopic) => {
+    setCreatorTopicIds((current) =>
+      current.includes(topic.id)
+        ? current.filter((id) => id !== topic.id)
+        : current.length >= 5
+          ? current
+          : [...current, topic.id]
+    );
+  };
+
+  const canEnable = profile.data?.visibility === 'public' && Boolean(profile.data?.handle) && creatorTopicIds.length > 0;
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Creator discovery</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Choose whether your public profile and selected public posts can appear in Discover.
+        </p>
+        <div className="mt-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+          <label className="flex items-center justify-between gap-4">
+            <span>
+              <span className="block text-sm font-medium text-slate-900 dark:text-white">Creator discovery</span>
+              <span className="block text-xs text-slate-500">Your Moments, chats, followers-only posts, and private Communities are not included in Discover.</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={creatorEnabled}
+              onChange={(event) => setCreatorEnabled(event.target.checked)}
+              className="h-5 w-5 accent-teal-600"
+              aria-label="Creator discovery"
+            />
+          </label>
+          <div className="mt-4">
+            <p className="mb-2 text-xs font-medium text-slate-500">Creator topics</p>
+            <div className="flex flex-wrap gap-2">
+              {(topics.data || []).map((topic) => (
+                <button
+                  key={topic.id}
+                  onClick={() => toggleTopic(topic)}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${creatorTopicIds.includes(topic.id) ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-200' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}
+                >
+                  {topic.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-900">
+            {!profile.data?.handle ? 'Choose a profile handle before enabling Creator discovery.' : profile.data?.visibility !== 'public' ? 'Make your profile public before enabling Creator discovery.' : creatorTopicIds.length === 0 ? 'Choose at least one topic for your creator profile.' : 'Your public profile and eligible public posts may appear in Discover.'}
+          </div>
+          <button
+            onClick={() => saveCreator.mutate()}
+            disabled={saveCreator.isPending || (creatorEnabled && !canEnable)}
+            className="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950"
+          >
+            {saveCreator.isPending ? 'Saving...' : 'Save creator discovery'}
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Discovery and personalization</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Control how Blabber uses your Discover activity to improve future recommendations.
+        </p>
+        <div className="mt-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+          <label className="flex items-center justify-between gap-4">
+            <span>
+              <span className="block text-sm font-medium text-slate-900 dark:text-white">Personalized discovery</span>
+              <span className="block text-xs text-slate-500">When enabled, your activity in Discover can help Blabber show more relevant content in future personalized feeds.</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={personalizedEnabled}
+              onChange={(event) => setPersonalizedEnabled(event.target.checked)}
+              className="h-5 w-5 accent-teal-600"
+              aria-label="Personalized discovery"
+            />
+          </label>
+          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+            <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">{prefs.data?.followedTopics.length || 0} followed topics</div>
+            <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">{prefs.data?.mutedTopics.length || 0} muted topics</div>
+            <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">{prefs.data?.hiddenPostCount || 0} hidden posts</div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              onClick={() => savePersonalization.mutate()}
+              disabled={savePersonalization.isPending}
+              className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950"
+            >
+              Save personalization
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('Clear the activity Blabber uses for personalized discovery? Your follows, posts, Communities, and messages will not be deleted.')) {
+                  clearPersonalization.mutate();
+                }
+              }}
+              disabled={clearPersonalization.isPending}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+            >
+              Clear personalization data
+            </button>
+          </div>
+        </div>
+      </section>
+      {notice && <p className="text-sm text-slate-500 dark:text-slate-400">{notice}</p>}
+    </div>
+  );
+}
+
 // ── Main SettingsPage ────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -2010,6 +2214,7 @@ export default function SettingsPage() {
     notifications: <NotificationsSection />,
     appearance:    <AppearanceSection />,
     ai:            <AISection />,
+    discovery:     <DiscoverySection />,
     help:          <HelpSection />,
   };
 

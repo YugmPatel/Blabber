@@ -10,14 +10,17 @@ import {
   deletePushSubscriptionById,
 } from '../models/push-subscription';
 import { getNotificationPreferences } from '../models/notification-preferences';
+import { recordNotificationInboxItem } from '../models/inbox';
 import { incrementPushCounter, pushOperationalStatus } from '../push-ops';
+import { getMobilePushDevicesCollection } from '../models/mobile-push-device';
+import { sendMobilePush } from '../mobile-push-provider';
 
 // Zod schema for send notification
 const sendNotificationSchema = z.object({
   userId: z.string().refine((val) => ObjectId.isValid(val), {
     message: 'Invalid userId format',
   }),
-  kind: z.enum(['message', 'mention', 'call', 'action_reminder', 'event_reminder', 'moment_update', 'moment_activity']).default('message'),
+  kind: z.enum(['message', 'mention', 'call', 'action_reminder', 'event_reminder', 'moment_update', 'moment_activity', 'post_activity', 'reel_activity']).default('message'),
   title: z.string().min(1),
   body: z.string().min(1),
   data: z.record(z.any()).optional(),
@@ -78,6 +81,10 @@ export async function send(req: Request, res: Response) {
           ? preferences.momentUpdatesEnabled
         : kind === 'moment_activity'
           ? preferences.momentActivityEnabled
+        : kind === 'post_activity'
+          ? preferences.postActivityEnabled
+        : kind === 'reel_activity'
+          ? preferences.reelActivityEnabled
         : preferences.messageNotificationsEnabled;
 
     if (!enabled) {
@@ -90,13 +97,26 @@ export async function send(req: Request, res: Response) {
       });
     }
 
+    const inboxBody =
+      (kind === 'message' || kind === 'mention' || kind === 'post_activity') && !preferences.notificationPreviewsEnabled && typeof data?.noPreviewBody === 'string'
+        ? data.noPreviewBody
+        : body;
+    const inboxItem = await recordNotificationInboxItem({ userId: userObjectId, kind, title, body: inboxBody, data });
+
     // Find all push subscriptions for the user
-    const subscriptions = await findPushSubscriptionsByUserId(userObjectId);
+    const [subscriptions, mobileDevices] = await Promise.all([
+      findPushSubscriptionsByUserId(userObjectId),
+      getMobilePushDevicesCollection().find({
+        userId: userObjectId,
+        verifiedAt: { $exists: true },
+        disabledAt: { $exists: false },
+      }).limit(10).toArray(),
+    ]);
     const uniqueSubscriptions = Array.from(
       new Map(subscriptions.map((subscription) => [subscription.endpoint, subscription])).values()
     );
 
-    if (uniqueSubscriptions.length === 0) {
+    if (uniqueSubscriptions.length === 0 && mobileDevices.length === 0) {
       incrementPushCounter('skipped');
       logger.info({ userId }, 'No push subscriptions found for user');
       return res.status(200).json({
@@ -108,31 +128,28 @@ export async function send(req: Request, res: Response) {
 
     // Configure VAPID only when there is something to deliver.
     const pushStatus = pushOperationalStatus();
-    if (!pushStatus.enabled) {
-      incrementPushCounter('skipped', uniqueSubscriptions.length);
+    const mobileFakeMode = process.env.MOBILE_PUSH_PROVIDER_MODE === 'fake';
+    if (!pushStatus.enabled && (!mobileFakeMode || mobileDevices.length === 0)) {
+      incrementPushCounter('skipped', uniqueSubscriptions.length + mobileDevices.length);
       return res.status(200).json({ success: true, message: 'Push notifications disabled', sent: 0 });
     }
     if (pushStatus.mockMode) {
-      incrementPushCounter('attempted', uniqueSubscriptions.length);
-      incrementPushCounter('delivered', uniqueSubscriptions.length);
-      return res.status(200).json({ success: true, sent: uniqueSubscriptions.length, failed: 0, total: uniqueSubscriptions.length, mode: 'mock' });
+      const total = uniqueSubscriptions.length + mobileDevices.length;
+      incrementPushCounter('attempted', total);
+      incrementPushCounter('delivered', total);
+      return res.status(200).json({ success: true, sent: total, failed: 0, total, mode: 'mock' });
     }
-    configureVAPID();
+    if (uniqueSubscriptions.length) configureVAPID();
 
     // Prepare notification payload
-    const notificationBody =
-      (kind === 'message' || kind === 'mention') && !preferences.notificationPreviewsEnabled && typeof data?.noPreviewBody === 'string'
-        ? data.noPreviewBody
-        : body;
-
     const payload = JSON.stringify({
       title,
-      body: notificationBody,
+      body: inboxBody,
       data: data || {},
     });
 
     // Send notifications to all subscriptions with retry logic
-    const results = await Promise.allSettled(
+    const webResults = await Promise.allSettled(
       uniqueSubscriptions.map(async (subscription) => {
         const pushSubscription = {
           endpoint: subscription.endpoint,
@@ -180,15 +197,50 @@ export async function send(req: Request, res: Response) {
         }
       })
     );
+    const mobilePayload = {
+      schema: 'blabber.mobile_push.v1' as const,
+      kind,
+      notificationRef: inboxItem._id.toString(),
+    };
+    const mobileResults = await Promise.allSettled(
+      mobileDevices.map(async (device) => {
+        incrementPushCounter('attempted');
+        const result = await sendMobilePush(device, mobilePayload);
+        const now = new Date();
+        if (result === 'delivered') {
+          incrementPushCounter('delivered');
+          await getMobilePushDevicesCollection().updateOne(
+            { _id: device._id },
+            { $set: { lastSeenAt: now, updatedAt: now }, $unset: { lastFailureAt: '', lastFailureReason: '' } } as any
+          );
+          return { success: true, deviceId: device._id };
+        }
+        if (result === 'invalid_token') {
+          incrementPushCounter('expired');
+          await getMobilePushDevicesCollection().updateOne(
+            { _id: device._id },
+            { $set: { disabledAt: now, lastFailureAt: now, lastFailureReason: 'invalid_token', updatedAt: now }, $inc: { failureCount: 1 } } as any
+          );
+          throw new Error('invalid_mobile_push_token');
+        }
+        incrementPushCounter('failed');
+        await getMobilePushDevicesCollection().updateOne(
+          { _id: device._id },
+          { $set: { lastFailureAt: now, lastFailureReason: 'temporary_failure', updatedAt: now }, $inc: { failureCount: 1 } } as any
+        );
+        throw new Error('temporary_mobile_push_failure');
+      })
+    );
 
     // Count successful sends
+    const results = [...webResults, ...mobileResults];
     const successCount = results.filter((r) => r.status === 'fulfilled').length;
     const failureCount = results.filter((r) => r.status === 'rejected').length;
 
     logger.info(
       {
         userId,
-        total: uniqueSubscriptions.length,
+        total: uniqueSubscriptions.length + mobileDevices.length,
         success: successCount,
         failed: failureCount,
       },
@@ -199,7 +251,7 @@ export async function send(req: Request, res: Response) {
       success: true,
       sent: successCount,
       failed: failureCount,
-      total: uniqueSubscriptions.length,
+      total: uniqueSubscriptions.length + mobileDevices.length,
     });
   } catch (error: any) {
     logger.error({ error: error.message }, 'Failed to send push notifications');

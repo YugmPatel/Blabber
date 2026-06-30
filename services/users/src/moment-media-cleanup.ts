@@ -9,19 +9,22 @@ function isLocalMediaPath(path: string) {
 
 export async function safelyDeleteMomentMedia(mediaId: ObjectId, excludingMomentId?: ObjectId) {
   const db = getDatabase();
-  const [otherMoment, messageReference, avatarReference] = await Promise.all([
+  const [otherMoment, postReference, communityReference, communityPostReference, messageReference, avatarReference] = await Promise.all([
     db.collection('moments').findOne({
       mediaId,
       archiveState: { $ne: 'deleted' },
       ...(excludingMomentId ? { _id: { $ne: excludingMomentId } } : {}),
     }),
+    db.collection('posts').findOne({ mediaIds: mediaId, deletedAt: { $exists: false } }),
+    db.collection('communities').findOne({ avatarMediaId: mediaId, deletedAt: { $exists: false } }),
+    db.collection('community_posts').findOne({ mediaIds: mediaId, deletedAt: { $exists: false } }),
     db.collection('messages').findOne({
       $or: [{ 'media.mediaId': mediaId.toString() }, { 'attachments.mediaId': mediaId.toString() }],
     }),
     db.collection('users').findOne({ avatarUrl: { $regex: mediaId.toString() } }),
   ]);
 
-  if (otherMoment || messageReference || avatarReference) return { deleted: false };
+  if (otherMoment || postReference || communityReference || communityPostReference || messageReference || avatarReference) return { deleted: false };
 
   const media = await db.collection('media').findOne({ _id: mediaId });
   if (!media) return { deleted: false };

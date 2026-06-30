@@ -18,6 +18,8 @@ export interface NotificationPreferences {
   eventReminderHourBeforeEnabled: boolean;
   momentUpdatesEnabled: boolean;
   momentActivityEnabled: boolean;
+  postActivityEnabled: boolean;
+  reelActivityEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +41,8 @@ export type NotificationPreferencePatch = Partial<
     | 'eventReminderHourBeforeEnabled'
     | 'momentUpdatesEnabled'
     | 'momentActivityEnabled'
+    | 'postActivityEnabled'
+    | 'reelActivityEnabled'
   >
 >;
 
@@ -57,6 +61,8 @@ const DEFAULT_PREFERENCES = {
   eventReminderHourBeforeEnabled: true,
   momentUpdatesEnabled: false,
   momentActivityEnabled: true,
+  postActivityEnabled: true,
+  reelActivityEnabled: true,
 };
 
 export async function createNotificationPreferenceIndexes() {
@@ -139,6 +145,10 @@ export function serializeNotificationPreferences(preferences: NotificationPrefer
       preferences.momentUpdatesEnabled ?? DEFAULT_PREFERENCES.momentUpdatesEnabled,
     momentActivityEnabled:
       preferences.momentActivityEnabled ?? DEFAULT_PREFERENCES.momentActivityEnabled,
+    postActivityEnabled:
+      preferences.postActivityEnabled ?? DEFAULT_PREFERENCES.postActivityEnabled,
+    reelActivityEnabled:
+      preferences.reelActivityEnabled ?? DEFAULT_PREFERENCES.reelActivityEnabled,
     updatedAt: preferences.updatedAt,
   };
 }

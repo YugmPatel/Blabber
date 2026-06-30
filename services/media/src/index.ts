@@ -3,6 +3,7 @@ import { logger } from '@repo/utils';
 import app from './app';
 import { connectToDatabase, closeDatabase } from './db';
 import { connectToRedis, closeRedis } from './redis';
+import { startReelVideoProcessor } from './reel-processing';
 
 const config = loadCommonConfig();
 
@@ -16,9 +17,19 @@ async function startServer() {
 
     // Create indexes
     const { createMediaIndexes } = await import('./models/media');
+    const { createReelIndexes } = await import('./models/reel');
+    const { createReelPlaybackSessionIndexes } = await import('./models/reel-playback-session');
+    const { createReelInteractionIndexes } = await import('./models/reel-interaction');
+    const { createReelForYouSessionIndexes } = await import('./models/reel-for-you-session');
     await createMediaIndexes();
+    await createReelIndexes();
+    await createReelPlaybackSessionIndexes();
+    await createReelInteractionIndexes();
+    await createReelForYouSessionIndexes();
 
     logger.info('Database and Redis connections established');
+
+    const stopReelVideoProcessor = startReelVideoProcessor();
 
     // Start Express server
     const server = app.listen(config.PORT, () => {
@@ -34,6 +45,7 @@ async function startServer() {
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       logger.info({ signal }, 'Received shutdown signal');
+      stopReelVideoProcessor();
 
       server.close(async () => {
         logger.info('HTTP server closed');

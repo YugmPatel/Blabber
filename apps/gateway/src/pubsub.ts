@@ -17,6 +17,9 @@ import {
   ProfileUpdatedEvent,
   FollowUpdatedEvent,
   FollowRequestUpdatedEvent,
+  PostEvent,
+  ReelEvent,
+  CommunityEvent,
   ChatCreatedEvent,
   ChatUpdatedEvent,
   ChatMemberAddedEvent,
@@ -322,6 +325,48 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
       io.to(`user:${userId}`).emit('follow:request-updated', {});
     });
   });
+
+  const emitPostEvent = (eventName: string, event: AppEvent) => {
+    const e = event as PostEvent;
+    io.to(`user:${e.data.authorUserId}`).emit(eventName, {
+      postId: e.data.postId,
+      authorUserId: e.data.authorUserId,
+    });
+  };
+
+  pubsub.on(EventType.POST_CREATED, (event: AppEvent) => emitPostEvent('feed:updated', event));
+  pubsub.on(EventType.POST_UPDATED, (event: AppEvent) => emitPostEvent('post:updated', event));
+  pubsub.on(EventType.POST_DELETED, (event: AppEvent) => emitPostEvent('post:deleted', event));
+  pubsub.on(EventType.POST_INTERACTION_UPDATED, (event: AppEvent) => emitPostEvent('post:interaction-updated', event));
+  pubsub.on(EventType.POST_COMMENTS_UPDATED, (event: AppEvent) => emitPostEvent('post:comments-updated', event));
+
+  const emitReelEvent = (eventName: string, event: AppEvent) => {
+    const e = event as ReelEvent;
+    Array.from(new Set([e.data.authorUserId, ...(e.data.userIds || [])].filter(Boolean))).forEach((userId) => {
+      io.to(`user:${userId}`).emit(eventName, { reelId: e.data.reelId });
+    });
+  };
+
+  pubsub.on(EventType.REEL_INTERACTION_UPDATED, (event: AppEvent) => emitReelEvent('reel:interaction-updated', event));
+  pubsub.on(EventType.REEL_COMMENTS_UPDATED, (event: AppEvent) => emitReelEvent('reel:comments-updated', event));
+  pubsub.on(EventType.REEL_DISCOVERABILITY_UPDATED, (event: AppEvent) => emitReelEvent('reel:discoverability-updated', event));
+
+  const emitCommunityEvent = (eventName: string, event: AppEvent) => {
+    const e = event as CommunityEvent;
+    Array.from(new Set(e.data.userIds || [])).forEach((userId) => {
+      io.to(`user:${userId}`).emit(eventName, {
+        communityId: e.data.communityId,
+        postId: e.data.postId,
+      });
+    });
+  };
+
+  pubsub.on(EventType.COMMUNITY_UPDATED, (event: AppEvent) => emitCommunityEvent('community:updated', event));
+  pubsub.on(EventType.COMMUNITY_MEMBERSHIP_UPDATED, (event: AppEvent) => emitCommunityEvent('community:membership-updated', event));
+  pubsub.on(EventType.COMMUNITY_JOIN_REQUEST_UPDATED, (event: AppEvent) => emitCommunityEvent('community:join-request-updated', event));
+  pubsub.on(EventType.COMMUNITY_MODERATION_UPDATED, (event: AppEvent) => emitCommunityEvent('community:moderation-updated', event));
+  pubsub.on(EventType.COMMUNITY_POSTS_UPDATED, (event: AppEvent) => emitCommunityEvent('community:posts-updated', event));
+  pubsub.on(EventType.COMMUNITY_POST_INTERACTION_UPDATED, (event: AppEvent) => emitCommunityEvent('community:post-interaction-updated', event));
 
   // Chat events
   pubsub.on(EventType.CHAT_CREATED, (event: AppEvent) => {

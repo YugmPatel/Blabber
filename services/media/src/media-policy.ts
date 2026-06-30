@@ -1,6 +1,6 @@
 import { basename, extname } from 'path';
 
-export type MediaCategory = 'image' | 'audio' | 'document';
+export type MediaCategory = 'image' | 'audio' | 'document' | 'video';
 
 export interface MediaPolicyResult {
   category: MediaCategory;
@@ -21,10 +21,14 @@ const AUDIO_TYPES: Record<string, string[]> = {
   'audio/ogg': ['.ogg'],
   'audio/wav': ['.wav'],
   'audio/webm': ['.webm'],
-  'audio/mp4': ['.m4a', '.mp4'],
+  'audio/mp4': ['.m4a'],
   'audio/x-m4a': ['.m4a'],
   'audio/m4a': ['.m4a'],
   'audio/aac': ['.aac'],
+};
+
+const VIDEO_TYPES: Record<string, string[]> = {
+  'video/mp4': ['.mp4'],
 };
 
 const DOCUMENT_TYPES: Record<string, string[]> = {
@@ -40,7 +44,7 @@ const DOCUMENT_TYPES: Record<string, string[]> = {
 };
 
 const EXTENSION_TO_MIME = new Map<string, string>();
-for (const [mime, extensions] of Object.entries({ ...IMAGE_TYPES, ...AUDIO_TYPES, ...DOCUMENT_TYPES })) {
+for (const [mime, extensions] of Object.entries({ ...IMAGE_TYPES, ...AUDIO_TYPES, ...DOCUMENT_TYPES, ...VIDEO_TYPES })) {
   for (const extension of extensions) EXTENSION_TO_MIME.set(extension, mime);
 }
 
@@ -73,7 +77,7 @@ export function detectMimeType(buffer: Buffer): string | null {
   if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WAVE') return 'audio/wav';
   if (buffer.length >= 4 && buffer.toString('ascii', 0, 4) === 'OggS') return 'audio/ogg';
   if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) return 'audio/webm';
-  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') return 'audio/mp4';
+  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') return 'video/mp4';
   if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0]))) return 'application/msword';
   if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) return 'application/zip';
   if (isMostlyText(buffer)) return 'text/plain';
@@ -117,8 +121,9 @@ export function validateMediaPolicy(params: {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation'].includes(expectedByExtension);
   const isCsv = extension === '.csv' && detected === 'text/plain';
+  const isMp4Family = detected === 'video/mp4' && ['audio/mp4', 'audio/x-m4a', 'audio/m4a'].includes(expectedByExtension);
 
-  if (!detected || (!isOoxml && !isCsv && detected !== expectedByExtension)) {
+  if (!detected || (!isOoxml && !isCsv && !isMp4Family && detected !== expectedByExtension)) {
     throw new Error('mime_mismatch');
   }
   if (declared && declared !== expectedByExtension && !(declared === 'image/jpg' && expectedByExtension === 'image/jpeg')) {
@@ -126,16 +131,23 @@ export function validateMediaPolicy(params: {
   }
 
   const category: MediaCategory =
-    expectedByExtension in IMAGE_TYPES ? 'image' : expectedByExtension in AUDIO_TYPES ? 'audio' : 'document';
+    expectedByExtension in IMAGE_TYPES
+      ? 'image'
+      : expectedByExtension in VIDEO_TYPES
+        ? 'video'
+        : expectedByExtension in AUDIO_TYPES
+          ? 'audio'
+          : 'document';
   return { category, mimeType: expectedByExtension, extension };
 }
 
 export function maxBytesForCategory(category: MediaCategory) {
   if (category === 'image') return Number(process.env.MEDIA_MAX_IMAGE_BYTES || 10 * 1024 * 1024);
+  if (category === 'video') return Number(process.env.REEL_MAX_SOURCE_BYTES || 100 * 1024 * 1024);
   if (category === 'audio') return Number(process.env.MEDIA_MAX_AUDIO_BYTES || 25 * 1024 * 1024);
   return Number(process.env.MEDIA_MAX_DOCUMENT_BYTES || 25 * 1024 * 1024);
 }
 
 export function allowedMimeTypes() {
-  return Object.keys({ ...IMAGE_TYPES, ...AUDIO_TYPES, ...DOCUMENT_TYPES });
+  return Object.keys({ ...IMAGE_TYPES, ...AUDIO_TYPES, ...DOCUMENT_TYPES, ...VIDEO_TYPES });
 }

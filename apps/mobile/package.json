@@ -1,0 +1,38 @@
+{
+  "name": "@apps/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "typecheck": "tsc --noEmit",
+    "lint": "node tests/mobile-lint.mjs",
+    "test": "node tests/mobile-unit.mjs",
+    "config-check": "node tests/mobile-config-check.mjs",
+    "export:android": "expo export --platform android --output-dir dist/android",
+    "export:ios": "expo export --platform ios --output-dir dist/ios",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm config-check && pnpm export:android && pnpm export:ios"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "15.1.1",
+    "@repo/types": "workspace:*",
+    "expo": "56.0.12",
+    "expo-file-system": "56.0.8",
+    "expo-image-picker": "56.0.18",
+    "expo-linking": "56.0.14",
+    "expo-notifications": "~56.0.18",
+    "expo-router": "56.2.11",
+    "expo-secure-store": "56.0.4",
+    "expo-video": "56.1.4",
+    "react": "19.2.7",
+    "react-native": "0.86.0",
+    "react-native-safe-area-context": "5.8.0",
+    "react-native-screens": "4.25.2",
+    "socket.io-client": "4.8.3"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "babel-preset-expo": "56.0.15",
+    "typescript": "6.0.3"
+  }
+}

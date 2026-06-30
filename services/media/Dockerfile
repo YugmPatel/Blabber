@@ -46,6 +46,8 @@ RUN pnpm --filter @services/media build
 # Stage 3: Production - Create minimal runtime image
 FROM node:20.11.0-alpine AS production
 
+RUN apk add --no-cache ffmpeg
+
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 

@@ -96,8 +96,11 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       ACCOUNT_MAIL_CAPTURE: 'true'
       ACCOUNT_WORKER_HTTP_ENABLED: 'true'
+      LOCAL_MEDIA_DIR: /data/blabber-media
     ports:
       - '3001:3001'
+    volumes:
+      - local_media_files:/data/blabber-media
     depends_on:
       mongodb:
         condition: service_healthy
@@ -252,6 +255,7 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
       PUSH_NOTIFICATIONS_ENABLED: ${PUSH_NOTIFICATIONS_ENABLED:-false}
+      MOBILE_PUSH_PROVIDER_MODE: ${MOBILE_PUSH_PROVIDER_MODE:-fake}
       OPS_DIAGNOSTIC_TOKEN: blabber-local-ops-diagnostic-token
     ports:
       - '3006:3006'

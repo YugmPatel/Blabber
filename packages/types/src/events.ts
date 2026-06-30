@@ -16,6 +16,26 @@ export enum EventType {
   FOLLOW_UPDATED = 'follow:updated',
   FOLLOW_REQUEST_UPDATED = 'follow:request-updated',
 
+  // Post events
+  POST_CREATED = 'post:created',
+  POST_UPDATED = 'post:updated',
+  POST_DELETED = 'post:deleted',
+  POST_INTERACTION_UPDATED = 'post:interaction-updated',
+  POST_COMMENTS_UPDATED = 'post:comments-updated',
+
+  // Reel events
+  REEL_INTERACTION_UPDATED = 'reel:interaction-updated',
+  REEL_COMMENTS_UPDATED = 'reel:comments-updated',
+  REEL_DISCOVERABILITY_UPDATED = 'reel:discoverability-updated',
+
+  // Community events
+  COMMUNITY_UPDATED = 'community:updated',
+  COMMUNITY_MEMBERSHIP_UPDATED = 'community:membership-updated',
+  COMMUNITY_JOIN_REQUEST_UPDATED = 'community:join-request-updated',
+  COMMUNITY_MODERATION_UPDATED = 'community:moderation-updated',
+  COMMUNITY_POSTS_UPDATED = 'community:posts-updated',
+  COMMUNITY_POST_INTERACTION_UPDATED = 'community:post-interaction-updated',
+
   // Chat events
   CHAT_CREATED = 'chat:created',
   CHAT_UPDATED = 'chat:updated',
@@ -159,6 +179,46 @@ export interface FollowRequestUpdatedEvent extends BaseEvent {
   };
 }
 
+export interface PostEvent extends BaseEvent {
+  type:
+    | EventType.POST_CREATED
+    | EventType.POST_UPDATED
+    | EventType.POST_DELETED
+    | EventType.POST_INTERACTION_UPDATED
+    | EventType.POST_COMMENTS_UPDATED;
+  data: {
+    postId: string;
+    authorUserId: string;
+  };
+}
+
+export interface ReelEvent extends BaseEvent {
+  type:
+    | EventType.REEL_INTERACTION_UPDATED
+    | EventType.REEL_COMMENTS_UPDATED
+    | EventType.REEL_DISCOVERABILITY_UPDATED;
+  data: {
+    reelId: string;
+    authorUserId: string;
+    userIds?: string[];
+  };
+}
+
+export interface CommunityEvent extends BaseEvent {
+  type:
+    | EventType.COMMUNITY_UPDATED
+    | EventType.COMMUNITY_MEMBERSHIP_UPDATED
+    | EventType.COMMUNITY_JOIN_REQUEST_UPDATED
+    | EventType.COMMUNITY_MODERATION_UPDATED
+    | EventType.COMMUNITY_POSTS_UPDATED
+    | EventType.COMMUNITY_POST_INTERACTION_UPDATED;
+  data: {
+    communityId: string;
+    userIds: string[];
+    postId?: string;
+  };
+}
+
 // Chat events
 export interface ChatCreatedEvent extends BaseEvent {
   type: EventType.CHAT_CREATED;
@@ -283,6 +343,9 @@ export type AppEvent =
   | ProfileUpdatedEvent
   | FollowUpdatedEvent
   | FollowRequestUpdatedEvent
+  | PostEvent
+  | ReelEvent
+  | CommunityEvent
   | ChatCreatedEvent
   | ChatUpdatedEvent
   | ChatMemberAddedEvent

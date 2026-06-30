@@ -14,6 +14,8 @@ export interface Media {
   storage?: 's3' | 'local';
   localPath?: string;
   status?: 'pending' | 'scanning' | 'approved' | 'rejected' | 'quarantined' | 'deleted';
+  purpose?: 'general' | 'reel_source' | 'reel_derivative' | 'reel_poster';
+  reelId?: ObjectId;
   scanMode?: 'clamav' | 'mock' | 'disabled';
   scanResult?: 'clean' | 'infected' | 'error' | 'skipped';
   scanErrorCategory?: string;

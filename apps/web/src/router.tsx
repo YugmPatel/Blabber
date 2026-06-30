@@ -8,6 +8,8 @@ import ChatsLayout from './pages/ChatsLayout';
 import ChatView from './pages/ChatView';
 import SettingsPage from './pages/SettingsPage';
 import MomentsPage from './pages/MomentsPage';
+import FeedPage from './pages/FeedPage';
+import DiscoverPage from './pages/DiscoverPage';
 import CallsPage from './pages/CallsPage';
 import MyActionsPage from './pages/MyActionsPage';
 import MessageSearchPage from './pages/MessageSearchPage';
@@ -15,6 +17,12 @@ import ArchivedChatsPage from './pages/ArchivedChatsPage';
 import SavedMessagesPage from './pages/SavedMessagesPage';
 import JoinInvitePage from './pages/JoinInvitePage';
 import SocialProfilePage from './pages/SocialProfilePage';
+import CommunitiesPage from './pages/CommunitiesPage';
+import CommunityPage from './pages/CommunityPage';
+import CommunityInvitePage from './pages/CommunityInvitePage';
+import CreateReelPage from './pages/CreateReelPage';
+import ReelPage from './pages/ReelPage';
+import ReelsPage from './pages/ReelsPage';
 
 export const router = createBrowserRouter([
   {
@@ -64,6 +72,70 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <SocialProfilePage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/feed',
+    element: (
+      <ProtectedRoute>
+        <FeedPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/reels',
+    element: (
+      <ProtectedRoute>
+        <ReelsPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/reels/new',
+    element: (
+      <ProtectedRoute>
+        <CreateReelPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/reels/:reelId',
+    element: (
+      <ProtectedRoute>
+        <ReelPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/discover',
+    element: (
+      <ProtectedRoute>
+        <DiscoverPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/communities',
+    element: (
+      <ProtectedRoute>
+        <CommunitiesPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/c/:handle',
+    element: (
+      <ProtectedRoute>
+        <CommunityPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/communities/join/:token',
+    element: (
+      <ProtectedRoute>
+        <CommunityInvitePage />
       </ProtectedRoute>
     ),
   },
