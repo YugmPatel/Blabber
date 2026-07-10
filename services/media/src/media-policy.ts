@@ -9,10 +9,18 @@ export interface MediaPolicyResult {
 }
 
 const IMAGE_TYPES: Record<string, string[]> = {
-  'image/jpeg': ['.jpg', '.jpeg'],
+  'image/jpeg': ['.jpg', '.jpeg', '.jpe', '.jfif'],
   'image/png': ['.png'],
   'image/webp': ['.webp'],
-  'image/gif': ['.gif'],
+  'image/heic': ['.heic'],
+  'image/heif': ['.heif'],
+};
+
+const MIME_ALIASES: Record<string, string> = {
+  'image/jpg': 'image/jpeg',
+  'image/pjpeg': 'image/jpeg',
+  'image/x-citrix-jpeg': 'image/jpeg',
+  'image/x-png': 'image/png',
 };
 
 const AUDIO_TYPES: Record<string, string[]> = {
@@ -71,6 +79,12 @@ export function detectMimeType(buffer: Buffer): string | null {
   if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
   if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
   if (buffer.length >= 6 && ['GIF87a', 'GIF89a'].includes(buffer.toString('ascii', 0, 6))) return 'image/gif';
+  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') {
+    const brand = buffer.toString('ascii', 8, 12).toLowerCase();
+    const compatibleBrands = buffer.toString('ascii', 8, Math.min(buffer.length, 64)).toLowerCase();
+    if (['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis'].includes(brand) || compatibleBrands.includes('heic')) return 'image/heic';
+    if (['heif', 'mif1', 'msf1'].includes(brand) || compatibleBrands.includes('heif')) return 'image/heif';
+  }
   if (buffer.length >= 4 && buffer.toString('ascii', 0, 4) === '%PDF') return 'application/pdf';
   if (buffer.length >= 3 && buffer.toString('ascii', 0, 3) === 'ID3') return 'audio/mpeg';
   if (buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) return 'audio/mpeg';
@@ -82,6 +96,11 @@ export function detectMimeType(buffer: Buffer): string | null {
   if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) return 'application/zip';
   if (isMostlyText(buffer)) return 'text/plain';
   return null;
+}
+
+export function normalizeDeclaredMimeType(value?: string) {
+  const declared = (value || '').split(';')[0].trim().toLowerCase();
+  return MIME_ALIASES[declared] || declared;
 }
 
 function isMostlyText(buffer: Buffer) {
@@ -110,7 +129,7 @@ export function validateMediaPolicy(params: {
   }
 
   const detected = detectMimeType(params.buffer);
-  const declared = (params.declaredMimeType || '').split(';')[0].trim().toLowerCase();
+  const declared = normalizeDeclaredMimeType(params.declaredMimeType);
   const expectedByExtension = EXTENSION_TO_MIME.get(extension);
   if (!expectedByExtension) throw new Error('unsafe_type');
 
@@ -126,7 +145,7 @@ export function validateMediaPolicy(params: {
   if (!detected || (!isOoxml && !isCsv && !isMp4Family && detected !== expectedByExtension)) {
     throw new Error('mime_mismatch');
   }
-  if (declared && declared !== expectedByExtension && !(declared === 'image/jpg' && expectedByExtension === 'image/jpeg')) {
+  if (declared && declared !== expectedByExtension) {
     throw new Error('mime_mismatch');
   }
 

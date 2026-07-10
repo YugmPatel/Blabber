@@ -2,17 +2,25 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { API_URL } from '@/api/client';
-import { Eye, EyeOff } from 'lucide-react';
-import BlabberLogo from '@/components/BlabberLogo';
+import { ArrowRight, CheckCircle2, Eye, EyeOff, Lock, Mail, MessageSquare, Zap } from 'lucide-react';
+import BlabberMark from '@/components/brand/BlabberMark';
 
 const serifStyle: React.CSSProperties = { fontFamily: "Georgia, 'Times New Roman', serif" };
+
+function BrandFeature({ icon: Icon, label }: { icon: typeof MessageSquare; label: string }) {
+  return (
+    <div className="flex flex-1 flex-col items-center gap-2 text-center">
+      <Icon size={18} className="text-teal-200" />
+      <span className="max-w-[10ch] text-[11.5px] font-medium leading-snug text-white/85">{label}</span>
+    </div>
+  );
+}
 
 function BrandPanel() {
   return (
     <aside
-      className="relative hidden overflow-hidden md:flex md:flex-col md:justify-between"
+      className="relative flex flex-col overflow-hidden p-8 md:p-12 md:pb-8"
       style={{
-        padding: '48px',
         background: 'linear-gradient(170deg, #c084fc 0%, #9333ea 18%, #7c3aed 36%, #5b21b6 56%, #1e1b4b 78%, #0d1f2d 100%)',
       }}
     >
@@ -21,7 +29,7 @@ function BrandPanel() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
         style={{
-          background: 'radial-gradient(ellipse 72% 48% at 42% 24%, rgba(255,210,160,0.58) 0%, rgba(240,130,170,0.22) 52%, transparent 76%)',
+          background: 'radial-gradient(ellipse 72% 48% at 42% 24%, rgba(255,210,160,0.5) 0%, rgba(240,130,170,0.2) 52%, transparent 76%)',
         }}
       />
 
@@ -50,30 +58,50 @@ function BrandPanel() {
         />
       </svg>
 
-      {/* Top label */}
+      {/* Dotted grid accent — top right */}
       <div
-        className="relative flex items-center gap-3 text-[11px] font-medium uppercase tracking-[0.28em] text-white/65"
-        style={{ zIndex: 1 }}
-      >
-        <span>Blabber Vision</span>
-        <span className="h-px w-8 bg-white/35" />
+        aria-hidden="true"
+        className="pointer-events-none absolute right-10 top-10 hidden h-14 w-24 opacity-70 md:block"
+        style={{
+          backgroundImage: 'radial-gradient(rgba(255,255,255,0.45) 1.2px, transparent 1.2px)',
+          backgroundSize: '12px 12px',
+        }}
+      />
+
+      {/* Floating mascot riding the teal wave crest */}
+      <div aria-hidden="true" className="pointer-events-none absolute hidden md:block" style={{ right: '7%', top: '36%' }}>
+        <BlabberMark size={104} variant="icon" mode="dark" />
       </div>
 
-      {/* Bottom text block */}
-      <div className="relative space-y-4" style={{ zIndex: 1 }}>
+      {/* Top lockup */}
+      <div className="relative z-[1]">
+        <BlabberMark size={24} variant="lockup" mode="dark" alive={false} />
+      </div>
+
+      {/* Headline block */}
+      <div className="relative z-[1] flex flex-1 flex-col justify-center space-y-4 py-10 md:py-0">
         <h1
-          className="text-[3.4rem] font-semibold leading-[1.06] text-white"
+          className="text-4xl font-semibold leading-[1.08] text-white md:text-[3.4rem] md:leading-[1.06]"
           style={serifStyle}
         >
-          Talk.
+          Talk<span className="text-teal-300">.</span>
           <br />
-          Decide.
+          Decide<span className="text-teal-300">.</span>
           <br />
-          Do.
+          Do<span className="text-teal-300">.</span>
         </h1>
-        <p className="max-w-[22ch] text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.78)' }}>
-          Turn conversations into summaries, tasks, decisions, and shared memory seamlessly.
+        <p className="max-w-[24ch] text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.8)' }}>
+          Turn conversations into summaries, tasks, decisions, and shared memory — seamlessly.
         </p>
+      </div>
+
+      {/* Feature strip */}
+      <div className="relative z-[1] hidden items-stretch justify-between gap-3 pt-8 md:flex">
+        <BrandFeature icon={MessageSquare} label="Smart Conversations" />
+        <span aria-hidden="true" className="w-px bg-white/15" />
+        <BrandFeature icon={CheckCircle2} label="Aligned Decisions" />
+        <span aria-hidden="true" className="w-px bg-white/15" />
+        <BrandFeature icon={Zap} label="Actionable Outcomes" />
       </div>
     </aside>
   );
@@ -173,9 +201,8 @@ export default function LoginPage() {
           <div className="w-full max-w-[380px]">
             {/* Logo */}
             <div className="mb-8 flex flex-col items-center gap-1">
-              <div className="mb-1 flex items-center gap-2.5">
-                <BlabberLogo size={30} />
-                <span className="text-[17px] font-semibold tracking-tight text-slate-900">Blabber</span>
+              <div className="mb-1 flex items-center justify-center">
+                <BlabberMark size={34} variant="lockup" mode="light" />
               </div>
               <h2
                 className="mt-2 text-center text-[2.2rem] font-semibold leading-tight text-slate-900"
@@ -202,18 +229,21 @@ export default function LoginPage() {
                 <label htmlFor="email" className="mb-1.5 block text-[13px] font-medium text-slate-700">
                   Email
                 </label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="block h-12 w-full rounded-[13px] border border-slate-200 bg-[#f5f6f8] px-3.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
-                  placeholder="name@company.com"
-                  disabled={isLoading}
-                />
+                <div className="relative">
+                  <Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="block h-12 w-full rounded-[13px] border border-slate-200 bg-[#f5f6f8] pl-10 pr-3.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
+                    placeholder="name@company.com"
+                    disabled={isLoading}
+                  />
+                </div>
               </div>
 
               <div>
@@ -221,6 +251,7 @@ export default function LoginPage() {
                   Password
                 </label>
                 <div className="relative">
+                  <Lock size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
                   <input
                     id="password"
                     name="password"
@@ -229,7 +260,7 @@ export default function LoginPage() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block h-12 w-full rounded-[13px] border border-slate-200 bg-[#f5f6f8] px-3.5 pr-11 text-sm text-slate-900 outline-none placeholder:text-slate-400 transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
+                    className="block h-12 w-full rounded-[13px] border border-slate-200 bg-[#f5f6f8] pl-10 pr-11 text-sm text-slate-900 outline-none placeholder:text-slate-400 transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:opacity-50"
                     placeholder="••••••••"
                     disabled={isLoading}
                   />
@@ -257,7 +288,7 @@ export default function LoginPage() {
                 </label>
                 <Link
                   to="/forgot-password"
-                  className="text-[13px] font-semibold text-slate-700 transition hover:text-slate-900 focus:outline-none focus-visible:underline"
+                  className="text-[13px] font-semibold text-teal-600 transition hover:text-teal-700 focus:outline-none focus-visible:underline"
                 >
                   Forgot Password?
                 </Link>
@@ -266,9 +297,10 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="mt-1 h-12 w-full rounded-[13px] bg-slate-950 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                className="relative mt-1 flex h-12 w-full items-center justify-center rounded-[13px] bg-teal-600 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isLoading ? 'Signing In…' : 'Sign In'}
+                {!isLoading && <ArrowRight size={16} className="absolute right-4" aria-hidden="true" />}
               </button>
 
               {/* Divider */}
@@ -301,7 +333,7 @@ export default function LoginPage() {
               Don&apos;t have an account?{' '}
               <Link
                 to="/register"
-                className="font-semibold text-slate-900 transition hover:text-teal-700 focus:outline-none focus-visible:underline"
+                className="font-semibold text-teal-600 transition hover:text-teal-700 focus:outline-none focus-visible:underline"
               >
                 Sign Up
               </Link>

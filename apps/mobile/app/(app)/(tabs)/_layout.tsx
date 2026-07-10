@@ -28,7 +28,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="discover" options={{ title: 'Discover' }} />
       <Tabs.Screen name="moments" options={{ title: 'Moments' }} />
       <Tabs.Screen name="reels" options={{ title: 'Reels' }} />
-      <Tabs.Screen name="messages" options={{ title: 'Messages' }} />
+      <Tabs.Screen name="messages" options={{ title: 'Convo' }} />
       <Tabs.Screen name="notifications" options={{ title: 'Notifications' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>

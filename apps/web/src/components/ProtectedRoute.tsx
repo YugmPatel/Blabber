@@ -1,5 +1,6 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import BlabberMark from '@/components/brand/BlabberMark';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -10,10 +11,15 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div
+        className="flex min-h-screen items-center justify-center bg-white dark:bg-slate-950"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <BlabberMark size={48} variant="icon" className="mx-auto" />
+          <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">Loading...</p>
         </div>
       </div>
     );

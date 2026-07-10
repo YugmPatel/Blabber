@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import ProfileRedirect from './components/ProfileRedirect';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -14,7 +15,6 @@ import CallsPage from './pages/CallsPage';
 import MyActionsPage from './pages/MyActionsPage';
 import MessageSearchPage from './pages/MessageSearchPage';
 import ArchivedChatsPage from './pages/ArchivedChatsPage';
-import SavedMessagesPage from './pages/SavedMessagesPage';
 import JoinInvitePage from './pages/JoinInvitePage';
 import SocialProfilePage from './pages/SocialProfilePage';
 import CommunitiesPage from './pages/CommunitiesPage';
@@ -23,6 +23,8 @@ import CommunityInvitePage from './pages/CommunityInvitePage';
 import CreateReelPage from './pages/CreateReelPage';
 import ReelPage from './pages/ReelPage';
 import ReelsPage from './pages/ReelsPage';
+import PostViewPage from './pages/PostViewPage';
+import VeyraPage from './pages/VeyraPage';
 
 export const router = createBrowserRouter([
   {
@@ -65,7 +67,11 @@ export const router = createBrowserRouter([
   },
   {
     path: '/profile',
-    element: <Navigate to="/settings?s=profile" replace />,
+    element: (
+      <ProtectedRoute>
+        <ProfileRedirect />
+      </ProtectedRoute>
+    ),
   },
   {
     path: '/p/:handle',
@@ -108,6 +114,14 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    path: '/posts/:postId',
+    element: (
+      <ProtectedRoute>
+        <PostViewPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
     path: '/discover',
     element: (
       <ProtectedRoute>
@@ -133,11 +147,7 @@ export const router = createBrowserRouter([
   },
   {
     path: '/communities/join/:token',
-    element: (
-      <ProtectedRoute>
-        <CommunityInvitePage />
-      </ProtectedRoute>
-    ),
+    element: <CommunityInvitePage />,
   },
   {
     path: '/settings',
@@ -185,11 +195,7 @@ export const router = createBrowserRouter([
   },
   {
     path: '/saved',
-    element: (
-      <ProtectedRoute>
-        <SavedMessagesPage />
-      </ProtectedRoute>
-    ),
+    element: <Navigate to="/settings?s=saved" replace />,
   },
   {
     path: '/search',
@@ -204,6 +210,14 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <MyActionsPage />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/veyra',
+    element: (
+      <ProtectedRoute>
+        <VeyraPage />
       </ProtectedRoute>
     ),
   },

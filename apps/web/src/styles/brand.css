@@ -1,0 +1,411 @@
+/* Blabber / VEYRA brand system — CSS custom properties, gradients, and
+   reduced-motion-safe keyframes. Scoped under `.brand-*` / `.veyra-*` class
+   names so it never leaks into unrelated Tailwind utility classes. */
+
+/* ── Blabber app-shell / Convo design tokens (teal / seafoam / aqua / mint) ─
+   These `--bl-*` tokens are the semantic design-token layer for the main app
+   shell and Convo experience. They are intentionally separate from the
+   `--blabber-*` / `--brand-*` tokens below, which remain VEYRA's own ambient
+   identity (cyan/violet/pink) and are left untouched — VEYRA keeps its
+   distinct visual treatment inside `/veyra` while the rest of the app uses
+   teal/aqua/mint. Both light (`:root`) and dark (`.dark`) are defined from
+   the same semantic names so any surface can theme correctly. */
+:root {
+  --bl-bg: #f6faf8;
+  --bl-sidebar: #ffffff;
+  --bl-panel: #ffffff;
+  --bl-elevated: #ffffff;
+  --bl-hover: #eff8f5;
+  --bl-selected: #ddf7f0;
+  --bl-border: #ddeae6;
+
+  --bl-text: #10262a;
+  --bl-text-secondary: #3d5257;
+  --bl-text-muted: #687b80;
+
+  --bl-cobalt: #0bae9a;
+  --bl-cobalt-strong: #008f82;
+  --bl-cyan: #2ac8bd;
+  --bl-coral: #e2543f;
+
+  --bl-success: #1f9d67;
+  --bl-warning: #c9820a;
+  --bl-danger: #e0453a;
+
+  --bl-focus-ring: 0 0 0 3px rgba(11, 174, 154, 0.35);
+  --bl-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --bl-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --bl-radius-md: 0.75rem;
+  --bl-radius-lg: 1rem;
+  --bl-radius-xl: 1.5rem;
+
+  --bl-glow-sm: 0 0 16px rgba(11, 174, 154, 0.18);
+  --bl-glow-md: 0 0 32px rgba(11, 174, 154, 0.16);
+  --bl-glow-lg: 0 0 64px rgba(11, 174, 154, 0.14);
+  --bl-mascot-glow: 0 6px 24px rgba(11, 174, 154, 0.26), 0 2px 8px rgba(11, 174, 154, 0.18);
+}
+
+.dark {
+  --bl-bg: #071315;
+  --bl-sidebar: #08181a;
+  --bl-panel: #0b1d20;
+  --bl-elevated: #10272a;
+  --bl-hover: rgba(255, 255, 255, 0.045);
+  --bl-selected: rgba(19, 200, 177, 0.16);
+  --bl-border: #1b393c;
+
+  --bl-text: #eaf8f5;
+  --bl-text-secondary: #b9d0cd;
+  --bl-text-muted: #96b4b1;
+
+  --bl-cobalt: #13c8b1;
+  --bl-cobalt-strong: #0d766e;
+  --bl-cyan: #8eebdd;
+  --bl-coral: #ff8f75;
+
+  --bl-success: #34c98a;
+  --bl-warning: #e2a53a;
+  --bl-danger: #ff6c5f;
+
+  --bl-focus-ring: 0 0 0 3px rgba(19, 200, 177, 0.4);
+  --bl-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --bl-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.35);
+
+  --bl-glow-sm: 0 0 18px rgba(19, 200, 177, 0.35);
+  --bl-glow-md: 0 0 36px rgba(19, 200, 177, 0.3);
+  --bl-glow-lg: 0 0 72px rgba(19, 200, 177, 0.26);
+  --bl-mascot-glow: 0 8px 32px rgba(19, 200, 177, 0.48), 0 3px 12px rgba(94, 234, 212, 0.3);
+}
+
+.bl-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: var(--bl-focus-ring);
+}
+
+:root {
+  /* Canonical Blabber design tokens — single source of truth for both the
+     app-wide palette (via the `slate`/`teal` Tailwind overrides in
+     tailwind.config.js) and VEYRA's ambient visuals, so the two stay part of
+     one coherent mint/teal family. Variable names are kept for back-compat
+     with AmbientOrb/BrandGlow/VeyraMark/VeyraPage — only the hues changed
+     (previously cyan/violet/pink). Defined for both `:root` (light) and
+     `.dark` so VEYRA's own page can finally follow the app's theme toggle
+     instead of always rendering dark. */
+  --blabber-bg: #f4fbf9;
+  --blabber-surface: #ffffff;
+  --blabber-surface-elevated: #ffffff;
+  --blabber-surface-soft: #eafaf5;
+  --blabber-border: rgba(11, 174, 154, 0.18);
+  --blabber-border-strong: rgba(11, 174, 154, 0.4);
+
+  --blabber-text: #10262a;
+  --blabber-text-muted: #55706c;
+  --blabber-text-subtle: #7c9490;
+
+  --blabber-cyan: #2ac8bd;
+  --blabber-blue: #13c8b1;
+  --blabber-violet: #0bae9a;
+  --blabber-pink: #7ee0d3;
+  --blabber-purple: #0d9488;
+
+  --blabber-success: #1f9d67;
+  --blabber-danger: #e0453a;
+
+  --blabber-gradient-ai: linear-gradient(135deg, var(--blabber-cyan) 0%, var(--blabber-blue) 55%, var(--blabber-violet) 100%);
+  --blabber-gradient-ai-soft: linear-gradient(135deg, rgba(42, 200, 189, 0.28) 0%, rgba(19, 200, 177, 0.24) 55%, rgba(11, 174, 154, 0.2) 100%);
+
+  --blabber-glow-cyan: 0 0 28px rgba(42, 200, 189, 0.3);
+  --blabber-glow-violet: 0 0 28px rgba(11, 174, 154, 0.25);
+  --blabber-glow-pink: 0 0 28px rgba(19, 200, 177, 0.2);
+  --blabber-glow-soft: 0 0 60px rgba(11, 174, 154, 0.12);
+
+  --blabber-focus-ring: 0 0 0 3px rgba(11, 174, 154, 0.4);
+
+  /* Back-compat aliases for the pre-existing VEYRA components (AmbientOrb,
+     BrandGlow, VeyraMark, VeyraPage) so they inherit the same palette without
+     needing per-file edits. */
+  --brand-midnight: var(--blabber-bg);
+  --brand-surface: var(--blabber-surface);
+  --brand-surface-elevated: #ffffff;
+  --brand-surface-border: var(--blabber-border);
+  --brand-cyan: var(--blabber-cyan);
+  --brand-violet: var(--blabber-violet);
+  --brand-pink: var(--blabber-pink);
+  --brand-text: var(--blabber-text);
+  --brand-text-muted: rgba(16, 38, 42, 0.62);
+
+  --brand-gradient-ai: var(--blabber-gradient-ai);
+  --brand-gradient-ai-soft: var(--blabber-gradient-ai-soft);
+
+  --brand-glow-cyan: var(--blabber-glow-cyan);
+  --brand-glow-violet: var(--blabber-glow-violet);
+  --brand-glow-pink: var(--blabber-glow-pink);
+  --brand-glow-soft: var(--blabber-glow-soft);
+
+  --brand-border-glow: 1px solid var(--blabber-border-strong);
+  --brand-focus-ring: var(--blabber-focus-ring);
+}
+
+.dark {
+  --blabber-bg: #05100f;
+  --blabber-surface: #0a1f1c;
+  --blabber-surface-elevated: #0e2622;
+  --blabber-surface-soft: #123029;
+  --blabber-border: rgba(19, 200, 177, 0.18);
+  --blabber-border-strong: rgba(19, 200, 177, 0.45);
+
+  --blabber-text: #eaf8f5;
+  --blabber-text-muted: #96b4b1;
+  --blabber-text-subtle: #6d8b87;
+
+  --blabber-cyan: #2ac8bd;
+  --blabber-blue: #13c8b1;
+  --blabber-violet: #13c8b1;
+  --blabber-pink: #8eebdd;
+  --blabber-purple: #0d766e;
+
+  --blabber-success: #34c98a;
+  --blabber-danger: #ff6c5f;
+
+  --blabber-gradient-ai: linear-gradient(135deg, var(--blabber-cyan) 0%, var(--blabber-blue) 55%, var(--blabber-pink) 100%);
+  --blabber-gradient-ai-soft: linear-gradient(135deg, rgba(42, 200, 189, 0.3) 0%, rgba(19, 200, 177, 0.3) 55%, rgba(142, 235, 221, 0.24) 100%);
+
+  --blabber-glow-cyan: 0 0 28px rgba(42, 200, 189, 0.35);
+  --blabber-glow-violet: 0 0 28px rgba(19, 200, 177, 0.35);
+  --blabber-glow-pink: 0 0 28px rgba(142, 235, 221, 0.28);
+  --blabber-glow-soft: 0 0 60px rgba(19, 200, 177, 0.18);
+
+  --blabber-focus-ring: 0 0 0 3px rgba(19, 200, 177, 0.45);
+
+  --brand-surface-elevated: rgba(19, 200, 177, 0.07);
+  --brand-text-muted: rgba(234, 248, 245, 0.62);
+}
+
+/* ── Shared surfaces ─────────────────────────────────────────────────── */
+
+.brand-glass {
+  background: var(--brand-surface-elevated);
+  border: 1px solid var(--brand-surface-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.brand-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: var(--brand-focus-ring);
+}
+
+/* ── Blabber mark ────────────────────────────────────────────────────── */
+
+/* Wordmark face — a rounded, friendly display weight for "Blabber" (and
+   VEYRA) text set next to the mascot mark. Scoped to this one class so the
+   rest of the app's UI text stays on the system font stack. */
+.font-brand {
+  font-family: 'Baloo 2', ui-rounded, 'Nunito', system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+.brand-mark-alive {
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .brand-mark-alive {
+    animation: brand-breathe 5.5s ease-in-out infinite;
+  }
+}
+
+/* ── Blabber mascot: float + glow-pulse + shimmer + hover ───────────────
+   Applied to the *tile wrapper* (not the raw SVG) so hover/scale never
+   distorts the mark's internal proportions. Reduced-motion users get a
+   fully static mascot; hover still gives a small, instant affordance. */
+
+.blabber-mascot-tile {
+  transform-origin: center;
+  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+
+.blabber-mascot-tile:hover,
+.blabber-mascot-tile:focus-visible {
+  transform: translateY(-2px) scale(1.05);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .blabber-mascot-tile.blabber-mascot-animated {
+    animation: blabber-float 4.8s ease-in-out infinite;
+  }
+  .blabber-mascot-tile.blabber-mascot-animated:hover,
+  .blabber-mascot-tile.blabber-mascot-animated:focus-visible {
+    animation-play-state: paused;
+  }
+  .blabber-mascot-shimmer {
+    animation: blabber-shimmer 4.8s ease-in-out infinite;
+  }
+}
+
+@keyframes blabber-float {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow: var(--bl-mascot-glow);
+  }
+  50% {
+    transform: translateY(-3px);
+    box-shadow: var(--bl-glow-md);
+  }
+}
+
+/* ── Bare floating mascot (no tile) ─────────────────────────────────────
+   For the mascot rendered directly on the page surface: the glow hugs the
+   mascot's silhouette via drop-shadow instead of box-shadow, which would
+   paint a rectangle behind the transparent SVG. Float is translate-only. */
+
+.blabber-mascot-bare {
+  transform-origin: center;
+  transition: transform 0.2s ease-out;
+  filter: drop-shadow(0 4px 10px rgba(11, 174, 154, 0.4));
+}
+
+.dark .blabber-mascot-bare {
+  filter: drop-shadow(0 4px 14px rgba(19, 200, 177, 0.6));
+}
+
+.blabber-mascot-bare:hover {
+  transform: translateY(-2px) scale(1.04);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .blabber-mascot-bare.blabber-mascot-animated {
+    animation: blabber-float-bare 4.8s ease-in-out infinite;
+  }
+  .blabber-mascot-bare.blabber-mascot-animated:hover {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes blabber-float-bare {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes blabber-shimmer {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translate(0, 0);
+  }
+  50% {
+    opacity: 0.75;
+    transform: translate(1px, -1px);
+  }
+}
+
+/* ── VEYRA ambient orb ───────────────────────────────────────────────── */
+
+.veyra-orb-core {
+  transform-origin: center;
+}
+
+.veyra-ring {
+  transform-origin: center;
+  opacity: 0.35;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .veyra-orb-core[data-state='idle'] {
+    animation: brand-breathe 6s ease-in-out infinite;
+  }
+  .veyra-orb-core[data-state='listening'] {
+    animation: veyra-listen 1.6s ease-in-out infinite;
+  }
+  .veyra-orb-core[data-state='thinking'] {
+    animation: veyra-think-pulse 2.2s ease-in-out infinite;
+  }
+  .veyra-orb-core[data-state='speaking'] {
+    animation: veyra-speak 0.9s ease-in-out infinite;
+  }
+  .veyra-ring[data-state='thinking'] {
+    animation: brand-rotate-slow 14s linear infinite;
+  }
+  .veyra-ring--rev[data-state='thinking'] {
+    animation-direction: reverse;
+    animation-duration: 20s;
+  }
+  .veyra-wave-bar {
+    animation: veyra-wave-bar 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes brand-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.045);
+    filter: brightness(1.08);
+  }
+}
+
+@keyframes veyra-listen {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.09);
+  }
+}
+
+@keyframes veyra-think-pulse {
+  0%,
+  100% {
+    transform: scale(0.97);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+@keyframes veyra-speak {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    transform: scale(1.05) rotate(1.5deg);
+  }
+}
+
+@keyframes brand-rotate-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes veyra-wave-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.veyra-wave-bar:nth-child(odd) {
+  animation-delay: 0.15s;
+}
+.veyra-wave-bar:nth-child(3n) {
+  animation-delay: 0.3s;
+}

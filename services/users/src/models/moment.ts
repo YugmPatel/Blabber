@@ -2,7 +2,7 @@ import { Collection, ObjectId } from 'mongodb';
 import { getDatabase } from '../db';
 import { logger } from '@repo/utils';
 
-export type MomentType = 'text' | 'image';
+export type MomentType = 'text' | 'image' | 'audio' | 'video';
 export type MomentAudienceType = 'contacts' | 'contacts_except' | 'only_share_with' | 'close_friends';
 export type MomentArchiveState = 'active' | 'archived' | 'deleted';
 
@@ -13,6 +13,7 @@ export interface MomentDocument {
   textBody?: string;
   caption?: string;
   mediaId?: ObjectId;
+  videoId?: ObjectId;
   style?: {
     backgroundKey?: string;
     textStyleKey?: string;
@@ -37,6 +38,7 @@ export async function createMomentIndexes(): Promise<void> {
     await collection.createIndex({ audienceSnapshotUserIds: 1, archiveState: 1, expiresAt: 1 }, { name: 'audience_archive_expiresAt' });
     await collection.createIndex({ archiveState: 1, expiresAt: 1 }, { name: 'archive_expiresAt' });
     await collection.createIndex({ mediaId: 1 }, { sparse: true, name: 'mediaId' });
+    await collection.createIndex({ videoId: 1 }, { sparse: true, name: 'videoId' });
     logger.info('Moment indexes created successfully');
   } catch (error) {
     logger.error({ error }, 'Failed to create Moment indexes');

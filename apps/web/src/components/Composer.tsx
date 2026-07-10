@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent, type ChangeEvent, type ClipboardEvent } from 'react';
 import {
   Plus,
   Mic,
@@ -121,6 +121,14 @@ const SUPPORTED_DOCUMENT_TYPES = new Set([
   'text/rtf',
 ]);
 
+const SUPPORTED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+
 export const Composer = ({
   chatId,
   replyToMessage,
@@ -149,6 +157,7 @@ export const Composer = ({
     title: string;
     message: string;
   } | null>(null);
+  const [pastedImage, setPastedImage] = useState<{ file: File; previewUrl: string } | null>(null);
   const [mentions, setMentions] = useState<Array<{ userId: string; start: number; length: number; displayName: string }>>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
@@ -172,6 +181,13 @@ export const Composer = ({
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const activeReplyToId = replyToMessage?._id || replyToId;
+
+  const clearPastedImage = () => {
+    setPastedImage((current) => {
+      if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
+      return null;
+    });
+  };
 
   const uploadAttachment = async (file: File): Promise<UploadResult | null> => {
     if (uploadMedia) {
@@ -227,6 +243,11 @@ export const Composer = ({
     };
   }, [showEmojiPicker]);
 
+  useEffect(() => {
+    clearPastedImage();
+    return () => clearPastedImage();
+  }, [chatId, currentUserId]);
+
   // ── Input / typing ────────────────────────────────────────────────────
 
   const handleInputChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -274,9 +295,9 @@ export const Composer = ({
     }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmedMessage = message.trim();
-    if (!trimmedMessage) return;
+    if (!trimmedMessage && !pastedImage) return;
 
     if (socket && isTypingRef.current) {
       socket.emit('typing:stop', { chatId });
@@ -295,12 +316,36 @@ export const Composer = ({
       )
       .map(({ userId, start, length }) => ({ userId, start, length }));
 
-    sendMessage({
-      chatId,
-      body: trimmedMessage,
-      replyToId: activeReplyToId,
-      mentions: outboundMentions,
-    });
+    if (pastedImage) {
+      const media = await uploadAttachment(pastedImage.file);
+      if (!media) {
+        setAttachmentNotice({
+          title: 'Photo upload failed',
+          message: 'This photo could not be uploaded. Try another image.',
+        });
+        return;
+      }
+      sendMessage({
+        chatId,
+        body: trimmedMessage || 'Photo',
+        mediaId: media.mediaId,
+        mediaKind: 'image',
+        mediaUrl: media.mediaUrl || media.publicUrl,
+        mediaFileName: media.fileName || pastedImage.file.name,
+        mediaMimeType: media.mimeType || pastedImage.file.type,
+        mediaSize: media.size || pastedImage.file.size,
+        replyToId: activeReplyToId,
+        mentions: outboundMentions,
+      });
+      clearPastedImage();
+    } else {
+      sendMessage({
+        chatId,
+        body: trimmedMessage,
+        replyToId: activeReplyToId,
+        mentions: outboundMentions,
+      });
+    }
     setMessage('');
     setMentions([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -335,6 +380,26 @@ export const Composer = ({
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData?.files || []);
+    const image = files.find((file) => SUPPORTED_IMAGE_TYPES.has(file.type.split(';')[0].toLowerCase()));
+    if (!image) return;
+    event.preventDefault();
+    clearPastedImage();
+    const extension = image.type.includes('png')
+      ? 'png'
+      : image.type.includes('webp')
+        ? 'webp'
+        : image.type.includes('heic')
+          ? 'heic'
+          : image.type.includes('heif')
+            ? 'heif'
+            : 'jpg';
+    const file = new File([image], image.name || `pasted-photo-${Date.now()}.${extension}`, { type: image.type });
+    setPastedImage({ file, previewUrl: URL.createObjectURL(file) });
+    setAttachmentNotice(null);
   };
 
   const mentionSuggestions = (chat?.participantProfiles || [])
@@ -411,10 +476,9 @@ export const Composer = ({
       setAttachmentNotice({
         title: fileType === 'image' ? 'Photo upload failed' : 'Document upload failed',
         message:
-          uploadError ||
-          (fileType === 'image'
-            ? 'We could not upload this photo. Try again.'
-            : 'We could not upload this document. Try again.'),
+          fileType === 'image'
+            ? 'This photo could not be uploaded. Try another image.'
+            : uploadError || 'We could not upload this document. Try again.',
       });
     } else {
       const body = message.trim() || (fileType === 'image' ? 'Photo' : file.name);
@@ -443,7 +507,7 @@ export const Composer = ({
     if (!media) {
       setAttachmentNotice({
         title: 'Camera upload failed',
-        message: uploadError || 'We could not upload this photo. Try again.',
+        message: 'This photo could not be uploaded. Try another image.',
       });
     } else {
       sendMessage({
@@ -464,7 +528,15 @@ export const Composer = ({
   const handleVoiceSend = async (audioBlob: Blob, duration: number) => {
     const audioType =
       audioBlob.type && audioBlob.type.startsWith('audio/') ? audioBlob.type : 'audio/webm';
-    const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: audioType });
+    const audioExtension =
+      audioType.includes('mp4') || audioType.includes('m4a')
+        ? 'm4a'
+        : audioType.includes('ogg')
+          ? 'ogg'
+          : audioType.includes('wav')
+            ? 'wav'
+            : 'webm';
+    const file = new File([audioBlob], `voice-${Date.now()}.${audioExtension}`, { type: audioType });
     const media = await uploadAttachment(file);
     if (!media) {
       setAttachmentNotice({
@@ -571,7 +643,7 @@ export const Composer = ({
     {
       label: 'Document',
       icon: FileText,
-      iconBg: 'bg-violet-600',
+      iconBg: 'bg-teal-700',
       action: () => documentInputRef.current?.click(),
     },
     {
@@ -585,12 +657,6 @@ export const Composer = ({
       icon: Camera,
       iconBg: 'bg-rose-500',
       action: () => setShowCamera(true),
-    },
-    {
-      label: 'Audio',
-      icon: Mic,
-      iconBg: 'bg-orange-500',
-      action: () => setShowVoiceRecorder(true),
     },
     {
       label: 'Poll',
@@ -621,9 +687,9 @@ export const Composer = ({
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="border-t border-slate-200 bg-white px-3 py-3 dark:border-slate-800 dark:bg-slate-900">
+    <div className="border-t border-teal-100 bg-white px-4 py-3.5 shadow-[0_-1px_8px_rgba(15,23,42,0.03)] dark:border-teal-900/40 dark:bg-slate-900">
       {/* Reply preview */}
-      {activeReplyToId && (
+          {activeReplyToId && (
         <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-teal-600">Reply</p>
@@ -644,16 +710,34 @@ export const Composer = ({
         </div>
       )}
 
+      {pastedImage && (
+        <div className="mb-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+          <img src={pastedImage.previewUrl} alt="Pasted photo preview" className="h-16 w-16 rounded-lg object-cover" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-teal-600">Photo ready to send</p>
+            <p className="truncate text-sm text-slate-700 dark:text-slate-300">{pastedImage.file.name}</p>
+          </div>
+          <button
+            type="button"
+            onClick={clearPastedImage}
+            className="rounded-full p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:hover:bg-slate-700"
+            aria-label="Remove pasted photo"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* Upload progress */}
       {isUploading && uploadProgress && (
-        <div className="mb-2 rounded-lg bg-blue-50 p-2 dark:bg-blue-900/20">
+        <div className="mb-2 rounded-lg bg-teal-50 p-2 dark:bg-teal-500/10">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-blue-700 dark:text-blue-300">Uploading…</span>
-            <span className="text-blue-700 dark:text-blue-300">{uploadProgress.percentage}%</span>
+            <span className="text-teal-700 dark:text-teal-300">Uploading…</span>
+            <span className="text-teal-700 dark:text-teal-300">{uploadProgress.percentage}%</span>
           </div>
-          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-blue-200 dark:bg-blue-800">
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-teal-200 dark:bg-teal-900">
             <div
-              className="h-full bg-blue-600 transition-all duration-300"
+              className="h-full bg-teal-600 transition-all duration-300"
               style={{ width: `${uploadProgress.percentage}%` }}
             />
           </div>
@@ -671,10 +755,10 @@ export const Composer = ({
             aria-expanded={showActionMenu}
             aria-haspopup="menu"
             disabled={isUploading}
-            className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+            className={`bl-focus-ring flex h-9 w-9 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
               showActionMenu
-                ? 'bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-white'
-                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white'
+                ? 'bg-teal-100 text-teal-800 dark:bg-teal-500/25 dark:text-teal-100'
+                : 'text-teal-600 hover:bg-teal-50 hover:text-teal-800 dark:text-teal-300 dark:hover:bg-teal-500/15 dark:hover:text-teal-100'
             }`}
           >
             <Plus
@@ -732,7 +816,7 @@ export const Composer = ({
           type="file"
           className="hidden"
           onChange={(e) => handleFileSelect(e, 'image')}
-          accept="image/*"
+          accept=".jpg,.jpeg,.jpe,.jfif,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
         />
         <input
           ref={documentInputRef}
@@ -775,11 +859,12 @@ export const Composer = ({
             ref={textareaRef}
             value={message}
             onChange={handleInputChange}
+            onPaste={handlePaste}
             onKeyDown={handleKeyDown}
             placeholder="Type a message…"
             rows={1}
             disabled={isUploading}
-            className="block max-h-32 min-h-[2.5rem] w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-500 dark:focus:bg-slate-800"
+            className="block max-h-32 min-h-[2.5rem] w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-400 dark:focus:bg-slate-800"
           />
         </div>
 
@@ -791,7 +876,7 @@ export const Composer = ({
             disabled={isUploading}
             aria-label="Add emoji"
             aria-expanded={showEmojiPicker}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+            className="bl-focus-ring flex h-9 w-9 items-center justify-center rounded-full text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-800 disabled:opacity-40 dark:text-teal-300 dark:hover:bg-teal-500/15 dark:hover:text-teal-100"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-4-8c.79 0 1.5-.71 1.5-1.5S8.79 9 8 9s-1.5.71-1.5 1.5S7.21 12 8 12zm8 0c.79 0 1.5-.71 1.5-1.5S16.79 9 16 9s-1.5.71-1.5 1.5.71 1.5 1.5 1.5zm-4 5.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z" />
@@ -826,13 +911,13 @@ export const Composer = ({
         </div>
 
         {/* ── Send / Mic button ── */}
-        {message.trim() ? (
+        {message.trim() || pastedImage ? (
           <button
             type="button"
             onClick={handleSend}
             disabled={isUploading}
             aria-label="Send message"
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center self-end rounded-full bg-slate-950 text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+            className="bl-focus-ring flex h-9 w-9 flex-shrink-0 items-center justify-center self-end rounded-full bg-teal-600 text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
@@ -844,7 +929,7 @@ export const Composer = ({
             onClick={() => setShowVoiceRecorder(true)}
             disabled={isUploading}
             aria-label="Voice message"
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center self-end rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+            className="bl-focus-ring flex h-9 w-9 flex-shrink-0 items-center justify-center self-end rounded-full text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-800 disabled:opacity-40 dark:text-teal-300 dark:hover:bg-teal-500/15 dark:hover:text-teal-100"
           >
             <Mic size={19} />
           </button>

@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '../types/react-query';
 import { apiClient, cancelEvent, closePoll, downloadEventIcs, forwardMessage as forwardMessageRequest, fetchMessagePins, fetchSavedMessages, fetchSharedContent, pinMessage, rsvpEvent, saveMessage, unpinMessage, unsaveMessage, updateEvent } from '../api/client';
 import type { SharedContentResponse, SharedContentType } from '../api/client';
@@ -21,6 +22,15 @@ export const messageKeys = {
   saved: () => [...messageKeys.all, 'saved'] as const,
   shared: (chatId: string, type: SharedContentType) => [...messageKeys.all, 'shared', chatId, type] as const,
 };
+
+const sharedContentTypes: SharedContentType[] = ['media', 'documents', 'links'];
+
+export function invalidateSharedContentForChat(queryClient: QueryClient, chatId: string | undefined) {
+  if (!chatId) return;
+  sharedContentTypes.forEach((type) => {
+    queryClient.invalidateQueries({ queryKey: messageKeys.shared(chatId, type) });
+  });
+}
 
 // Response type for paginated messages
 interface MessagesResponse {
@@ -164,6 +174,8 @@ export const useSendMessage = (chatId: string) => {
           );
         });
       });
+
+      invalidateSharedContentForChat(queryClient, newMessage.chatId || chatId);
     },
   });
 };
@@ -281,6 +293,7 @@ export const useSharedContent = (
     initialPageParam: undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: Boolean(chatId),
+    refetchOnMount: 'always',
   });
 };
 
@@ -324,6 +337,7 @@ export const useEditMessage = (chatId: string) => {
           })),
         };
       });
+      invalidateSharedContentForChat(queryClient, updatedMessage.chatId || chatId);
     },
   });
 };
@@ -350,6 +364,7 @@ export const useDeleteMessage = (chatId: string) => {
           })),
         };
       });
+      invalidateSharedContentForChat(queryClient, chatId);
     },
   });
 };

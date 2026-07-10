@@ -84,6 +84,14 @@ export function serializeMessage(message: MessageDocument, tempId?: string, view
           })),
         }
       : undefined,
+    planThis: message.planThis
+      ? {
+          ...message.planThis,
+          planId: objectIdToString(message.planThis.planId),
+          createdAt: dateToIso(message.planThis.createdAt),
+          updatedAt: dateToIso(message.planThis.updatedAt),
+        }
+      : undefined,
     replyTo: message.replyTo
       ? {
           messageId: objectIdToString(message.replyTo.messageId),

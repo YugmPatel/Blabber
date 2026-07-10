@@ -1,3 +1,6 @@
+import { createReadStream } from 'fs';
+import { promises as fs } from 'fs';
+import { resolve } from 'path';
 import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { z } from 'zod';
@@ -8,26 +11,31 @@ import { getMomentsCollection, MomentAudienceType, MomentDocument } from '../mod
 import { getMomentViewsCollection } from '../models/moment-view';
 import { getMomentReactionsCollection, MOMENT_REACTION_EMOJIS, MomentReactionEmoji } from '../models/moment-reaction';
 import { getMomentNotificationCooldownsCollection, MomentNotificationKind } from '../models/moment-notification-cooldown';
+import { getMomentVideoPlaybackSessionsCollection } from '../models/moment-video-playback-session';
 import { getCloseFriendsCollection } from '../models/close-friend';
 import { getOrCreateUserSettings } from '../models/user-settings';
 import { hasBlockBetween } from '../models/user-block';
 import { MomentExpiryProcessor } from '../workers/moment-expiry-processor';
 import { safelyDeleteMomentMedia } from '../moment-media-cleanup';
+import { deleteMomentVideoArtifacts } from '../moment-video-cleanup';
 import { getPubSub } from '../pubsub';
 
 const TEXT_LIMIT = 500;
 const REPLY_TEXT_LIMIT = 1000;
 const MOMENT_UPDATE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const MOMENT_ACTIVITY_COOLDOWN_MS = 5 * 60 * 1000;
+const MOMENT_VIDEO_PLAYBACK_SESSION_TTL_MS = 5 * 60 * 1000;
+const MEDIA_ROOT = process.env.LOCAL_MEDIA_DIR || '/data/blabber-media';
 const STYLE_KEYS = new Set(['teal', 'sky', 'violet', 'rose', 'amber', 'slate']);
 const TEXT_STYLE_KEYS = new Set(['classic', 'headline', 'quiet']);
 const REACTION_EMOJI_SET = new Set<string>(MOMENT_REACTION_EMOJIS);
 
 const CreateMomentSchema = z.object({
-  type: z.enum(['text', 'image']),
+  type: z.enum(['text', 'image', 'audio', 'video']),
   textBody: z.string().trim().max(TEXT_LIMIT).optional(),
   caption: z.string().trim().max(TEXT_LIMIT).optional(),
   mediaId: z.string().trim().optional(),
+  videoId: z.string().trim().optional(),
   style: z
     .object({
       backgroundKey: z.string().trim().optional(),
@@ -57,6 +65,12 @@ function publicUser(user: any) {
     name: user?.name || user?.username || 'User',
     avatarUrl: user?.avatarUrl || null,
   };
+}
+
+function isSafeLocalMediaPath(path: string) {
+  const root = resolve(MEDIA_ROOT);
+  const target = resolve(path);
+  return target === root || target.startsWith(`${root}/`);
 }
 
 async function ensureActiveUser(userId: ObjectId) {
@@ -151,7 +165,8 @@ function serializeMoment(
     type: moment.type,
     textBody: moment.textBody || '',
     caption: moment.caption || '',
-    mediaUrl: moment.type === 'image' ? `/api/moments/${moment._id.toString()}/media` : null,
+    mediaUrl: moment.mediaId && ['image', 'audio'].includes(moment.type) ? `/api/moments/${moment._id.toString()}/media` : null,
+    videoPlaybackUrl: moment.videoId && moment.type === 'video' ? `/api/moments/${moment._id.toString()}/video/playback-session` : null,
     style: moment.style || { backgroundKey: 'teal', textStyleKey: 'classic' },
     createdAt: moment.createdAt,
     expiresAt: moment.expiresAt,
@@ -387,34 +402,61 @@ export const createMoment = asyncHandler(async (req: Request, res: Response) => 
   if (!userId) return;
   await ensureActiveUser(userId);
 
-  if (req.body?.type === 'video') throw new ValidationError('Video Moments are not available yet');
   const body = CreateMomentSchema.parse(req.body);
   if (body.style?.backgroundKey && !STYLE_KEYS.has(body.style.backgroundKey)) throw new ValidationError('Moment style is unavailable');
   if (body.style?.textStyleKey && !TEXT_STYLE_KEYS.has(body.style.textStyleKey)) throw new ValidationError('Moment style is unavailable');
 
+  const now = new Date();
+  const momentId = new ObjectId();
   let mediaId: ObjectId | undefined;
+  let videoId: ObjectId | undefined;
   if (body.type === 'text') {
     if (!body.textBody) throw new ValidationError('Moment text is required');
-  } else {
-    if (!body.mediaId || !ObjectId.isValid(body.mediaId)) throw new ValidationError('Moment photo is required');
+  } else if (body.type === 'image' || body.type === 'audio') {
+    if (!body.mediaId || !ObjectId.isValid(body.mediaId)) throw new ValidationError(body.type === 'audio' ? 'Moment audio is required' : 'Moment photo is required');
     const media = await getDatabase().collection('media').findOne({
       _id: new ObjectId(body.mediaId),
       userId,
       status: 'approved',
-      fileType: /^image\//,
+      fileType: body.type === 'audio' ? /^audio\// : /^image\//,
     });
-    if (!media) throw new ValidationError('Moment photo is unavailable');
+    if (!media) throw new ValidationError(body.type === 'audio' ? 'Moment audio is unavailable' : 'Moment photo is unavailable');
     mediaId = media._id;
+  } else if (body.type === 'video') {
+    if (!body.videoId || !ObjectId.isValid(body.videoId)) throw new ValidationError('Moment video is required');
+    videoId = new ObjectId(body.videoId);
+    const video = await getDatabase().collection('moment_videos').findOneAndUpdate(
+      {
+        _id: videoId,
+        authorUserId: userId,
+        processingStatus: 'ready',
+        momentId: { $exists: false },
+        deletedAt: { $exists: false },
+      },
+      { $set: { momentId, publishedAt: now, updatedAt: now } },
+      { returnDocument: 'after' }
+    );
+    if (!video?.sourceMediaId || !video.fallbackPath || !video.posterPath) throw new ValidationError('Moment video is unavailable');
+    const media = await getDatabase().collection('media').findOne({
+      _id: video.sourceMediaId,
+      userId,
+      status: 'approved',
+      purpose: 'moment_video_source',
+      fileType: 'video/mp4',
+      deletedAt: { $exists: false },
+    });
+    if (!media) throw new ValidationError('Moment video is unavailable');
+    mediaId = video.sourceMediaId;
   }
 
-  const now = new Date();
   const moment: MomentDocument = {
-    _id: new ObjectId(),
+    _id: momentId,
     authorUserId: userId,
     type: body.type,
     textBody: body.type === 'text' ? body.textBody : undefined,
     caption: body.caption || undefined,
     mediaId,
+    videoId,
     style: {
       backgroundKey: body.style?.backgroundKey || 'teal',
       textStyleKey: body.style?.textStyleKey || 'classic',
@@ -745,6 +787,7 @@ export const deleteMoment = asyncHandler(async (req: Request, res: Response) => 
     { 'momentReply.momentId': moment._id },
     { $unset: { momentReply: '' } }
   );
+  if (moment.videoId) await deleteMomentVideoArtifacts(moment.videoId);
   if (moment.mediaId) await safelyDeleteMomentMedia(moment.mediaId, moment._id);
   res.status(200).json({ success: true });
 });
@@ -753,11 +796,15 @@ export const getMomentMedia = asyncHandler(async (req: Request, res: Response) =
   const userId = requireUserId(req, res);
   if (!userId) return;
   const moment = await loadAuthorizedMoment(req.params.id, userId, true);
-  if (!moment?.mediaId || moment.type !== 'image') {
+  if (!moment?.mediaId || !['image', 'audio'].includes(moment.type)) {
     res.status(404).json({ error: 'Not Found', message: 'This Moment is no longer available.' });
     return;
   }
-  const media = await getDatabase().collection('media').findOne({ _id: moment.mediaId, status: 'approved', fileType: /^image\// });
+  const media = await getDatabase().collection('media').findOne({
+    _id: moment.mediaId,
+    status: 'approved',
+    fileType: moment.type === 'audio' ? /^audio\// : /^image\//,
+  });
   if (!media) {
     res.status(404).json({ error: 'Not Found', message: 'This Moment is no longer available.' });
     return;
@@ -777,6 +824,146 @@ export const getMomentMedia = asyncHandler(async (req: Request, res: Response) =
   res.setHeader('Cache-Control', 'private, max-age=300');
   const buffer = Buffer.from(await response.arrayBuffer());
   res.status(200).send(buffer);
+});
+
+async function loadAuthorizedVideoMoment(momentId: string, viewerUserId: ObjectId) {
+  const moment = await loadAuthorizedMoment(momentId, viewerUserId, true);
+  if (!moment?.videoId || moment.type !== 'video') return null;
+  await ensureActiveUser(viewerUserId);
+  await ensureActiveUser(moment.authorUserId);
+
+  const video = await getDatabase().collection('moment_videos').findOne({
+    _id: moment.videoId,
+    momentId: moment._id,
+    authorUserId: moment.authorUserId,
+    processingStatus: 'ready',
+    deletedAt: { $exists: false },
+  });
+  if (!video?.sourceMediaId || !video.fallbackPath || !video.posterPath) return null;
+
+  const media = await getDatabase().collection('media').findOne({
+    _id: video.sourceMediaId,
+    userId: moment.authorUserId,
+    status: 'approved',
+    purpose: 'moment_video_source',
+    fileType: 'video/mp4',
+    deletedAt: { $exists: false },
+  });
+  if (!media) return null;
+
+  return { moment, video };
+}
+
+async function loadSessionVideoMoment(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return null;
+  if (!ObjectId.isValid(req.params.id)) {
+    momentUnavailable(res);
+    return null;
+  }
+  const session = await getMomentVideoPlaybackSessionsCollection().findOne({
+    viewerUserId: userId,
+    momentId: new ObjectId(req.params.id),
+    revokedAt: { $exists: false },
+    expiresAt: { $gt: new Date() },
+  }, { sort: { createdAt: -1 } });
+  if (!session) {
+    momentUnavailable(res);
+    return null;
+  }
+
+  const loaded = await loadAuthorizedVideoMoment(req.params.id, userId);
+  if (!loaded || !loaded.video._id.equals(session.videoId)) {
+    momentUnavailable(res);
+    return null;
+  }
+  return loaded;
+}
+
+async function streamLocalFile(res: Response, path: string, contentType: string, rangeHeader?: string | string[]) {
+  if (!isSafeLocalMediaPath(path)) {
+    momentUnavailable(res);
+    return;
+  }
+
+  let stat;
+  try {
+    stat = await fs.stat(path);
+  } catch {
+    momentUnavailable(res);
+    return;
+  }
+
+  const size = stat.size;
+  const range = Array.isArray(rangeHeader) ? rangeHeader[0] : rangeHeader;
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, max-age=30');
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match) {
+      res.status(416).end();
+      return;
+    }
+    const start = match[1] ? Number(match[1]) : 0;
+    const end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || end >= size) {
+      res.status(416).setHeader('Content-Range', `bytes */${size}`).end();
+      return;
+    }
+    res.status(206);
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+    res.setHeader('Content-Length', String(end - start + 1));
+    createReadStream(path, { start, end }).pipe(res);
+    return;
+  }
+
+  res.status(200);
+  res.setHeader('Content-Length', String(size));
+  createReadStream(path).pipe(res);
+}
+
+export const createMomentVideoPlaybackSession = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  if (!ObjectId.isValid(req.params.id)) {
+    momentUnavailable(res);
+    return;
+  }
+
+  const loaded = await loadAuthorizedVideoMoment(req.params.id, userId);
+  if (!loaded) {
+    momentUnavailable(res);
+    return;
+  }
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + MOMENT_VIDEO_PLAYBACK_SESSION_TTL_MS);
+  await getMomentVideoPlaybackSessionsCollection().insertOne({
+    _id: new ObjectId(),
+    viewerUserId: userId,
+    momentId: loaded.moment._id,
+    videoId: loaded.video._id,
+    createdAt: now,
+    expiresAt,
+    schemaVersion: 1,
+  });
+
+  res.status(201).json({ playback: { expiresAt } });
+});
+
+export const playbackMomentVideoFallback = asyncHandler(async (req: Request, res: Response) => {
+  const loaded = await loadSessionVideoMoment(req, res);
+  if (!loaded?.video?.fallbackPath) return;
+  await streamLocalFile(res, loaded.video.fallbackPath, 'video/mp4', req.headers.range);
+});
+
+export const playbackMomentVideoPoster = asyncHandler(async (req: Request, res: Response) => {
+  const loaded = await loadSessionVideoMoment(req, res);
+  if (!loaded?.video?.posterPath) return;
+  await streamLocalFile(res, loaded.video.posterPath, 'image/jpeg');
 });
 
 export const runMomentExpiryWorker = asyncHandler(async (req: Request, res: Response) => {

@@ -11,7 +11,7 @@ import { getCommunitiesCollection, CommunityDocument } from '../models/community
 import { getCommunityMembershipsCollection, CommunityMembershipDocument, CommunityRole } from '../models/community-membership';
 import { getCommunityJoinRequestsCollection } from '../models/community-join-request';
 import { getCommunityBansCollection } from '../models/community-ban';
-import { getCommunityInvitesCollection } from '../models/community-invite';
+import { getCommunityInvitesCollection, CommunityInviteDocument } from '../models/community-invite';
 import { getCommunityPostsCollection, CommunityPostDocument } from '../models/community-post';
 import { getCommunityPostCommentsCollection, CommunityPostCommentDocument } from '../models/community-post-comment';
 import { COMMUNITY_REACTION_EMOJIS, getCommunityPostReactionsCollection } from '../models/community-post-reaction';
@@ -35,7 +35,7 @@ const ROLE_RANK: Record<CommunityRole, number> = { member: 1, moderator: 2, admi
 
 const createCommunitySchema = z.object({
   name: z.string().trim().min(3).max(80),
-  handle: z.string().trim().toLowerCase().regex(HANDLE_REGEX),
+  handle: z.string().trim().toLowerCase().regex(HANDLE_REGEX).optional(),
   description: z.string().trim().max(500).default(''),
   membershipMode: z.enum(['open', 'approval_required', 'private']).default('open'),
   postingPolicy: z.enum(['everyone', 'mods_admins', 'admins_only']).default('everyone'),
@@ -103,6 +103,34 @@ async function ensureHandleAvailable(handle: string, currentCommunityId?: Object
     getCommunityHandleReservationsCollection().findOne({ handle, reservedUntil: { $gt: new Date() } }),
   ]);
   return !existing && !reservation;
+}
+
+function communityHandleBase(name: string) {
+  const ascii = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  let base = ascii || 'community';
+  if (!/^[a-z]/.test(base)) base = `c_${base}`;
+  base = base.slice(0, 30).replace(/_+$/g, '');
+  while (base.length < 3) base += 'x';
+  if (RESERVED_HANDLES.has(base)) base = `${base.slice(0, 26)}_hub`.slice(0, 30).replace(/_+$/g, '');
+  while (base.length < 3) base += 'x';
+  return base;
+}
+
+async function deriveAvailableCommunityHandle(name: string, requested?: string) {
+  if (requested) return requested;
+  const base = communityHandleBase(name);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `_${attempt + 1}`;
+    const candidate = `${base.slice(0, 30 - suffix.length).replace(/_+$/g, '')}${suffix}`;
+    if (await ensureHandleAvailable(candidate)) return candidate;
+  }
+  return null;
 }
 
 async function validateAvatar(ownerUserId: ObjectId, avatarMediaId?: string) {
@@ -335,9 +363,10 @@ export const createCommunity = asyncHandler(async (req: Request, res: Response) 
   const userId = requireUserId(req, res);
   if (!userId) return;
   const user = await loadActiveUser(userId);
-  if (!user || !(user as any).emailVerified || !user.profileHandle) throw new ValidationError('Verified account and profile handle required');
+  if (!user) throw new ValidationError('Community creation is unavailable');
   const parsed = parseSchema(createCommunitySchema, req.body);
-  if (!(await ensureHandleAvailable(parsed.handle))) {
+  const handle = await deriveAvailableCommunityHandle(parsed.name, parsed.handle);
+  if (!handle || !(await ensureHandleAvailable(handle))) {
     res.status(409).json({ error: 'Conflict', message: 'That Community handle is unavailable.' });
     return;
   }
@@ -346,7 +375,7 @@ export const createCommunity = asyncHandler(async (req: Request, res: Response) 
     _id: new ObjectId(),
     ownerUserId: userId,
     name: parsed.name,
-    handle: parsed.handle,
+    handle,
     description: parsed.description,
     avatarMediaId: await validateAvatar(userId, parsed.avatarMediaId),
     membershipMode: parsed.membershipMode,
@@ -653,6 +682,14 @@ async function loadValidInvite(token: string) {
   return { invite, community };
 }
 
+async function claimInviteUse(invite: CommunityInviteDocument) {
+  return getCommunityInvitesCollection().findOneAndUpdate(
+    { _id: invite._id, revokedAt: { $exists: false }, ...(invite.expiresAt ? { expiresAt: { $gt: new Date() } } : {}), ...(invite.maxUses !== undefined ? { useCount: { $lt: invite.maxUses } } : {}) },
+    { $inc: { useCount: 1 }, $set: { updatedAt: new Date() } },
+    { returnDocument: 'after' }
+  );
+}
+
 export const previewInvite = asyncHandler(async (req: Request, res: Response) => {
   const userId = requireUserId(req, res);
   if (!userId) return;
@@ -673,12 +710,34 @@ export const acceptInvite = asyncHandler(async (req: Request, res: Response) => 
     return;
   }
   const existing = await getMembership(loaded.community._id, userId);
-  if (!existing) {
-    const invite = await getCommunityInvitesCollection().findOneAndUpdate(
-      { _id: loaded.invite._id, revokedAt: { $exists: false }, ...(loaded.invite.expiresAt ? { expiresAt: { $gt: new Date() } } : {}), ...(loaded.invite.maxUses !== undefined ? { useCount: { $lt: loaded.invite.maxUses } } : {}) },
-      { $inc: { useCount: 1 }, $set: { updatedAt: new Date() } },
-      { returnDocument: 'after' }
+  let pending = false;
+  if (!existing && loaded.community.membershipMode === 'approval_required') {
+    const now = new Date();
+    const existingRequest = await getCommunityJoinRequestsCollection().findOne({ communityId: loaded.community._id, requesterUserId: userId, status: 'pending' });
+    if (!existingRequest) {
+      const invite = await claimInviteUse(loaded.invite);
+      if (!invite) {
+        res.status(404).json({ error: 'Not Found', message: 'Invite unavailable' });
+        return;
+      }
+    }
+    await getCommunityJoinRequestsCollection().updateOne(
+      { communityId: loaded.community._id, requesterUserId: userId, status: 'pending' },
+      {
+        $setOnInsert: {
+          _id: new ObjectId(),
+          communityId: loaded.community._id,
+          requesterUserId: userId,
+          status: 'pending',
+          createdAt: now,
+        },
+        $set: { updatedAt: now },
+      } as any,
+      { upsert: true }
     );
+    pending = true;
+  } else if (!existing) {
+    const invite = await claimInviteUse(loaded.invite);
     if (!invite) {
       res.status(404).json({ error: 'Not Found', message: 'Invite unavailable' });
       return;
@@ -687,7 +746,11 @@ export const acceptInvite = asyncHandler(async (req: Request, res: Response) => 
     await getCommunityMembershipsCollection().insertOne({ _id: new ObjectId(), communityId: loaded.community._id, userId, role: 'member', postingRestricted: false, joinedAt: now, createdAt: now, updatedAt: now });
     await recomputeMemberCount(loaded.community._id);
   }
-  res.status(200).json({ community: await serializeCommunity((await getCommunitiesCollection().findOne({ _id: loaded.community._id }))!, userId, await getMembership(loaded.community._id, userId)) });
+  const community = (await getCommunitiesCollection().findOne({ _id: loaded.community._id }))!;
+  res.status(200).json({
+    community: await serializeCommunity(community, userId, await getMembership(loaded.community._id, userId), pending),
+    pending,
+  });
 });
 
 export const listCommunityPosts = asyncHandler(async (req: Request, res: Response) => {

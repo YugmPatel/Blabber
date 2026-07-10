@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import Avatar from './Avatar';
 import type { Chat } from '@repo/types';
 import { formatDistanceToNow } from 'date-fns';
-import { Pin, Timer, Users } from 'lucide-react';
+import { Archive, ArchiveRestore, Loader2, Pin, Timer, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUser, useUserPresence } from '@/hooks/useUsers';
 
@@ -11,9 +11,20 @@ interface ChatItemProps {
   isActive?: boolean;
   isPinned?: boolean;
   unreadCount?: number;
+  onArchive?: (chat: Chat) => void;
+  onUnarchive?: (chat: Chat) => void;
+  isArchivePending?: boolean;
 }
 
-export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: ChatItemProps) {
+export default function ChatItem({
+  chat,
+  isActive,
+  isPinned,
+  unreadCount = 0,
+  onArchive,
+  onUnarchive,
+  isArchivePending = false,
+}: ChatItemProps) {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
 
@@ -48,6 +59,7 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
     return senderName ? `${senderName}: ${body}` : body;
   };
   const mentionCount = chat.mentionUnreadCount || 0;
+  const isArchived = Boolean(chat.archived);
 
   const temporaryLabel = () => {
     if (!isTemporary || !chat.expiresAt) return null;
@@ -69,9 +81,9 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
   return (
     <div
       onClick={handleClick}
-      className={`flex cursor-pointer items-center gap-3 px-3 py-3 transition-colors ${
+      className={`bl-focus-ring group/chat-row relative mx-2 flex cursor-pointer items-center gap-3 rounded-xl px-3 py-3 transition-colors ${
         isActive
-          ? 'bg-teal-50 dark:bg-teal-900/20'
+          ? 'bg-teal-50 dark:bg-teal-500/15'
           : unreadCount > 0
             ? 'bg-teal-50/45 hover:bg-teal-50 dark:bg-teal-950/20 dark:hover:bg-teal-950/30'
           : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
@@ -85,6 +97,12 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
         }
       }}
     >
+      {isActive && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-teal-600 dark:bg-teal-400"
+        />
+      )}
       {chat.type === 'group' && avatarUrl ? (
         <Avatar src={avatarUrl} alt={title} size="md" />
       ) : chat.type === 'group' ? (
@@ -138,6 +156,29 @@ export default function ChatItem({ chat, isActive, isPinned, unreadCount = 0 }: 
           )}
         </div>
       </div>
+      {(onArchive || onUnarchive) && (
+        <button
+          type="button"
+          aria-label={isArchived ? 'Unarchive conversation' : 'Archive conversation'}
+          title={isArchived ? 'Unarchive conversation' : 'Archive conversation'}
+          disabled={isArchivePending}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (isArchived) onUnarchive?.(chat);
+            else onArchive?.(chat);
+          }}
+          className="ml-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-400 opacity-100 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-100 md:opacity-0 md:focus:opacity-100 md:group-hover/chat-row:opacity-100 md:group-focus-within/chat-row:opacity-100"
+        >
+          {isArchivePending ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : isArchived ? (
+            <ArchiveRestore size={15} />
+          ) : (
+            <Archive size={15} />
+          )}
+        </button>
+      )}
     </div>
   );
 }

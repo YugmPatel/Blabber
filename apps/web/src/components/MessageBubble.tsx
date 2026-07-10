@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Message } from '@repo/types';
-import { createReport, normalizeMediaUrl } from '@/api/client';
+import { createReport, getAccessToken, normalizeMediaUrl } from '@/api/client';
 import Avatar from './Avatar';
 import ReadReceipts from './ReadReceipts';
+import PlanThisMessageCard from './PlanThisMessageCard';
+import { Bookmark, Flag, Image as ImageIcon, Loader2, Pin, X } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -31,6 +33,8 @@ interface MessageBubbleProps {
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const URL_REGEX = /(https?:\/\/[^\s<>"']+)/gi;
 const TRAILING_URL_PUNCTUATION = /[),.!?:;]+$/;
+const REPORT_REASONS = ['Harassment or bullying', 'Hate or abusive content', 'Spam or scam', 'Sexual content', 'Violence or threats', 'Other safety concern'];
+const CLIPBOARD_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 function formatFileSize(size?: number) {
   if (!size || size <= 0) return '';
@@ -54,45 +58,78 @@ function splitTrailingPunctuation(url: string) {
   };
 }
 
+function communityInvitePath(url: string) {
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(/^\/communities\/join\/([A-Za-z0-9_-]{20,})$/);
+    return match ? `/communities/join/${match[1]}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function CommunityInviteCard({ url, isSentByMe }: { url: string; isSentByMe: boolean }) {
+  const path = communityInvitePath(url);
+  if (!path) return null;
+  return (
+    <a
+      href={path}
+      className={`mt-2 block rounded-lg border px-3 py-2 text-left no-underline ${
+        isSentByMe
+          ? 'border-teal-200 bg-white/60 text-slate-900 hover:bg-white dark:border-teal-400/30 dark:bg-white/10 dark:text-white dark:hover:bg-white/15'
+          : 'border-teal-200 bg-teal-50 text-slate-900 hover:bg-teal-100 dark:border-teal-900/60 dark:bg-teal-950/30 dark:text-white'
+      }`}
+    >
+      <span className="block text-sm font-semibold">Community invite</span>
+      <span className="mt-1 block text-xs text-slate-600 dark:text-slate-300">Open this Blabber invite to join or request access.</span>
+    </a>
+  );
+}
+
 function LinkifiedText({ text, isSentByMe }: { text: string; isSentByMe: boolean }) {
   const parts = text.split(URL_REGEX);
+  const inviteUrl = parts.find((part) => part.match(URL_REGEX) && communityInvitePath(splitTrailingPunctuation(part).href));
 
   return (
-    <p className="whitespace-pre-wrap break-words text-sm">
-      {parts.map((part, index) => {
-        if (!part.match(URL_REGEX)) return <span key={`${part}-${index}`}>{part}</span>;
+    <>
+      <p className="whitespace-pre-wrap break-words text-sm">
+        {parts.map((part, index) => {
+          if (!part.match(URL_REGEX)) return <span key={`${part}-${index}`}>{part}</span>;
 
-        const { href, trailing } = splitTrailingPunctuation(part);
-        let parsed: URL;
-        try {
-          parsed = new URL(href);
-        } catch {
-          return <span key={`${part}-${index}`}>{part}</span>;
-        }
+          const { href, trailing } = splitTrailingPunctuation(part);
+          let parsed: URL;
+          try {
+            parsed = new URL(href);
+          } catch {
+            return <span key={`${part}-${index}`}>{part}</span>;
+          }
 
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-          return <span key={`${part}-${index}`}>{part}</span>;
-        }
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return <span key={`${part}-${index}`}>{part}</span>;
+          }
 
-        return (
-          <span key={`${href}-${index}`}>
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`font-medium underline underline-offset-2 ${
-                isSentByMe
-                  ? 'text-white decoration-white/60 hover:decoration-white'
-                  : 'text-teal-700 decoration-teal-500/50 hover:decoration-teal-700 dark:text-teal-300'
-              }`}
-            >
-              {href}
-            </a>
-            {trailing}
-          </span>
-        );
-      })}
-    </p>
+          const internalInvitePath = communityInvitePath(href);
+          return (
+            <span key={`${href}-${index}`}>
+              <a
+                href={internalInvitePath || href}
+                target={internalInvitePath ? undefined : '_blank'}
+                rel={internalInvitePath ? undefined : 'noopener noreferrer'}
+                className={`font-medium underline underline-offset-2 [overflow-wrap:anywhere] ${
+                  isSentByMe
+                    ? 'text-teal-700 decoration-teal-500/60 hover:text-teal-800 hover:decoration-teal-700 dark:text-teal-300 dark:decoration-teal-300/60 dark:hover:text-teal-200 dark:hover:decoration-teal-200'
+                    : 'text-teal-700 decoration-teal-500/50 hover:text-teal-800 hover:decoration-teal-700 dark:text-teal-300 dark:hover:text-teal-200'
+                }`}
+              >
+                {href}
+              </a>
+              {trailing}
+            </span>
+          );
+        })}
+      </p>
+      {inviteUrl && <CommunityInviteCard url={splitTrailingPunctuation(inviteUrl).href} isSentByMe={isSentByMe} />}
+    </>
   );
 }
 
@@ -116,9 +153,7 @@ function MentionedText({ message, isSentByMe }: { message: Message; isSentByMe: 
       {parts.map((part) => part.mention ? (
         <span
           key={part.key}
-          className={`rounded px-1 font-semibold ${
-            isSentByMe ? 'bg-white/10 text-white' : 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200'
-          }`}
+          className="rounded bg-teal-600/10 px-1 font-semibold text-teal-800 dark:bg-teal-400/20 dark:text-teal-100"
         >
           {part.text}
         </span>
@@ -154,8 +189,16 @@ export default function MessageBubble({
 }: MessageBubbleProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [isCopyingPhoto, setIsCopyingPhoto] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [reportReason, setReportReason] = useState(REPORT_REASONS[0]);
+  const [reportStatus, setReportStatus] = useState<string | null>(null);
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const canCopyPhoto = isSentByMe && message.media?.type === 'image' && Boolean(message.media.url);
 
   useEffect(() => {
     if (!showMenu) return;
@@ -194,7 +237,7 @@ export default function MessageBubble({
     }
 
     const menuWidth = 160;
-    const menuHeight = 168;
+    const menuHeight = canCopyPhoto ? 300 : 260;
     const gutter = 8;
     const top =
       window.innerHeight - rect.bottom >= menuHeight + gutter
@@ -207,6 +250,58 @@ export default function MessageBubble({
 
     setMenuPosition({ top, left });
     setShowMenu((value) => !value);
+  };
+
+  const returnFocusToMenuButton = () => {
+    window.setTimeout(() => menuButtonRef.current?.focus(), 0);
+  };
+
+  const copyPhotoToClipboard = async () => {
+    if (!canCopyPhoto || isCopyingPhoto) return;
+    const ClipboardItemCtor = window.ClipboardItem;
+    if (!navigator.clipboard?.write || !ClipboardItemCtor) {
+      setActionNotice('Copying photos is not available in this browser.');
+      return;
+    }
+
+    const mediaUrl = normalizeMediaUrl(message.media?.url);
+    if (!mediaUrl) {
+      setActionNotice('This photo is unavailable.');
+      return;
+    }
+
+    setIsCopyingPhoto(true);
+    setActionNotice(null);
+    try {
+      const headers: HeadersInit = {};
+      const token = getAccessToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(mediaUrl, { credentials: 'include', headers });
+      if (!response.ok) throw new Error('photo_unavailable');
+      const blob = await response.blob();
+      const type = blob.type.split(';')[0].toLowerCase();
+      if (!CLIPBOARD_IMAGE_TYPES.has(type)) throw new Error('unsupported_clipboard_image');
+      await navigator.clipboard.write([new ClipboardItemCtor({ [type]: blob })]);
+      setActionNotice('Photo copied.');
+    } catch {
+      setActionNotice('Copying photos is not available in this browser.');
+    } finally {
+      setIsCopyingPhoto(false);
+    }
+  };
+
+  const submitReport = async () => {
+    if (isSubmittingReport) return;
+    setIsSubmittingReport(true);
+    setReportStatus(null);
+    try {
+      const result = await createReport({ targetType: 'message', targetId: message._id, reason: reportReason });
+      setReportStatus(result.duplicate ? 'You have already reported this message.' : 'Thanks. Your report was submitted.');
+    } catch {
+      setReportStatus('This report could not be submitted. Please try again.');
+    } finally {
+      setIsSubmittingReport(false);
+    }
   };
 
   const renderMedia = () => {
@@ -236,6 +331,7 @@ export default function MessageBubble({
             key={mediaUrl}
             controls
             preload="metadata"
+            aria-label="Play or pause voice message"
             className="h-10 max-w-xs"
           >
             <source src={mediaUrl} type={mimeType || 'audio/webm'} />
@@ -256,16 +352,16 @@ export default function MessageBubble({
           href={mediaUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className={`mb-1 flex w-full max-w-[min(20rem,calc(100vw-7rem))] items-center gap-3 rounded-xl border p-3 text-left transition ${
+          className={`mb-1 flex w-full max-w-[20rem] items-center gap-3 rounded-xl border p-3 text-left transition ${
             isSentByMe
-              ? 'border-slate-600 bg-slate-800 text-slate-50 hover:bg-slate-700 dark:border-teal-400/30 dark:bg-teal-700 dark:text-white dark:hover:bg-teal-500'
+              ? 'border-teal-200 bg-white/70 text-slate-900 hover:bg-white dark:border-teal-400/25 dark:bg-white/10 dark:text-slate-100 dark:hover:bg-white/15'
               : 'border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:bg-slate-900'
           }`}
         >
           <span
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
               isSentByMe
-                ? 'bg-white/10 text-white'
+                ? 'bg-teal-600/10 text-teal-700 dark:bg-white/10 dark:text-teal-100'
                 : 'bg-white text-slate-700 shadow-sm dark:bg-slate-800 dark:text-slate-200'
             }`}
           >
@@ -283,11 +379,7 @@ export default function MessageBubble({
             <span className="block truncate text-sm font-semibold leading-5">
               {fileName || 'Document'}
             </span>
-            <span
-              className={`mt-0.5 block truncate text-xs ${
-                isSentByMe ? 'text-slate-300 dark:text-teal-50/80' : 'text-slate-500 dark:text-slate-400'
-              }`}
-            >
+            <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
               {metadata || 'Open document'}
             </span>
           </span>
@@ -336,7 +428,7 @@ export default function MessageBubble({
             <button
               type="button"
               onClick={() => onClosePoll(message._id)}
-              className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold opacity-80 hover:opacity-100 dark:border-slate-600"
+              className="rounded-lg border border-teal-100 px-2 py-1 text-[11px] font-semibold text-teal-700 opacity-80 hover:bg-teal-50 hover:opacity-100 dark:border-teal-800/50 dark:text-teal-200 dark:hover:bg-teal-500/10"
             >
               Close
             </button>
@@ -357,7 +449,7 @@ export default function MessageBubble({
                 className={`relative w-full overflow-hidden rounded-xl border px-3 py-2 text-left text-sm transition ${
                   selected
                     ? 'border-teal-200 bg-teal-50 text-teal-900 dark:border-teal-500/50 dark:bg-teal-500/20 dark:text-white'
-                    : 'border-slate-200 bg-white/80 text-slate-800 hover:border-teal-300 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-100'
+                    : 'border-teal-100 bg-white/80 text-slate-800 hover:border-teal-300 hover:bg-teal-50/60 dark:border-teal-800/40 dark:bg-slate-900/50 dark:text-slate-100'
                 }`}
               >
                 <span
@@ -465,24 +557,36 @@ export default function MessageBubble({
               className={`rounded-lg border px-2 py-1 text-[11px] font-semibold capitalize ${
                 message.event?.currentUserRsvp === status
                   ? 'border-teal-300 bg-teal-50 text-teal-700 dark:border-teal-500 dark:bg-teal-500/20 dark:text-teal-200'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
+                  : 'border-teal-100 text-slate-600 hover:border-teal-300 hover:bg-teal-50 dark:border-teal-800/50 dark:text-slate-300 dark:hover:bg-teal-500/10'
               }`}
             >
               {status} {rsvpCounts[status] || 0}
             </button>
           ))}
-          {onEventIcs && (
-            <button
-              type="button"
-              onClick={() => onEventIcs(message._id)}
-              className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              Calendar
-            </button>
+          {cancelled ? (
+            <span className="cursor-default rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-400 dark:border-slate-700 dark:text-slate-500">
+              Event cancelled
+            </span>
+          ) : (
+            onEventIcs && (
+              <button
+                type="button"
+                onClick={() => onEventIcs(message._id)}
+                className="rounded-lg border border-teal-100 px-2 py-1 text-[11px] font-semibold text-teal-700 hover:bg-teal-50 dark:border-teal-800/50 dark:text-teal-200 dark:hover:bg-teal-500/10"
+              >
+                Calendar
+              </button>
+            )
           )}
         </div>
       </div>
     );
+  };
+
+  const renderPlanThis = () => {
+    const planId = message.planThis?.planId;
+    if (!planId) return null;
+    return <PlanThisMessageCard planId={planId} />;
   };
 
   const renderReplyPreview = () => {
@@ -560,7 +664,7 @@ export default function MessageBubble({
       {showAvatar && isSentByMe && <div className="w-8" />}
 
       {/* Message content */}
-      <div className={`flex max-w-[72%] flex-col ${isSentByMe ? 'items-end' : 'items-start'}`}>
+      <div className={`flex max-w-[68%] flex-col ${isSentByMe ? 'items-end' : 'items-start'}`}>
         {/* Sender name for group chats */}
         {!isSentByMe && senderName && (
           <span className="mb-1 px-1 text-xs text-gray-600 dark:text-slate-400">{senderName}</span>
@@ -680,6 +784,7 @@ export default function MessageBubble({
                     }}
                     className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-700"
                   >
+                    <Pin size={16} aria-hidden="true" />
                     {(message as any).isPinned ? 'Unpin message' : 'Pin message'}
                   </button>
                 )}
@@ -692,7 +797,21 @@ export default function MessageBubble({
                     }}
                     className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-700"
                   >
+                    <Bookmark size={16} aria-hidden="true" />
                     {(message as any).isSaved ? 'Remove from Saved' : 'Save message'}
+                  </button>
+                )}
+                {canCopyPhoto && (
+                  <button
+                    onClick={() => {
+                      void copyPhotoToClipboard();
+                      setShowMenu(false);
+                    }}
+                    disabled={isCopyingPhoto}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    {isCopyingPhoto ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} aria-hidden="true" />}
+                    Copy photo
                   </button>
                 )}
                 <button
@@ -709,17 +828,19 @@ export default function MessageBubble({
                 </button>
                 <button
                   onClick={() => {
-                    void createReport({ targetType: 'message', targetId: message._id, reason: 'Message report' });
+                    setShowReportDialog(true);
+                    setReportStatus(null);
                     setShowMenu(false);
                   }}
                   className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-gray-100 dark:text-rose-400 dark:hover:bg-slate-700"
                 >
+                  <Flag size={16} aria-hidden="true" />
                   Report message
                 </button>
                 {isSentByMe && onDelete && (
                   <button
                     onClick={() => {
-                      onDelete(message._id);
+                      setShowDeleteDialog(true);
                       setShowMenu(false);
                     }}
                     className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100 dark:text-rose-400 dark:hover:bg-slate-700"
@@ -732,27 +853,23 @@ export default function MessageBubble({
                 )}
               </div>
             </>
-          )}
+            )}
 
           <div
             className={`rounded-2xl px-3.5 py-2.5 shadow-sm ${
               isSentByMe
-                ? 'bg-slate-900 text-slate-100 dark:bg-teal-600 dark:text-white'
+                ? 'border border-teal-100 bg-teal-50 text-slate-900 dark:border-teal-400/20 dark:bg-teal-500/15 dark:text-slate-100'
                 : 'border border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
             }`}
           >
             {renderReplyPreview()}
             {message.forwarded?.isForwarded && (
-              <p className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${
-                isSentByMe ? 'text-slate-300 dark:text-teal-50/80' : 'text-slate-500 dark:text-slate-400'
-              }`}>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Forwarded
               </p>
             )}
             {message.momentReply?.isMomentReply && (
-              <p className={`mb-1 text-[11px] font-semibold uppercase tracking-wide ${
-                isSentByMe ? 'text-slate-300 dark:text-teal-50/80' : 'text-slate-500 dark:text-slate-400'
-              }`}>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 {message.momentReply.label || 'Replied to a Moment'}
               </p>
             )}
@@ -760,25 +877,228 @@ export default function MessageBubble({
             {renderPoll()}
             {renderSticker()}
             {renderEvent()}
-            {message.body && !message.poll && !message.sticker && !message.event && (
+            {renderPlanThis()}
+            {message.body && !message.poll && !message.sticker && !message.event && !message.planThis && (
               <MentionedText message={message} isSentByMe={isSentByMe} />
             )}
 
             {/* Time and status */}
-            <div
-              className={`mt-1 flex items-center gap-1 text-xs ${
-                isSentByMe ? 'text-slate-300 dark:text-teal-50/80' : 'text-slate-500 dark:text-slate-400'
-              }`}
-            >
+            <div className="mt-1 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
               <span>{formatTime(message.createdAt)}</span>
               {message.editedAt && <span>(edited)</span>}
               <ReadReceipts status={message.status} isSentByMe={isSentByMe} />
             </div>
           </div>
+          {actionNotice && (
+            <p className="mt-1 max-w-xs px-1 text-xs text-slate-500 dark:text-slate-400">
+              {actionNotice}
+            </p>
+          )}
         </div>
 
         {/* Reactions */}
         {renderReactions()}
+      </div>
+      {showDeleteDialog && (
+        <MessageActionDialog
+          title="Delete this message?"
+          description="This will remove the message from the conversation."
+          confirmLabel="Delete"
+          danger
+          onClose={() => {
+            setShowDeleteDialog(false);
+            returnFocusToMenuButton();
+          }}
+          onConfirm={() => {
+            onDelete?.(message._id);
+            setShowDeleteDialog(false);
+            returnFocusToMenuButton();
+          }}
+        />
+      )}
+      {showReportDialog && (
+        <ReportMessageDialog
+          reason={reportReason}
+          status={reportStatus}
+          isSubmitting={isSubmittingReport}
+          onReasonChange={setReportReason}
+          onSubmit={submitReport}
+          onClose={() => {
+            setShowReportDialog(false);
+            setReportStatus(null);
+            returnFocusToMenuButton();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function trapDialogFocus(event: KeyboardEvent, container: HTMLDivElement | null, onClose: () => void) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    onClose();
+    return;
+  }
+  if (event.key !== 'Tab' || !container) return;
+  const focusable = Array.from(
+    container.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])')
+  );
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function MessageActionDialog({
+  title,
+  description,
+  confirmLabel,
+  danger = false,
+  onClose,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  danger?: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const handleKey = (event: globalThis.KeyboardEvent) => trapDialogFocus(event as unknown as KeyboardEvent, dialogRef.current, onClose);
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4" role="presentation" onMouseDown={onClose}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="message-action-dialog-title"
+        aria-describedby="message-action-dialog-body"
+        className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-950 p-5 text-white shadow-2xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="message-action-dialog-title" className="text-base font-semibold">{title}</h2>
+            <p id="message-action-dialog-body" className="mt-2 text-sm leading-6 text-slate-300">{description}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button ref={cancelRef} type="button" onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${danger ? 'bg-rose-600 hover:bg-rose-500' : 'bg-teal-600 hover:bg-teal-500'}`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportMessageDialog({
+  reason,
+  status,
+  isSubmitting,
+  onReasonChange,
+  onSubmit,
+  onClose,
+}: {
+  reason: string;
+  status: string | null;
+  isSubmitting: boolean;
+  onReasonChange: (reason: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const handleKey = (event: globalThis.KeyboardEvent) => trapDialogFocus(event as unknown as KeyboardEvent, dialogRef.current, onClose);
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  const submitted = status === 'Thanks. Your report was submitted.' || status === 'You have already reported this message.';
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4" role="presentation" onMouseDown={onClose}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="report-message-dialog-title"
+        className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5 text-white shadow-2xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="report-message-dialog-title" className="text-base font-semibold">Report message</h2>
+            <p className="mt-2 text-sm text-slate-300">Why are you reporting this message?</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="mt-4 space-y-2">
+          {REPORT_REASONS.map((entry) => (
+            <label key={entry} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2.5 text-sm text-slate-100 has-[:checked]:border-teal-500 has-[:checked]:bg-teal-950/60">
+              <input
+                type="radio"
+                name="report-reason"
+                value={entry}
+                checked={reason === entry}
+                disabled={submitted || isSubmitting}
+                onChange={() => onReasonChange(entry)}
+                className="h-4 w-4 border-slate-500 text-teal-500 focus:ring-teal-500"
+              />
+              {entry}
+            </label>
+          ))}
+        </div>
+        {status && (
+          <p className={`mt-4 rounded-xl border px-3 py-2 text-sm ${submitted ? 'border-teal-700 bg-teal-950/40 text-teal-100' : 'border-rose-800 bg-rose-950/40 text-rose-100'}`}>
+            {status}
+          </p>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <button ref={cancelRef} type="button" onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={isSubmitting || submitted}
+            className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSubmitting && <Loader2 size={15} className="animate-spin" />}
+            Submit report
+          </button>
+        </div>
       </div>
     </div>
   );

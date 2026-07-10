@@ -73,6 +73,8 @@ async function buildExportFiles(userId: ObjectId) {
     authoredPosts,
     myPostComments,
     myPostReactions,
+    savedPosts,
+    myPostReposts,
     saves,
     archiveState,
     actions,
@@ -96,6 +98,8 @@ async function buildExportFiles(userId: ObjectId) {
     savedReels,
     myReelSignals,
     myReelAffinities,
+    planThisRecords,
+    veyraSettings,
   ] = await Promise.all([
     db.collection('userSettings').findOne({ userId }),
     db.collection('deviceSessions').find({ userId }).project({ refreshTokenHash: 0, ipAddress: 0 }).toArray(),
@@ -105,6 +109,8 @@ async function buildExportFiles(userId: ObjectId) {
     db.collection('posts').find({ authorUserId: userId }).project({ body: 1, visibility: 1, discoverable: 1, discoveryTopicIds: 1, mediaIds: 1, commentCount: 1, reactionCounts: 1, createdAt: 1, updatedAt: 1, editedAt: 1, deletedAt: 1 }).toArray(),
     db.collection('post_comments').find({ authorUserId: userId }).project({ postId: 1, postAuthorUserId: 1, body: 1, createdAt: 1, deletedAt: 1 }).toArray(),
     db.collection('post_reactions').find({ reactingUserId: userId }).project({ postId: 1, authorUserId: 1, emoji: 1, createdAt: 1, updatedAt: 1 }).toArray(),
+    db.collection('post_saves').find({ userId }).project({ postId: 1, createdAt: 1 }).toArray(),
+    db.collection('post_reposts').find({ userId }).project({ postId: 1, createdAt: 1, updatedAt: 1 }).toArray(),
     db.collection('savedMessages').find({ userId }).toArray(),
     db.collection('userChatPreferences').find({ userId }).toArray(),
     db.collection('chat_actions').find({
@@ -222,6 +228,10 @@ async function buildExportFiles(userId: ObjectId) {
     db.collection('reel_saves').find({ userId }).project({ reelId: 1, createdAt: 1 }).toArray(),
     db.collection('discovery_events').find({ userId, targetType: 'reel' }).project({ eventType: 1, sourceContext: 1, topicIds: 1, dwellBucket: 1, createdAt: 1 }).toArray(),
     db.collection('discovery_affinities').find({ userId, surface: 'reels' }).project({ affinityType: 1, lastSignalAt: 1, updatedAt: 1 }).toArray(),
+    db.collection('plan_this_plans').find({
+      $or: [{ creatorUserId: userId }, { 'participants.userId': userId }],
+    }).project({ title: 1, state: 1, chatId: 1, creatorUserId: 1, participants: 1, votes: 1, assignments: 1, createdAt: 1, updatedAt: 1, finalizedAt: 1 }).toArray(),
+    db.collection('veyra_settings').findOne({ userId }, { projection: { enabled: 1, voiceRepliesEnabled: 1, scopes: 1, createdAt: 1, updatedAt: 1 } }),
   ]);
 
   const followTargetIds = following.map((item: any) => item.targetUserId).filter(Boolean);
@@ -391,6 +401,21 @@ async function buildExportFiles(userId: ObjectId) {
         emoji: reaction.emoji,
         createdAt: iso(reaction.createdAt),
         updatedAt: iso(reaction.updatedAt),
+      })),
+    },
+    {
+      name: 'saved-posts.json',
+      content: savedPosts.map((save: any) => ({
+        postId: oid(save.postId),
+        savedAt: iso(save.createdAt),
+      })),
+    },
+    {
+      name: 'my-post-reposts.json',
+      content: myPostReposts.map((repost: any) => ({
+        postId: oid(repost.postId),
+        repostedAt: iso(repost.createdAt),
+        updatedAt: iso(repost.updatedAt),
       })),
     },
     {
@@ -583,6 +608,44 @@ async function buildExportFiles(userId: ObjectId) {
     },
     { name: 'my-actions.json', content: safeActions },
     {
+      name: 'plan-this.json',
+      content: planThisRecords.map((plan: any) => ({
+        id: oid(plan._id),
+        chatId: oid(plan.chatId),
+        title: plan.title,
+        state: plan.state,
+        createdByMe: Boolean(plan.creatorUserId?.equals?.(userId)),
+        participantCount: Array.isArray(plan.participants) ? plan.participants.length : 0,
+        myVote: (plan.votes || []).find((vote: any) => vote.userId?.equals?.(userId))?.status || null,
+        assignments: (plan.assignments || [])
+          .filter((assignment: any) => assignment.assigneeUserId?.equals?.(userId) || plan.creatorUserId?.equals?.(userId))
+          .map((assignment: any) => ({
+            title: assignment.title,
+            status: assignment.status,
+            assignedToMe: Boolean(assignment.assigneeUserId?.equals?.(userId)),
+          })),
+        createdAt: iso(plan.createdAt),
+        updatedAt: iso(plan.updatedAt),
+        finalizedAt: iso(plan.finalizedAt),
+      })),
+    },
+    {
+      name: 'veyra-settings.json',
+      content: veyraSettings
+        ? {
+            enabled: Boolean(veyraSettings.enabled),
+            voiceRepliesEnabled: Boolean(veyraSettings.voiceRepliesEnabled),
+            scopes: (veyraSettings.scopes || []).map((scope: any) => ({
+              type: scope.type,
+              label: scope.label,
+              grantedAt: iso(scope.grantedAt),
+            })),
+            createdAt: iso(veyraSettings.createdAt),
+            updatedAt: iso(veyraSettings.updatedAt),
+          }
+        : null,
+    },
+    {
       name: 'my-blocked-users.json',
       content: blocks.map((block: any) => ({
         blockedUserId: oid(block.blockedUserId),
@@ -618,6 +681,8 @@ async function buildExportFiles(userId: ObjectId) {
           'posts-authored-by-me.json',
           'my-post-comments.json',
           'my-post-reactions.json',
+          'saved-posts.json',
+          'my-post-reposts.json',
           'communities-owned-by-me.json',
           'my-community-memberships.json',
           'community-posts-authored-by-me.json',
@@ -636,6 +701,8 @@ async function buildExportFiles(userId: ObjectId) {
           'my-saved-message-references.json',
           'my-chat-archive-state.json',
           'my-actions.json',
+          'plan-this.json',
+          'veyra-settings.json',
           'my-blocked-users.json',
           'my-report-history.json',
           'notification-preferences.json',
@@ -869,6 +936,8 @@ export class AccountDeletionProcessor {
         { recipientUserId: userId },
       ],
     }));
+    await count('postSavesAuthoredPosts', db.collection('post_saves').deleteMany({ postId: { $in: authoredPostIds } }));
+    await count('postRepostsAuthoredPosts', db.collection('post_reposts').deleteMany({ postId: { $in: authoredPostIds } }));
     await count('authoredPosts', db.collection('posts').deleteMany({ authorUserId: userId }));
     await count('discoveryFeedbackAuthoredPosts', db.collection('discovery_feedback').deleteMany({ targetId: { $in: authoredPostIds } }));
     await count('discoveryEventsAuthoredPosts', db.collection('discovery_events').deleteMany({ targetId: { $in: authoredPostIds } }));
@@ -876,6 +945,8 @@ export class AccountDeletionProcessor {
     await count('discoveryForYouSessionsAuthoredPosts', db.collection('discovery_for_you_sessions').deleteMany({ candidatePostIds: { $in: authoredPostIds } }));
     await count('postCommentsAuthoredByUser', db.collection('post_comments').deleteMany({ authorUserId: userId }));
     await count('postReactionsAuthoredByUser', db.collection('post_reactions').deleteMany({ reactingUserId: userId }));
+    await count('postSavesAuthoredByUser', db.collection('post_saves').deleteMany({ userId }));
+    await count('postRepostsAuthoredByUser', db.collection('post_reposts').deleteMany({ userId }));
     const affectedPostIds = Array.from(new Set(postInteractionIds.map((postId: any) => postId.toString()))).map((postId) => new ObjectId(postId));
     for (const postId of affectedPostIds) {
       const [commentCount, reactionCounts] = await Promise.all([
@@ -930,6 +1001,21 @@ export class AccountDeletionProcessor {
     await count('aiSummaries', db.collection('chat_summaries').deleteMany({ generatedByUserId: userId }));
     await count('aiDecisions', db.collection('chat_decisions').deleteMany({ generatedByUserId: userId }));
     await count('aiWaitingOn', db.collection('chat_waiting_on').deleteMany({ generatedByUserId: userId }));
+    await count('veyraSettings', db.collection('veyra_settings').deleteMany({ userId }));
+    await count('veyraAudit', db.collection('veyra_audit').deleteMany({ userId }));
+    await count('planThisAuthored', db.collection('plan_this_plans').updateMany(
+      { creatorUserId: userId },
+      { $set: { creatorDeletedAt: now, updatedAt: now }, $unset: { creatorUserId: '' } } as any
+    ));
+    await count('planThisParticipants', db.collection('plan_this_plans').updateMany(
+      { 'participants.userId': userId },
+      { $pull: { participants: { userId }, votes: { userId } }, $set: { updatedAt: now } } as any
+    ));
+    await count('planThisAssignments', db.collection('plan_this_plans').updateMany(
+      { 'assignments.assigneeUserId': userId },
+      { $unset: { 'assignments.$[assignment].assigneeUserId': '' }, $set: { 'assignments.$[assignment].status': 'declined', 'assignments.$[assignment].updatedAt': now, updatedAt: now } } as any,
+      { arrayFilters: [{ 'assignment.assigneeUserId': userId }] } as any
+    ));
     await count('userBlocks', db.collection('user_blocks').deleteMany({ $or: [{ blockerUserId: userId }, { blockedUserId: userId }] }));
     await count('profileRelationships', db.collection('profile_relationships').deleteMany({ $or: [{ followerUserId: userId }, { targetUserId: userId }] }));
     if (user.profileHandle) {

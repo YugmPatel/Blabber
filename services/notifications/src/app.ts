@@ -1,7 +1,7 @@
 import express, { Request, Response, Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
-import { loadCommonConfig, loadCORSConfig } from '@repo/config';
+import { loadCommonConfig, loadCORSConfig, structuredJsonParserOptions, structuredUrlEncodedParserOptions } from '@repo/config';
 import {
   createAuthMiddleware,
   errorHandler,
@@ -33,13 +33,13 @@ app.use(helmet());
 app.use(
   cors({
     origin: corsConfig.origins,
-    credentials: true,
+    credentials: corsConfig.credentials,
   })
 );
 
 // Body parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json(structuredJsonParserOptions()));
+app.use(express.urlencoded(structuredUrlEncodedParserOptions()));
 
 app.use(requestIdMiddleware);
 app.use(requestLogger('notifications'));

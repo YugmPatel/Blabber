@@ -6,7 +6,7 @@ import type { Message, Chat } from '@repo/types';
 import type { ServerToClientEvents, ClientToServerEvents } from '@repo/types';
 import { useAppStore } from '@/store/app-store';
 import { useAuth } from '@/contexts/AuthContext';
-import { messageKeys } from './useMessages';
+import { invalidateSharedContentForChat, messageKeys } from './useMessages';
 import { chatKeys } from './useChats';
 import { userKeys } from './useUsers';
 import { chatActionKeys, upsertOrRemoveAction } from './useChatActions';
@@ -122,6 +122,10 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       }
 
       const message = hydrateMessage(data.message);
+      if (message.planThis?.planId) {
+        queryClient.invalidateQueries({ queryKey: ['plan-this-plan', message.planThis.planId] });
+        queryClient.invalidateQueries({ queryKey: chatActionKeys.mine() });
+      }
       const isOwnMessage = message.senderId === user?._id;
       const isActiveVisibleChat =
         activeChat === message.chatId &&
@@ -184,11 +188,16 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       if (!isActiveVisibleChat) {
         queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
       }
+      invalidateSharedContentForChat(queryClient, message.chatId);
     };
 
     // Handler for message edits
     const handleMessageEdit = (data: { message: any }) => {
       const message = hydrateMessage(data.message);
+      if (message.planThis?.planId) {
+        queryClient.invalidateQueries({ queryKey: ['plan-this-plan', message.planThis.planId] });
+        queryClient.invalidateQueries({ queryKey: chatActionKeys.mine() });
+      }
 
       // Update the message in the cache
       queryClient.setQueryData<InfiniteData<MessagesResponse>>(
@@ -205,6 +214,7 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
           };
         }
       );
+      invalidateSharedContentForChat(queryClient, message.chatId);
     };
 
     const handleMessageReaction = (data: {
@@ -270,6 +280,7 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
 
       // Update chat list
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      invalidateSharedContentForChat(queryClient, data.chatId);
     };
 
     // Handler for delivery receipts

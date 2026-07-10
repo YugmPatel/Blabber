@@ -5,6 +5,11 @@ services:
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:3000
+        VITE_SOCKET_URL: http://localhost:3000
+        VITE_LIVEKIT_WS_URL: ws://localhost:7880
+        VITE_ALLOW_LOCAL_API_FALLBACK: 'true'
     ports:
       - '3000:80'
     environment:

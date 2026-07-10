@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   MessagesSquare,
   CircleDashed,
-  Users,
+  UsersRound,
+  Landmark,
   CheckSquare,
   Phone,
   LogOut,
@@ -11,20 +13,21 @@ import {
   ChevronLeft,
   ChevronRight,
   User,
-  Bell,
+  Bookmark,
   HelpCircle,
   Moon,
+  Settings,
   Sun,
-  Shield,
   Archive,
-  Bookmark,
   Newspaper,
   Compass,
   Clapperboard,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
-import BlabberLogo from '@/components/BlabberLogo';
+import { fetchMyProfile } from '@/api/client';
+import BlabberMark from '@/components/brand/BlabberMark';
+import VeyraMark from '@/components/brand/VeyraMark';
 import Avatar from '@/components/Avatar';
 
 export interface SidebarProps {
@@ -56,10 +59,39 @@ export default function Sidebar({
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, resolvedTheme, toggleTheme } = useTheme();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileAreaRef = useRef<HTMLDivElement>(null);
   const avatarUrl = (user as any)?.avatarUrl || user?.avatar;
+
+  // Fetched lazily so "View profile" can deep-link to the public profile;
+  // users without a handle yet are sent to settings to pick one.
+  const queryClient = useQueryClient();
+  useQuery({
+    queryKey: ['profiles', 'me'],
+    queryFn: fetchMyProfile,
+    enabled: profileMenuOpen,
+    staleTime: 60_000,
+  });
+
+  // Awaits the profile instead of reading possibly-not-yet-loaded query data —
+  // a fast click right after opening the menu must still land on /p/<handle>,
+  // not fall through to settings.
+  const openPublicProfile = async () => {
+    setProfileMenuOpen(false);
+    onNavigateMobile?.();
+    try {
+      const profile = await queryClient.fetchQuery({
+        queryKey: ['profiles', 'me'],
+        queryFn: fetchMyProfile,
+        staleTime: 60_000,
+      });
+      const cleanHandle = profile.handle?.replace(/^@/, '') || '';
+      navigate(cleanHandle ? `/p/${cleanHandle}` : '/settings?s=profile&hint=handle');
+    } catch {
+      navigate('/settings?s=profile');
+    }
+  };
 
   // Close profile menu on outside click
   useEffect(() => {
@@ -79,20 +111,19 @@ export default function Sidebar({
     navigate('/login', { replace: true });
   };
 
-  const intelligenceItems: Array<{ label: string; icon: typeof Users; path: string; badge?: number }> = [
-    { label: 'Groups', icon: Users, path: '/chats' },
-    { label: 'Communities', icon: Users, path: '/communities' },
+  const intelligenceItems: Array<{ label: string; icon: typeof UsersRound; path: string; badge?: number }> = [
+    { label: 'Groups', icon: UsersRound, path: '/chats' },
+    { label: 'Communities', icon: Landmark, path: '/communities' },
     { label: 'Feed', icon: Newspaper, path: '/feed' },
     { label: 'Reels', icon: Clapperboard, path: '/reels' },
     { label: 'Discover', icon: Compass, path: '/discover' },
     { label: 'Archived', icon: Archive, path: '/archived' },
-    { label: 'Saved', icon: Bookmark, path: '/saved' },
     { label: 'Calls', icon: Phone, path: '/calls' },
     { label: 'My Actions', icon: CheckSquare, path: '/actions' },
   ];
 
   const navItemBase =
-    'relative flex items-center rounded-xl py-2.5 text-sm font-medium transition-colors';
+    'relative flex items-center rounded-xl py-2.5 text-sm font-medium transition-colors bl-focus-ring';
   const navItemPadding = collapsed ? 'justify-center px-0' : 'gap-2.5 px-2.5';
   const isChatsRoute = location.pathname === '/chats' || location.pathname.startsWith('/chats/');
   const isMomentsRoute = location.pathname === '/status' || location.pathname.startsWith('/moments');
@@ -103,32 +134,39 @@ export default function Sidebar({
   const isCallsRoute = location.pathname === '/calls';
   const isActionsRoute = location.pathname === '/actions';
   const isArchivedRoute = location.pathname === '/archived';
-  const isSavedRoute = location.pathname === '/saved';
-  const activeNavClass = 'bg-[#e7f8f4] text-[#0f766e] dark:bg-teal-900/40 dark:text-teal-300';
+  const isVeyraRoute = location.pathname === '/veyra';
+  // Active state: a calm teal wash plus a slim teal indicator bar (added via
+  // `activeIndicator` below) rather than a bright full-width glow.
+  const activeNavClass = 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300';
   const inactiveNavClass =
     'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100';
+  const activeIndicator = (
+    <span
+      aria-hidden="true"
+      className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-teal-600 dark:bg-teal-400"
+    />
+  );
 
   return (
     <aside
-      className="relative flex h-full flex-col border-r border-slate-200 bg-[#f8faf9] dark:border-slate-700 dark:bg-slate-900"
+      className="relative flex h-full flex-col border-r border-slate-200 bg-white dark:border-[#1b393c] dark:bg-[#08181a]"
       style={{
-        width: collapsed ? 64 : 220,
+        width: collapsed ? 68 : 264,
         transition: 'width 0.22s ease',
         flexShrink: 0,
       }}
     >
       {/* ── Header ─────────────────────────────────── */}
       <div
-        className={`flex h-14 items-center border-b border-slate-200 dark:border-slate-700 ${
-          collapsed ? 'justify-center gap-1 px-1' : 'justify-between px-3'
+        className={`flex h-16 items-center border-b border-slate-200 dark:border-slate-800 ${
+          collapsed ? 'justify-center gap-1 px-1' : 'justify-between px-4'
         }`}
       >
         <div className="flex min-w-0 items-center gap-2.5">
-          <BlabberLogo size={collapsed ? 28 : 30} className="flex-shrink-0" />
-          {!collapsed && (
-            <span className="whitespace-nowrap text-[15px] font-semibold tracking-tight text-slate-900 dark:text-white">
-              Blabber
-            </span>
+          {collapsed ? (
+            <BlabberMark size={32} variant="icon" className="flex-shrink-0" />
+          ) : (
+            <BlabberMark size={36} variant="lockup" className="min-w-0" />
           )}
         </div>
 
@@ -143,42 +181,43 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* ── New Chat button ──────────────────────────── */}
-      <div className={`px-3 py-3 ${collapsed ? 'flex justify-center' : ''}`}>
+      {/* ── New Convo button ──────────────────────────── */}
+      <div className={`px-4 py-4 ${collapsed ? 'flex justify-center' : ''}`}>
         <button
           onClick={() => {
             onNewConversation();
             onNavigateMobile?.();
           }}
-          aria-label="New conversation"
-          title={collapsed ? 'New conversation' : undefined}
-          className={`flex items-center justify-center gap-2 rounded-xl bg-slate-950 text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 ${
-            collapsed ? 'h-9 w-9' : 'h-9 w-full px-3 text-[13px] font-semibold'
+          aria-label="New Convo"
+          title={collapsed ? 'New Convo' : undefined}
+          className={`bl-focus-ring flex items-center justify-center gap-2 rounded-xl bg-teal-600 text-white shadow-sm transition hover:bg-teal-700 hover:shadow dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 ${
+            collapsed ? 'h-10 w-10' : 'h-10 w-full px-3.5 text-[13px] font-semibold'
           }`}
         >
-          <Plus size={15} strokeWidth={2.5} />
-          {!collapsed && 'New chat'}
+          <Plus size={16} strokeWidth={2.5} />
+          {!collapsed && 'New Convo'}
         </button>
       </div>
 
       {/* ── Navigation ────────────────────────────────── */}
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
-        {/* Main nav: All Chats */}
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-1">
+        {/* Main nav: Convo */}
         <button
           onClick={() => {
             onChatFilterChange('all');
             navigate('/chats');
             onNavigateMobile?.();
           }}
-          aria-label="All Chats"
+          aria-label="Convo"
           aria-pressed={isChatsRoute && activeChatFilter === 'all'}
-          title={collapsed ? 'All Chats' : undefined}
+          title={collapsed ? 'Convo' : undefined}
           className={`${navItemBase} ${navItemPadding} w-full ${
             isChatsRoute && activeChatFilter === 'all' ? activeNavClass : inactiveNavClass
           }`}
         >
+          {isChatsRoute && activeChatFilter === 'all' && activeIndicator}
           <MessagesSquare size={17} className="flex-shrink-0" />
-          {!collapsed && <span className="flex-1 truncate text-left">All Chats</span>}
+          {!collapsed && <span className="flex-1 truncate text-left">Convo</span>}
         </button>
 
         <button
@@ -193,18 +232,32 @@ export default function Sidebar({
             isMomentsRoute ? activeNavClass : inactiveNavClass
           }`}
         >
+          {isMomentsRoute && activeIndicator}
           <CircleDashed size={17} className="flex-shrink-0" />
           {!collapsed && <span className="flex-1 truncate text-left">Moments</span>}
         </button>
 
         {/* Intelligence items */}
-        {intelligenceItems.map((item) => (
+        {intelligenceItems.map((item) => {
+          const isItemActive =
+            (item.label === 'Groups' && isChatsRoute && activeChatFilter === 'groups') ||
+            (item.label === 'Communities' && isCommunitiesRoute) ||
+            (item.label === 'Feed' && isFeedRoute) ||
+            (item.label === 'Reels' && isReelsRoute) ||
+            (item.label === 'Discover' && isDiscoverRoute) ||
+            (item.label === 'Archived' && isArchivedRoute) ||
+            (item.label === 'Calls' && isCallsRoute) ||
+            (item.label === 'My Actions' && isActionsRoute);
+          return (
           <button
             key={item.label}
             onClick={() => {
               if (item.label === 'Groups') {
                 onChatFilterChange('groups');
-                navigate('/chats');
+                // The filter travels in the URL so ChatsLayout lands directly in
+                // Groups view — pages outside /chats have no way to hand over
+                // their filter state otherwise (first-click-shows-Convo bug).
+                navigate('/chats?filter=groups');
               } else {
                 navigate(item.path || '/chats');
               }
@@ -224,8 +277,6 @@ export default function Sidebar({
                   ? isDiscoverRoute
                 : item.label === 'Archived'
                   ? isArchivedRoute
-                  : item.label === 'Saved'
-                    ? isSavedRoute
                 : item.label === 'Calls'
                   ? isCallsRoute
                   : item.label === 'My Actions'
@@ -233,20 +284,9 @@ export default function Sidebar({
                     : undefined
             }
             title={collapsed ? item.label : undefined}
-            className={`${navItemBase} ${navItemPadding} w-full ${
-              (item.label === 'Groups' && isChatsRoute && activeChatFilter === 'groups') ||
-              (item.label === 'Communities' && isCommunitiesRoute) ||
-              (item.label === 'Feed' && isFeedRoute) ||
-              (item.label === 'Reels' && isReelsRoute) ||
-              (item.label === 'Discover' && isDiscoverRoute) ||
-              (item.label === 'Archived' && isArchivedRoute) ||
-              (item.label === 'Saved' && isSavedRoute) ||
-              (item.label === 'Calls' && isCallsRoute) ||
-              (item.label === 'My Actions' && isActionsRoute)
-                ? activeNavClass
-                : inactiveNavClass
-            }`}
+            className={`${navItemBase} ${navItemPadding} w-full ${isItemActive ? activeNavClass : inactiveNavClass}`}
           >
+            {isItemActive && activeIndicator}
             <item.icon size={17} className="flex-shrink-0" />
             {!collapsed && (
               <>
@@ -262,91 +302,147 @@ export default function Sidebar({
               <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-teal-500" />
             )}
           </button>
-        ))}
+          );
+        })}
+
+        {/* VEYRA — dedicated ambient-AI entry, visually distinct from ordinary nav items */}
+        <button
+          onClick={() => {
+            navigate('/veyra');
+            onNavigateMobile?.();
+          }}
+          aria-label="VEYRA, Ambient AI"
+          aria-pressed={isVeyraRoute}
+          title={collapsed ? 'VEYRA' : undefined}
+          className={`${navItemBase} ${navItemPadding} bl-focus-ring mt-1 w-full border border-teal-500/30 text-white transition-all hover:brightness-110`}
+          style={{
+            background: isVeyraRoute
+              ? 'linear-gradient(135deg, #0d2f2b, #0a3a34)'
+              : 'linear-gradient(135deg, #08201d, #0d2624)',
+            boxShadow: isVeyraRoute ? 'var(--bl-glow-md)' : 'none',
+          }}
+        >
+          <VeyraMark size={17} alive={!collapsed || isVeyraRoute} className="flex-shrink-0" />
+          {!collapsed && (
+            <span className="flex min-w-0 flex-1 flex-col items-start text-left">
+              <span className="truncate font-semibold tracking-wide">VEYRA</span>
+              <span className="truncate text-[10px] font-normal text-slate-400">AI Companion</span>
+            </span>
+          )}
+        </button>
       </nav>
 
       {/* ── Profile area (popup + button) ───────────── */}
       <div ref={profileAreaRef} className="relative border-t border-slate-200 p-3 dark:border-slate-700">
         {/* Profile menu popover — fixed width so it never overflows in collapsed mode */}
         {profileMenuOpen && (
-          <div className="absolute bottom-full left-0 z-50 mb-2 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
-            {/* User header */}
-            <div className="border-b border-slate-100 px-3 py-2.5 dark:border-slate-700">
-              <p className="truncate text-[13px] font-semibold text-slate-900 dark:text-white">
-                {user?.name || user?.username}
-              </p>
-              <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">{user?.email}</p>
+          <div
+            className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-[#1b393c] dark:bg-[#0a1e20]"
+            style={{ boxShadow: 'var(--bl-glow-sm), 0 16px 40px -12px rgba(2, 20, 18, 0.4)' }}
+          >
+            {/* User summary header */}
+            <div className="flex items-center gap-2.5 border-b border-slate-100 px-3.5 py-3 dark:border-[#1b393c]">
+              <Avatar src={avatarUrl} alt={user?.name || user?.username || 'Account'} size="md" online={true} />
+              <div className="min-w-0">
+                <p className="truncate text-[13px] font-semibold text-slate-900 dark:text-white">
+                  {user?.name || user?.username}
+                </p>
+                <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">{user?.email}</p>
+              </div>
             </div>
 
             {/* Menu items */}
-            {(
-              [
-                {
-                  icon: User,
-                  label: 'Profile',
-                  action: () => { navigate('/settings?s=profile'); setProfileMenuOpen(false); onNavigateMobile?.(); },
-                },
-                {
-                  icon: Shield,
-                  label: 'Privacy',
-                  action: () => { navigate('/settings?s=privacy'); setProfileMenuOpen(false); },
-                },
-                {
-                  icon: Bell,
-                  label: 'Notifications',
-                  action: () => { navigate('/settings?s=notifications'); setProfileMenuOpen(false); },
-                },
-                {
-                  icon: HelpCircle,
-                  label: 'Help',
-                  action: () => { navigate('/settings?s=help'); setProfileMenuOpen(false); },
-                },
-              ] as const
-            ).map((item) => (
-              <button
-                key={item.label}
-                onClick={item.action}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-              >
-                <item.icon size={15} className="flex-shrink-0 text-slate-400 dark:text-slate-500" />
-                {item.label}
-              </button>
-            ))}
+            <div className="py-1">
+              {(
+                [
+                  {
+                    icon: User,
+                    label: 'View profile',
+                    subtitle: 'See your public profile',
+                    action: () => { void openPublicProfile(); },
+                  },
+                  {
+                    icon: Settings,
+                    label: 'Settings',
+                    subtitle: 'Manage your account',
+                    action: () => { navigate('/settings'); setProfileMenuOpen(false); onNavigateMobile?.(); },
+                  },
+                  {
+                    icon: Bookmark,
+                    label: 'Saved',
+                    subtitle: 'Messages, posts & more',
+                    action: () => { navigate('/settings?s=saved'); setProfileMenuOpen(false); onNavigateMobile?.(); },
+                  },
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item.label}
+                  onClick={item.action}
+                  className="group flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition hover:bg-teal-50 dark:hover:bg-teal-500/10"
+                >
+                  <item.icon size={16} className="flex-shrink-0 text-slate-400 transition group-hover:text-teal-600 dark:text-slate-500 dark:group-hover:text-teal-300" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] font-semibold text-slate-800 group-hover:text-teal-800 dark:text-slate-200 dark:group-hover:text-teal-200">
+                      {item.label}
+                    </span>
+                    <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">{item.subtitle}</span>
+                  </span>
+                </button>
+              ))}
 
-            {/* Theme toggle row */}
-            <div className="flex items-center justify-between px-3 py-2">
-              <div className="flex items-center gap-2 text-[13px] text-slate-700 dark:text-slate-300">
-                {theme === 'dark' ? (
-                  <Moon size={15} className="text-slate-400" />
-                ) : (
-                  <Sun size={15} className="text-slate-400" />
-                )}
-                {theme === 'dark' ? 'Dark mode' : 'Light mode'}
-              </div>
-              <button
-                onClick={toggleTheme}
-                role="switch"
-                aria-checked={theme === 'dark'}
-                aria-label="Toggle dark mode"
-                className={`relative h-5 w-9 flex-shrink-0 overflow-hidden rounded-full transition-colors ${
-                  theme === 'dark' ? 'bg-teal-500' : 'bg-slate-300'
-                }`}
-              >
-                <span
-                  className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                    theme === 'dark' ? 'translate-x-[18px]' : 'translate-x-0.5'
+              {/* Appearance quick toggle (full control stays in Settings) */}
+              <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                <div className="flex min-w-0 items-center gap-3">
+                  {resolvedTheme === 'dark' ? (
+                    <Moon size={16} className="flex-shrink-0 text-slate-400 dark:text-slate-500" />
+                  ) : (
+                    <Sun size={16} className="flex-shrink-0 text-slate-400 dark:text-slate-500" />
+                  )}
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-semibold text-slate-800 dark:text-slate-200">Appearance</span>
+                    <span className="block text-[11px] text-slate-500 dark:text-slate-400">
+                      {theme === 'system' ? 'System' : resolvedTheme === 'dark' ? 'Dark mode' : 'Light mode'}
+                    </span>
+                  </span>
+                </div>
+                <button
+                  onClick={toggleTheme}
+                  role="switch"
+                  aria-checked={resolvedTheme === 'dark'}
+                  aria-label="Toggle dark mode"
+                  className={`relative h-5 w-9 flex-shrink-0 overflow-hidden rounded-full transition-colors ${
+                    resolvedTheme === 'dark' ? 'bg-teal-500' : 'bg-slate-300'
                   }`}
-                />
+                >
+                  <span
+                    className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                      resolvedTheme === 'dark' ? 'translate-x-[18px]' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <button
+                onClick={() => { navigate('/settings?s=help'); setProfileMenuOpen(false); onNavigateMobile?.(); }}
+                className="group flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition hover:bg-teal-50 dark:hover:bg-teal-500/10"
+              >
+                <HelpCircle size={16} className="flex-shrink-0 text-slate-400 transition group-hover:text-teal-600 dark:text-slate-500 dark:group-hover:text-teal-300" />
+                <span className="min-w-0">
+                  <span className="block truncate text-[13px] font-semibold text-slate-800 group-hover:text-teal-800 dark:text-slate-200 dark:group-hover:text-teal-200">
+                    Help & support
+                  </span>
+                  <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">Get help and resources</span>
+                </span>
               </button>
             </div>
 
             {/* Logout */}
-            <div className="border-t border-slate-100 pt-1 dark:border-slate-700">
+            <div className="border-t border-slate-100 py-1 dark:border-[#1b393c]">
               <button
                 onClick={handleLogout}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] font-medium text-rose-600 transition hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                className="flex w-full items-center gap-3 px-3.5 py-2.5 text-[13px] font-semibold text-rose-600 transition hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/20"
               >
-                <LogOut size={15} className="flex-shrink-0" />
+                <LogOut size={16} className="flex-shrink-0" />
                 Logout
               </button>
             </div>

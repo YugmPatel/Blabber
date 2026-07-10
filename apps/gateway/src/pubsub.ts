@@ -224,14 +224,22 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
       { event: e.type, messageId: e.data.messageId },
       'Broadcasting MESSAGE_EDITED'
     );
-    io.to(`chat:${e.data.chatId}`).emit('message:edit', {
+    const payload = {
       message: e.data.message ?? {
         _id: e.data.messageId,
         chatId: e.data.chatId,
         body: e.data.content,
         editedAt: e.data.editedAt,
       },
-    });
+    };
+    const participants = Array.from(new Set(e.data.participants ?? []));
+    if (participants.length > 0) {
+      participants.forEach((userId) => {
+        io.to(`user:${userId}`).emit('message:edit', payload);
+      });
+    } else {
+      io.to(`chat:${e.data.chatId}`).emit('message:edit', payload);
+    }
     if (e.data.mentions?.length) {
       void sendMentionPushes(io, e);
     }

@@ -1,10 +1,10 @@
 # Multi-stage Dockerfile for Gateway Service
 
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:20.19.4-alpine AS builder
 
 # Install pnpm
-RUN npm install -g pnpm
+RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 
 WORKDIR /app
 
@@ -23,10 +23,10 @@ RUN pnpm --filter "@repo/*" build
 RUN pnpm --filter "@apps/gateway" build
 
 # Stage 2: Production
-FROM node:20-alpine AS production
+FROM node:20.19.4-alpine AS production
 
 # Install pnpm
-RUN npm install -g pnpm
+RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 
 WORKDIR /app
 

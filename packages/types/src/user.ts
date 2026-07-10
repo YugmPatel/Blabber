@@ -67,7 +67,8 @@ export type LoginDTO = z.infer<typeof LoginDTOSchema>;
 // User Update DTO
 export const UpdateUserDTOSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  avatarUrl: z.string().url().optional(),
+  // Empty string clears the avatar (matches the users-service route schema)
+  avatarUrl: z.string().url().or(z.literal('')).optional(),
   about: z.string().max(500).optional(),
   role: z.string().max(120).optional(),
   department: z.string().max(120).optional(),

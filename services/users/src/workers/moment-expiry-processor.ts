@@ -6,6 +6,7 @@ import { getMomentReactionsCollection } from '../models/moment-reaction';
 import { getMomentNotificationCooldownsCollection } from '../models/moment-notification-cooldown';
 import { getOrCreateUserSettings } from '../models/user-settings';
 import { safelyDeleteMomentMedia } from '../moment-media-cleanup';
+import { deleteMomentVideoArtifacts } from '../moment-video-cleanup';
 import { getDatabase } from '../db';
 
 export class MomentExpiryProcessor {
@@ -40,6 +41,7 @@ export class MomentExpiryProcessor {
             { 'momentReply.momentId': moment._id },
             { $unset: { momentReply: '' } }
           );
+          if (moment.videoId instanceof ObjectId) await deleteMomentVideoArtifacts(moment.videoId);
           if (moment.mediaId instanceof ObjectId) await safelyDeleteMomentMedia(moment.mediaId, moment._id);
         }
       }

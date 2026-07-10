@@ -2,7 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Eye, EyeOff, Check } from 'lucide-react';
-import BlabberLogo from '@/components/BlabberLogo';
+import BlabberMark from '@/components/brand/BlabberMark';
 
 const serifStyle: React.CSSProperties = { fontFamily: "Georgia, 'Times New Roman', serif" };
 
@@ -177,9 +177,8 @@ export default function RegisterPage() {
           <div className="w-full max-w-[380px]">
             {/* Logo */}
             <div className="mb-7 flex flex-col items-center gap-1">
-              <div className="mb-1 flex items-center gap-2.5">
-                <BlabberLogo size={30} />
-                <span className="text-[17px] font-semibold tracking-tight text-slate-900">Blabber</span>
+              <div className="mb-1 flex items-center justify-center">
+                <BlabberMark size={34} variant="lockup" mode="light" />
               </div>
               <h2
                 className="mt-2 text-center text-[2.2rem] font-semibold leading-tight text-slate-900"

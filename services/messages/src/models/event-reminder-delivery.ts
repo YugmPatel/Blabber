@@ -1,7 +1,7 @@
 import { Collection, ObjectId } from 'mongodb';
 import { getDatabase } from '../db';
 
-export type EventReminderType = 'day_before' | 'hour_before';
+export type EventReminderType = 'five_minutes_before' | 'fifteen_minutes_before' | 'hour_before' | 'day_before';
 export type EventReminderDeliveryStatus = 'pending' | 'sent' | 'skipped' | 'failed';
 
 export interface EventReminderDeliveryDocument {

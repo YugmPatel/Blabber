@@ -1,7 +1,7 @@
 import express, { Request, Response, Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
-import { loadCommonConfig, loadCORSConfig, loadJWTConfig } from '@repo/config';
+import { loadCommonConfig, loadCORSConfig, loadJWTConfig, structuredJsonParserOptions, structuredUrlEncodedParserOptions } from '@repo/config';
 import {
   createAuthMiddleware,
   errorHandler,
@@ -32,13 +32,13 @@ app.use(helmet());
 app.use(
   cors({
     origin: corsConfig.origins,
-    credentials: true,
+    credentials: corsConfig.credentials,
   })
 );
 
 // Body parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json(structuredJsonParserOptions()));
+app.use(express.urlencoded(structuredUrlEncodedParserOptions()));
 
 app.use(requestIdMiddleware);
 app.use(requestLogger('users'));
@@ -80,6 +80,7 @@ import { createStatus, deleteStatus, listStatuses } from './routes/status';
 import {
   addCloseFriend,
   createMoment,
+  createMomentVideoPlaybackSession,
   deleteMoment,
   getMoment,
   getMomentMedia,
@@ -90,6 +91,8 @@ import {
   listMomentContacts,
   listMomentViewers,
   markMomentViewed,
+  playbackMomentVideoFallback,
+  playbackMomentVideoPoster,
   reactToMoment,
   removeMomentReaction,
   replyToMoment,
@@ -130,8 +133,13 @@ import {
   listFeed,
   listPostComments,
   listProfilePosts,
+  listSavedPosts,
   removePostReaction,
+  repostPost,
+  savePost,
   setPostReaction,
+  undoRepostPost,
+  unsavePost,
   updatePost,
   updatePostDiscovery,
 } from './routes/posts';
@@ -227,6 +235,9 @@ app.get('/moments/archive', authMiddleware, listMomentArchive);
 app.patch('/moments/archive-settings', authMiddleware, updateMomentArchiveSettings);
 app.post('/moments/worker/run', authMiddleware, runMomentExpiryWorker);
 app.get('/moments/:id/media', authMiddleware, getMomentMedia);
+app.post('/moments/:id/video/playback-session', authMiddleware, createMomentVideoPlaybackSession);
+app.get('/moments/:id/video/fallback', authMiddleware, playbackMomentVideoFallback);
+app.get('/moments/:id/video/poster', authMiddleware, playbackMomentVideoPoster);
 app.get('/moments/:id/interactions', authMiddleware, listMomentInteractions);
 app.get('/moments/:id/viewers', authMiddleware, listMomentViewers);
 app.post('/moments/:id/view', authMiddleware, markMomentViewed);
@@ -240,6 +251,7 @@ app.post('/statuses', authMiddleware, createStatus);
 app.delete('/statuses/:id', authMiddleware, deleteStatus);
 app.patch('/me', authMiddleware, updateProfile);
 app.get('/feed', authMiddleware, listFeed);
+app.get('/posts/saved', authMiddleware, listSavedPosts);
 app.get('/discovery/topics', authMiddleware, getDiscoveryTopics);
 app.get('/discovery/preferences', authMiddleware, getDiscoveryPreferences);
 app.patch('/discovery/preferences', authMiddleware, updateDiscoveryPreferences);
@@ -307,6 +319,10 @@ app.post('/posts', authMiddleware, createPost);
 app.get('/posts/:postId/media/:mediaId', authMiddleware, getPostMedia);
 app.post('/posts/:postId/reaction', authMiddleware, setPostReaction);
 app.delete('/posts/:postId/reaction', authMiddleware, removePostReaction);
+app.post('/posts/:postId/save', authMiddleware, savePost);
+app.delete('/posts/:postId/save', authMiddleware, unsavePost);
+app.post('/posts/:postId/repost', authMiddleware, repostPost);
+app.delete('/posts/:postId/repost', authMiddleware, undoRepostPost);
 app.get('/posts/:postId/comments', authMiddleware, listPostComments);
 app.post('/posts/:postId/comments', authMiddleware, createPostComment);
 app.delete('/posts/:postId/comments/:commentId', authMiddleware, deletePostComment);

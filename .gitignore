@@ -61,3 +61,7 @@ infra/terraform/**/.terraform.tfstate.lock.info
 temp/
 tmp/
 backups/
+
+# Local AI-assistant files
+CLAUDE.md
+.codex/

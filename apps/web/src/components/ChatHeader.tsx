@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronUp, FolderOpen, Pin, Users, Phone, Video, Search, MoreVertical, X, Sparkles, Crown, Shield, UserPlus, Trash2, Camera, Loader2 } from 'lucide-react';
+import { AlertTriangle, Ban, ChevronDown, ChevronUp, ExternalLink, Flag, FolderOpen, Link2, MessageCircle, Pencil, Pin, Users, Phone, Video, Search, X, Sparkles, Crown, Shield, UserPlus, Trash2, Camera, Loader2 } from 'lucide-react';
 import type { Chat, User } from '@repo/types';
 import Avatar from './Avatar';
 import GroupCallModal, { createGroupCallId } from './GroupCallModal';
@@ -11,6 +11,7 @@ import {
   blockUser,
   createReport,
   fetchGroupModerationActivity,
+  fetchMyProfile,
   moderationRemoveGroupMember,
   restrictGroupMember,
   searchChatMessages,
@@ -34,7 +35,7 @@ import {
   useUpdateChat,
 } from '@/hooks/useChats';
 import type { InviteExpiry, InviteMaxUses } from '@/api/client';
-import { useSearchUsers } from '@/hooks/useUsers';
+import { useSearchUsers, useUpdateProfile } from '@/hooks/useUsers';
 
 interface ChatHeaderProps {
   chat: Chat;
@@ -44,13 +45,12 @@ interface ChatHeaderProps {
   isGroupChat: boolean;
   onOpenIntelligence?: () => void;
   intelligenceEnabled?: boolean;
+  /** Whether the Chat Intelligence panel is currently open (drives the button's active state) */
+  intelligenceOpen?: boolean;
   onJumpToMessage?: (messageId: string) => void;
   pinnedCount?: number;
   onOpenPins?: () => void;
   onOpenShared?: () => void;
-  onArchiveChat?: () => void;
-  onUnarchiveChat?: () => void;
-  isArchived?: boolean;
 }
 
 type DisplayUser = Partial<User> & { _id: string };
@@ -63,14 +63,66 @@ function getUserMeta(user: DisplayUser | undefined) {
   return [user?.email, user?.username ? `@${user.username}` : ''].filter(Boolean).join(' • ');
 }
 
+/** Card block used to group each settings area inside the info modals. */
+function SectionCard({
+  icon: Icon,
+  title,
+  description,
+  tone = 'default',
+  children,
+}: {
+  icon?: typeof Shield;
+  title?: string;
+  description?: string;
+  tone?: 'default' | 'danger';
+  children: React.ReactNode;
+}) {
+  const danger = tone === 'danger';
+  return (
+    <section
+      className={`rounded-2xl border p-4 text-left ${
+        danger
+          ? 'border-rose-300/60 bg-rose-50/60 dark:border-rose-500/30 dark:bg-rose-500/5'
+          : 'border-[color:var(--bl-border)] bg-[color:var(--bl-hover)]'
+      }`}
+    >
+      {title && (
+        <div className="mb-3 flex items-start gap-2">
+          {Icon && <Icon size={16} className={`mt-0.5 flex-shrink-0 ${danger ? 'text-rose-500' : 'text-teal-600 dark:text-teal-300'}`} />}
+          <div>
+            <p className={`text-sm font-semibold ${danger ? 'text-rose-700 dark:text-rose-300' : 'text-[color:var(--bl-text)]'}`}>{title}</p>
+            {description && <p className={`mt-0.5 text-xs ${danger ? 'text-rose-600/80 dark:text-rose-300/70' : 'text-[color:var(--bl-text-muted)]'}`}>{description}</p>}
+          </div>
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
 function UserProfileModal({
   user,
+  online,
   onClose,
 }: {
   user: DisplayUser | null;
+  /** Presence for the shown user, when the caller knows it (direct chats) */
+  online?: boolean;
   onClose: () => void;
 }) {
   const [notice, setNotice] = useState('');
+  const navigate = useNavigate();
+  const { user: currentUser, refreshUser } = useAuth();
+  const updateProfile = useUpdateProfile();
+  const { uploadMedia, isUploading: isUploadingPhoto } = useFileUpload();
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  // Own social handle — the auth user object doesn't carry it.
+  const myProfileQuery = useQuery({
+    queryKey: ['profiles', 'me'],
+    queryFn: fetchMyProfile,
+    enabled: Boolean(user && currentUser?._id === user._id),
+    staleTime: 60_000,
+  });
   useEffect(() => {
     if (!user) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -79,6 +131,46 @@ function UserProfileModal({
   }, [user, onClose]);
 
   if (!user) return null;
+
+  // Photo edit/remove is only ever offered on the viewer's own profile —
+  // another person's account photo can never be changed from here.
+  const isSelf = currentUser?._id === user._id;
+  const selfWithLegacyAvatar = currentUser as (typeof currentUser & { avatarUrl?: string; avatar?: string }) | null;
+  const displayedAvatarUrl = isSelf
+    ? selfWithLegacyAvatar?.avatarUrl || selfWithLegacyAvatar?.avatar
+    : user.avatarUrl;
+
+  // Public handle: other users carry profileHandle on /api/users/:id; own
+  // handle comes from the profiles API. Normalized without the leading @.
+  const publicHandle = ((isSelf ? myProfileQuery.data?.handle || user.profileHandle : user.profileHandle) || '')
+    .replace(/^@/, '');
+  const openPublicProfile = () => {
+    if (publicHandle) {
+      onClose();
+      navigate(`/p/${publicHandle}`);
+    } else if (isSelf) {
+      // Own profile without a handle → settings, with the create-handle hint
+      onClose();
+      navigate('/settings?s=profile&hint=handle');
+    }
+  };
+  const viewProfileButton = (
+    <div className="col-span-2">
+      <button
+        onClick={openPublicProfile}
+        disabled={!publicHandle && !isSelf}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+      >
+        <ExternalLink size={15} />
+        View public profile
+      </button>
+      {!publicHandle && !isSelf && (
+        <p className="mt-1.5 text-center text-xs text-[color:var(--bl-text-muted)]">
+          Public profile is not available yet for this user.
+        </p>
+      )}
+    </div>
+  );
 
   const runTrustAction = async (action: () => Promise<unknown>, success: string) => {
     try {
@@ -89,55 +181,182 @@ function UserProfileModal({
     }
   };
 
+  const handleOwnPhotoFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setNotice('Choose an image file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setNotice('Image must be less than 5MB.');
+      return;
+    }
+    setNotice('');
+    try {
+      const uploaded = await uploadMedia?.(file);
+      const nextUrl = uploaded?.mediaUrl || uploaded?.publicUrl;
+      if (!nextUrl) throw new Error('Photo upload failed. Try again.');
+      await updateProfile.mutateAsync({ avatarUrl: nextUrl });
+      if (refreshUser) await refreshUser();
+      setNotice('Profile photo updated.');
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: string } }; message?: string };
+      setNotice(err?.response?.data?.message || err?.message || 'Photo update failed');
+    }
+  };
+
+  const removeOwnPhoto = async () => {
+    setNotice('');
+    try {
+      await updateProfile.mutateAsync({ avatarUrl: '' });
+      if (refreshUser) await refreshUser();
+      setNotice('Profile photo removed.');
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: string } }; message?: string };
+      setNotice(err?.response?.data?.message || err?.message || 'Photo removal failed');
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="relative w-full max-w-sm rounded-3xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-6 pt-9"
+        style={{ boxShadow: 'var(--bl-glow-md), 0 24px 60px -12px rgba(2, 20, 18, 0.45)' }}
         onClick={(e) => e.stopPropagation()}
       >
+        <button
+          onClick={onClose}
+          aria-label="Close profile"
+          className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--bl-border)] text-[color:var(--bl-text-muted)] transition hover:bg-[color:var(--bl-hover)] hover:text-[color:var(--bl-text)]"
+        >
+          <X size={16} />
+        </button>
+
+        {/* Identity */}
         <div className="flex flex-col items-center text-center">
-          <Avatar src={user.avatarUrl} alt={getUserTitle(user)} size="xl" />
-          <h3 className="mt-4 text-lg font-semibold text-slate-900 dark:text-white">
+          <div className="relative">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-[-45%]"
+              style={{ background: 'radial-gradient(circle, rgba(45, 212, 191, 0.35) 0%, rgba(45, 212, 191, 0) 68%)' }}
+            />
+            <div className="relative rounded-full p-1 ring-2 ring-teal-400/40">
+              <Avatar src={displayedAvatarUrl} alt={getUserTitle(user)} size="xl" online={online} />
+            </div>
+            {isSelf && (
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                disabled={isUploadingPhoto || updateProfile.isPending}
+                aria-label="Edit profile photo"
+                title="Edit profile photo"
+                className="absolute bottom-0 right-0 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-teal-600 text-white shadow-md transition hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+              >
+                {isUploadingPhoto ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+              </button>
+            )}
+          </div>
+          <h3 className="mt-5 text-xl font-bold tracking-tight text-[color:var(--bl-text)]">
             {getUserTitle(user)}
           </h3>
-          {getUserMeta(user) && (
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{getUserMeta(user)}</p>
+          {(publicHandle || user.username) && (
+            <p className="mt-1 text-sm font-medium text-teal-600 dark:text-teal-300">@{publicHandle || user.username}</p>
           )}
-          {user.about && (
-            <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-              {user.about}
+          {online !== undefined && (
+            <p className={`mt-0.5 text-xs font-medium ${online ? 'text-emerald-600 dark:text-emerald-400' : 'text-[color:var(--bl-text-muted)]'}`}>
+              {online ? 'Online' : 'Offline'}
             </p>
           )}
+          {/* Email is private — only ever shown on your own card */}
+          {isSelf && user.email && <p className="mt-0.5 text-xs text-[color:var(--bl-text-muted)]">{user.email}</p>}
         </div>
-        <div className="mt-6 grid grid-cols-2 gap-3">
-          <button
-            onClick={onClose}
-            className="rounded-xl bg-slate-900 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
-          >
-            Message
-          </button>
-          <button
-            onClick={onClose}
-            className="rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            Close
-          </button>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <button
-            onClick={() => runTrustAction(() => blockUser(user._id), 'User blocked.')}
-            className="rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            Block
-          </button>
-          <button
-            onClick={() => runTrustAction(() => createReport({ targetType: 'user', targetId: user._id, reason: 'User report' }), 'Report submitted.')}
-            className="rounded-xl border border-rose-200 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
-          >
-            Report
-          </button>
-        </div>
-        {notice && <p className="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">{notice}</p>}
+
+        {user.about && (
+          <div className="mt-5 rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] px-4 py-3 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--bl-text-muted)]">About</p>
+            <p className="mt-1 text-sm leading-6 text-[color:var(--bl-text-secondary)]">{user.about}</p>
+          </div>
+        )}
+
+        {/* Actions */}
+        {isSelf ? (
+          <div className="mt-6 grid grid-cols-2 gap-2.5">
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) await handleOwnPhotoFile(file);
+                e.target.value = '';
+              }}
+            />
+            {viewProfileButton}
+            <button
+              onClick={() => { onClose(); navigate('/settings?s=profile'); }}
+              className="flex items-center justify-center gap-2 rounded-xl border border-teal-500/40 py-2.5 text-sm font-semibold text-teal-700 transition hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
+            >
+              <Pencil size={14} />
+              Edit profile
+            </button>
+            <button
+              onClick={() => photoInputRef.current?.click()}
+              disabled={isUploadingPhoto || updateProfile.isPending}
+              className="flex items-center justify-center gap-2 rounded-xl border border-[color:var(--bl-border)] py-2.5 text-sm font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)] disabled:opacity-50"
+            >
+              {isUploadingPhoto ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}
+              Edit photo
+            </button>
+            <button
+              onClick={onClose}
+              className={`rounded-xl border border-[color:var(--bl-border)] py-2.5 text-sm font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)] ${displayedAvatarUrl ? '' : 'col-span-2'}`}
+            >
+              Close
+            </button>
+            {displayedAvatarUrl && (
+              <button
+                onClick={removeOwnPhoto}
+                disabled={isUploadingPhoto || updateProfile.isPending}
+                className="flex items-center justify-center gap-2 rounded-xl border border-rose-300/70 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
+              >
+                <Trash2 size={15} />
+                Remove photo
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="mt-6 grid grid-cols-2 gap-2.5">
+            {viewProfileButton}
+            <button
+              onClick={onClose}
+              className="flex items-center justify-center gap-2 rounded-xl border border-teal-500/40 py-2.5 text-sm font-semibold text-teal-700 transition hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
+            >
+              <MessageCircle size={15} />
+              Message
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-xl border border-[color:var(--bl-border)] py-2.5 text-sm font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => runTrustAction(() => blockUser(user._id), 'User blocked.')}
+              className="flex items-center justify-center gap-2 rounded-xl border border-[color:var(--bl-border)] py-2.5 text-sm font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
+            >
+              <Ban size={15} />
+              Block
+            </button>
+            <button
+              onClick={() => runTrustAction(() => createReport({ targetType: 'user', targetId: user._id, reason: 'User report' }), 'Report submitted.')}
+              className="flex items-center justify-center gap-2 rounded-xl border border-rose-300/70 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
+            >
+              <Flag size={15} />
+              Report
+            </button>
+          </div>
+        )}
+        {notice && <p className="mt-3 text-center text-xs text-[color:var(--bl-text-muted)]" role="status">{notice}</p>}
       </div>
     </div>
   );
@@ -352,30 +571,40 @@ function GroupInfoModal({
   );
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
-        className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)]"
+        style={{ boxShadow: 'var(--bl-glow-md), 0 24px 60px -12px rgba(2, 20, 18, 0.45)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-white">Group info</h3>
+        <div className="flex items-center justify-between border-b border-[color:var(--bl-border)] px-6 py-4">
+          <h3 className="text-base font-semibold text-[color:var(--bl-text)]">Group info</h3>
           <button
             onClick={onClose}
             aria-label="Close group info"
-            className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--bl-border)] text-[color:var(--bl-text-muted)] transition hover:bg-[color:var(--bl-hover)] hover:text-[color:var(--bl-text)]"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
-        <div className="px-5 py-5 text-center">
-          <div className="relative mx-auto h-20 w-20">
-            {avatarUrl ? (
-              <Avatar src={avatarUrl} alt={title} size="xl" />
-            ) : (
-              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-teal-600">
-                <Users size={30} className="text-white" />
-              </div>
-            )}
+
+        {/* Group overview */}
+        <div className="flex items-start gap-5 px-6 py-5 text-left">
+          <div className="relative flex-shrink-0">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-[-35%]"
+              style={{ background: 'radial-gradient(circle, rgba(45, 212, 191, 0.3) 0%, rgba(45, 212, 191, 0) 68%)' }}
+            />
+            <div className="relative rounded-full p-1 ring-2 ring-teal-400/40">
+              {avatarUrl ? (
+                <Avatar src={avatarUrl} alt={title} size="xl" />
+              ) : (
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-teal-600">
+                  <Users size={30} className="text-white" />
+                </div>
+              )}
+            </div>
             {canEdit && (
               <>
                 <button
@@ -401,95 +630,92 @@ function GroupInfoModal({
               </>
             )}
           </div>
-          {canEdit && avatarUrl && (
-            <div className="mt-3">
+          <div className="min-w-0 flex-1 pt-1">
+            <h4 className="truncate text-xl font-bold tracking-tight text-[color:var(--bl-text)]">{title}</h4>
+            <p className="mt-0.5 text-sm text-[color:var(--bl-text-muted)]">
+              {members.length} {members.length === 1 ? 'member' : 'members'}
+            </p>
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[color:var(--bl-text-muted)]">
+              {createdAt && <span>Created {createdAt.toLocaleDateString()}</span>}
+              {chat.groupKind === 'temporary' && expiresAt && <span>Expires {expiresAt.toLocaleString()}</span>}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {canEdit && avatarUrl && (
+                <button
+                  type="button"
+                  onClick={removeGroupAvatar}
+                  disabled={updateChat.isPending}
+                  className="rounded-lg border border-[color:var(--bl-border)] px-2.5 py-1 text-xs font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)] disabled:opacity-60"
+                >
+                  Remove photo
+                </button>
+              )}
               <button
-                type="button"
-                onClick={removeGroupAvatar}
-                disabled={updateChat.isPending}
-                className="text-xs font-semibold text-rose-600 transition hover:text-rose-700 disabled:opacity-60 dark:text-rose-400"
+                onClick={reportGroup}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/70 px-2.5 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
               >
-                Remove photo
+                <Flag size={12} />
+                Report group
               </button>
             </div>
-          )}
-          <h4 className="mt-3 text-lg font-semibold text-slate-900 dark:text-white">{title}</h4>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            {members.length} {members.length === 1 ? 'member' : 'members'}
-          </p>
-          <button
-            onClick={reportGroup}
-            className="mt-3 rounded-xl border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
-          >
-            Report group
-          </button>
-          <div className="mt-2 flex flex-wrap justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            {createdAt && <span>Created {createdAt.toLocaleDateString()}</span>}
-            {chat.groupKind === 'temporary' && expiresAt && <span>Expires {expiresAt.toLocaleString()}</span>}
           </div>
         </div>
-        <div className="overflow-y-auto border-t border-slate-200 dark:border-slate-700">
+
+        <div className="space-y-4 overflow-y-auto border-t border-[color:var(--bl-border)] px-6 py-5">
           {notice && (
-            <div className="mx-5 mt-4 rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <div className="rounded-xl border border-teal-500/30 bg-teal-50 px-3.5 py-2.5 text-sm text-teal-800 dark:bg-teal-500/10 dark:text-teal-200" role="status">
               {notice}
             </div>
           )}
 
           {!canEdit && (chat.description || chat.groupContext) && (
-            <div className="border-b border-slate-200 p-5 text-left dark:border-slate-700">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Description
-              </p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-200">
+            <SectionCard title="Description">
+              <p className="whitespace-pre-wrap text-sm leading-6 text-[color:var(--bl-text-secondary)]">
                 {chat.description || chat.groupContext}
               </p>
-            </div>
+            </SectionCard>
           )}
 
           {canEdit && (
-            <div className="space-y-3 border-b border-slate-200 p-5 dark:border-slate-700">
+            <SectionCard title="Group details" description="Name and description shown to all members.">
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <label className="text-left text-xs font-semibold uppercase tracking-wide text-[color:var(--bl-text-muted)]">
                   Name
                   <input
                     value={editTitle}
                     onChange={(event) => setEditTitle(event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="mt-1 w-full rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--bl-text)] outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-500/20"
                   />
                 </label>
-                <label className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <label className="text-left text-xs font-semibold uppercase tracking-wide text-[color:var(--bl-text-muted)]">
                   Description
                   <input
                     value={editDescription}
                     onChange={(event) => setEditDescription(event.target.value)}
                     placeholder="Add a group description"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="mt-1 w-full rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--bl-text)] outline-none placeholder:text-[color:var(--bl-text-muted)] focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-500/20"
                   />
                 </label>
               </div>
               <button
                 onClick={saveDetails}
                 disabled={updateChat.isPending}
-                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-950"
+                className="mt-3 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
               >
                 {updateChat.isPending ? 'Saving...' : 'Save details'}
               </button>
-            </div>
+            </SectionCard>
           )}
 
           {canEdit && (
-            <div className="space-y-3 border-b border-slate-200 p-5 text-left dark:border-slate-700">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                <UserPlus size={16} />
-                Invite link
-              </div>
+            <SectionCard icon={Link2} title="Invite link" description="Share a link so people can join this group.">
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <label className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bl-text-muted)]">
                   Expiry
                   <select
                     value={inviteExpiry}
                     onChange={(event) => setInviteExpiry(event.target.value as InviteExpiry)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="mt-1 w-full rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--bl-text)] outline-none focus:border-teal-400"
                   >
                     <option value="never">Never</option>
                     <option value="1d">1 day</option>
@@ -497,12 +723,12 @@ function GroupInfoModal({
                     <option value="30d">30 days</option>
                   </select>
                 </label>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <label className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bl-text-muted)]">
                   Maximum uses
                   <select
                     value={inviteMaxUses}
                     onChange={(event) => setInviteMaxUses(event.target.value === 'unlimited' ? 'unlimited' : Number(event.target.value) as InviteMaxUses)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    className="mt-1 w-full rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--bl-text)] outline-none focus:border-teal-400"
                   >
                     <option value="unlimited">Unlimited</option>
                     <option value="10">10</option>
@@ -512,12 +738,12 @@ function GroupInfoModal({
                 </label>
               </div>
               {inviteSettings.data?.invite ? (
-                <div className="rounded-xl border border-slate-200 p-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                  <div className="font-medium text-slate-900 dark:text-white">
+                <div className="mt-3 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-3 text-sm text-[color:var(--bl-text-secondary)]">
+                  <div className="font-medium text-[color:var(--bl-text)]">
                     {inviteSettings.data.invite.useCount}
                     {inviteSettings.data.invite.maxUses ? ` / ${inviteSettings.data.invite.maxUses}` : ''} uses
                   </div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  <div className="mt-1 text-xs text-[color:var(--bl-text-muted)]">
                     {inviteSettings.data.invite.expiresAt
                       ? `Expires ${new Date(inviteSettings.data.invite.expiresAt).toLocaleString()}`
                       : 'Never expires'}
@@ -526,23 +752,23 @@ function GroupInfoModal({
                     <input
                       readOnly
                       value={latestInviteUrl}
-                      className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      className="mt-3 w-full rounded-lg border border-teal-500/30 bg-teal-50 px-3 py-2 text-xs text-teal-800 dark:bg-teal-500/10 dark:text-teal-200"
                     />
                   ) : (
-                    <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                    <p className="mt-3 text-xs text-[color:var(--bl-text-muted)]">
                       Regenerate to copy a fresh invite URL. Stored links keep only a hash of the token.
                     </p>
                   )}
                 </div>
               ) : (
-                <p className="text-sm text-slate-500 dark:text-slate-400">No active invite link.</p>
+                <p className="mt-3 text-sm text-[color:var(--bl-text-muted)]">No active invite link.</p>
               )}
-              <div className="flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap gap-2">
                 {!inviteSettings.data?.invite ? (
                   <button
                     onClick={createInviteLink}
                     disabled={createInvite.isPending}
-                    className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60"
+                    className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
                   >
                     {createInvite.isPending ? 'Creating...' : 'Create invite link'}
                   </button>
@@ -551,107 +777,111 @@ function GroupInfoModal({
                     <button
                       onClick={copyInviteLink}
                       disabled={!latestInviteUrl}
-                      className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-950"
+                      className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
                     >
                       Copy link
                     </button>
                     <button
                       onClick={regenerateInviteLink}
                       disabled={regenerateInvite.isPending}
-                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      className="rounded-xl border border-[color:var(--bl-border)] px-4 py-2 text-sm font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-panel)] disabled:opacity-60"
                     >
                       {regenerateInvite.isPending ? 'Regenerating...' : 'Regenerate'}
                     </button>
                     <button
                       onClick={revokeInviteLink}
                       disabled={revokeInvite.isPending}
-                      className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                      className="rounded-xl border border-rose-300/70 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-60 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10"
                     >
                       {revokeInvite.isPending ? 'Revoking...' : 'Revoke'}
                     </button>
                   </>
                 )}
               </div>
-              <div className="flex items-center justify-between gap-4 pt-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-white">AI Intelligence</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Allow Catch Me Up, Group Brain, and AI suggestions.</p>
-                </div>
-                <button
-                  onClick={() => setAiEnabled(chat.aiEnabled === false)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                    chat.aiEnabled === false
-                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                      : 'bg-teal-600 text-white hover:bg-teal-700'
-                  }`}
-                >
-                  {chat.aiEnabled === false ? 'Off' : 'On'}
-                </button>
-              </div>
-            </div>
+            </SectionCard>
           )}
 
           {canEdit && (
-            <div className="space-y-3 border-b border-slate-200 p-5 text-left dark:border-slate-700">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                <Shield size={16} />
-                Send permissions
+            <SectionCard icon={Sparkles} title="AI Intelligence" description="Allow Catch Me Up, Group Brain, and AI suggestions.">
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm text-[color:var(--bl-text-secondary)]">
+                  {chat.aiEnabled === false ? 'AI features are off for this group.' : 'AI features are on for this group.'}
+                </p>
+                <button
+                  onClick={() => setAiEnabled(chat.aiEnabled === false)}
+                  role="switch"
+                  aria-checked={chat.aiEnabled !== false}
+                  aria-label="Toggle AI Intelligence"
+                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                    chat.aiEnabled === false ? 'bg-slate-300 dark:bg-slate-700' : 'bg-teal-500'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                      chat.aiEnabled === false ? 'translate-x-0.5' : 'translate-x-[22px]'
+                    }`}
+                  />
+                </button>
               </div>
-              <div className="inline-flex rounded-xl border border-slate-200 p-1 dark:border-slate-700">
+            </SectionCard>
+          )}
+
+          {canEdit && (
+            <SectionCard icon={Shield} title="Send permissions" description="Control who can send messages in this group.">
+              <div className="inline-flex rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-1">
                 {(['everyone', 'admins_only'] as const).map((mode) => (
                   <button
                     key={mode}
                     onClick={() => setSendMode(mode)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
                       (chat.sendMode || 'everyone') === mode
-                        ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950'
-                        : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                        ? 'bg-teal-600 text-white shadow-sm dark:bg-teal-500 dark:text-slate-950'
+                        : 'text-[color:var(--bl-text-secondary)] hover:bg-[color:var(--bl-hover)]'
                     }`}
                   >
                     {mode === 'everyone' ? 'Everyone' : 'Admins only'}
                   </button>
                 ))}
               </div>
-            </div>
+              <p className="mt-2 text-xs text-[color:var(--bl-text-muted)]">
+                {(chat.sendMode || 'everyone') === 'everyone' ? 'All members can send messages.' : 'Only admins can send messages.'}
+              </p>
+            </SectionCard>
           )}
 
           {canEdit && (
-            <div className="space-y-3 border-b border-slate-200 p-5 dark:border-slate-700">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                <UserPlus size={16} />
-                Add members
-              </div>
+            <SectionCard icon={UserPlus} title="Add members" description="Add friends or teammates to the group.">
               <input
                 value={memberQuery}
                 onChange={(event) => setMemberQuery(event.target.value)}
-                placeholder="Search people by name, username, or email"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                placeholder="Search by name, username, or email"
+                className="w-full rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm text-[color:var(--bl-text)] outline-none placeholder:text-[color:var(--bl-text-muted)] focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-500/20"
               />
               {selectedUsers.length > 0 && (
-                <div className="flex flex-wrap gap-2">
+                <div className="mt-2.5 flex flex-wrap gap-2">
                   {selectedUsers.map((user) => (
                     <button
                       key={user._id}
                       onClick={() => setSelectedMemberIds((ids) => ids.filter((id) => id !== user._id))}
-                      className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800 dark:bg-teal-500/20 dark:text-teal-100"
+                      className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800 transition hover:bg-teal-100 dark:bg-teal-500/20 dark:text-teal-100 dark:hover:bg-teal-500/30"
                     >
-                      {getUserTitle(user as DisplayUser)}
+                      {getUserTitle(user as DisplayUser)} ✕
                     </button>
                   ))}
                 </div>
               )}
               {memberQuery.trim().length >= 2 && (
-                <div className="max-h-32 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                  {isSearching && <p className="px-3 py-2 text-sm text-slate-500">Searching...</p>}
-                  {!isSearching && availableUsers.length === 0 && <p className="px-3 py-2 text-sm text-slate-500">No available users found.</p>}
+                <div className="mt-2.5 max-h-32 overflow-y-auto rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)]">
+                  {isSearching && <p className="px-3 py-2 text-sm text-[color:var(--bl-text-muted)]">Searching...</p>}
+                  {!isSearching && availableUsers.length === 0 && <p className="px-3 py-2 text-sm text-[color:var(--bl-text-muted)]">No available users found.</p>}
                   {availableUsers.map((user) => (
                     <button
                       key={user._id}
                       onClick={() => setSelectedMemberIds((ids) => ids.includes(user._id) ? ids.filter((id) => id !== user._id) : [...ids, user._id])}
-                      className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-slate-50 dark:hover:bg-slate-800"
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-[color:var(--bl-hover)]"
                     >
                       <Avatar src={user.avatarUrl} alt={getUserTitle(user as DisplayUser)} size="sm" />
-                      <span className="min-w-0 flex-1 truncate text-slate-800 dark:text-slate-100">{getUserTitle(user as DisplayUser)}</span>
+                      <span className="min-w-0 flex-1 truncate text-[color:var(--bl-text)]">{getUserTitle(user as DisplayUser)}</span>
                     </button>
                   ))}
                 </div>
@@ -659,121 +889,140 @@ function GroupInfoModal({
               <button
                 onClick={addSelectedMembers}
                 disabled={selectedMemberIds.length === 0 || addMember.isPending}
-                className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60"
+                className="mt-3 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
               >
                 {addMember.isPending ? 'Adding...' : 'Add selected'}
               </button>
-            </div>
+            </SectionCard>
           )}
 
-          <div className="p-2">
-          {members.map((member) => (
-            <div
-              key={member._id}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
-            >
-              <button onClick={() => onSelectMember(member)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                <Avatar src={member.avatarUrl} alt={getUserTitle(member)} size="md" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
-                    {getUserTitle(member, 'Unknown member')}
-                  </p>
-                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                    {member._id === ownerId ? 'Owner' : adminIds.has(member._id) ? 'Admin' : getUserMeta(member) || member._id}
-                  </p>
-                </div>
-              </button>
-              <div className="flex flex-shrink-0 items-center gap-1">
-                {member._id === ownerId && <Crown size={15} className="text-amber-500" />}
-                {member._id !== ownerId && adminIds.has(member._id) && <Shield size={15} className="text-teal-500" />}
-                {canEdit && member._id !== currentUserId && member._id !== ownerId && (
-                  <>
-                    <button
-                      onClick={() => submit(() => adminIds.has(member._id) ? demoteMember.mutateAsync(member._id) : promoteMember.mutateAsync(member._id), adminIds.has(member._id) ? 'Member demoted.' : 'Member promoted.')}
-                      className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
-                    >
-                      {adminIds.has(member._id) ? 'Demote' : 'Promote'}
-                    </button>
-                    {isOwner && (
-                      <button
-                        onClick={() => submit(() => transferOwnership.mutateAsync(member._id), 'Ownership transferred.')}
-                        className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
-                      >
-                        Transfer
-                      </button>
+          <SectionCard icon={Users} title="Members" description={canEdit ? 'Manage roles and permissions.' : undefined}>
+            <div className="-mx-2 space-y-0.5">
+              {members.map((member) => (
+                <div
+                  key={member._id}
+                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-2 py-2 text-left transition hover:bg-[color:var(--bl-panel)]"
+                >
+                  <button onClick={() => onSelectMember(member)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <Avatar src={member.avatarUrl} alt={getUserTitle(member)} size="md" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-[color:var(--bl-text)]">
+                        {getUserTitle(member, 'Unknown member')}
+                      </p>
+                      <p className="truncate text-xs text-[color:var(--bl-text-muted)]">
+                        {getUserMeta(member) || member._id}
+                      </p>
+                    </div>
+                  </button>
+                  <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1">
+                    {member._id === ownerId && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                        <Crown size={11} /> Owner
+                      </span>
                     )}
-                    <button
-                      onClick={() => toggleRestriction(member._id)}
-                      className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
-                    >
-                      {restrictedIds.has(member._id) ? 'Allow send' : 'Restrict'}
-                    </button>
-                    <button
-                      onClick={() => removeWithModeration(member._id)}
-                      className="rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
-                    >
-                      Remove
-                    </button>
-                  </>
-                )}
-              </div>
+                    {member._id !== ownerId && adminIds.has(member._id) && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
+                        <Shield size={11} /> Admin
+                      </span>
+                    )}
+                    {restrictedIds.has(member._id) && (
+                      <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600 dark:bg-rose-500/15 dark:text-rose-300">
+                        Restricted
+                      </span>
+                    )}
+                    {canEdit && member._id !== currentUserId && member._id !== ownerId && (
+                      <>
+                        <button
+                          onClick={() => submit(() => adminIds.has(member._id) ? demoteMember.mutateAsync(member._id) : promoteMember.mutateAsync(member._id), adminIds.has(member._id) ? 'Member demoted.' : 'Member promoted.')}
+                          className="rounded-lg border border-[color:var(--bl-border)] px-2 py-1 text-xs font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
+                        >
+                          {adminIds.has(member._id) ? 'Demote' : 'Promote'}
+                        </button>
+                        {isOwner && (
+                          <button
+                            onClick={() => submit(() => transferOwnership.mutateAsync(member._id), 'Ownership transferred.')}
+                            className="rounded-lg border border-[color:var(--bl-border)] px-2 py-1 text-xs font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
+                          >
+                            Transfer
+                          </button>
+                        )}
+                        <button
+                          onClick={() => toggleRestriction(member._id)}
+                          className="rounded-lg border border-[color:var(--bl-border)] px-2 py-1 text-xs font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
+                        >
+                          {restrictedIds.has(member._id) ? 'Allow send' : 'Restrict'}
+                        </button>
+                        <button
+                          onClick={() => removeWithModeration(member._id)}
+                          className="rounded-lg border border-rose-300/50 px-2 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                        >
+                          Remove
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-          </div>
+          </SectionCard>
 
           {canEdit && (
-            <div className="border-t border-slate-200 p-5 text-left dark:border-slate-700">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                <Shield size={16} />
-                Moderation activity
-              </div>
-              <div className="space-y-2">
+            <SectionCard icon={Shield} title="Moderation activity" description="Recent group activity and changes.">
+              <div className="space-y-1">
                 {moderationActivity.data?.activity?.length ? (
                   moderationActivity.data.activity.slice(0, 8).map((item) => (
-                    <div key={item.id} className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      <span className="font-semibold">{item.actor?.name || item.actor?.username || 'Deleted user'}</span>
-                      {' '}
-                      {item.action.replaceAll('_', ' ')}
-                      {item.target ? ` · ${item.target.name || item.target.username || 'Deleted user'}` : ''}
+                    <div key={item.id} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-xs text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-panel)]">
+                      <span aria-hidden="true" className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500" />
+                      <span className="min-w-0">
+                        <span className="font-semibold text-[color:var(--bl-text)]">{item.actor?.name || item.actor?.username || 'Deleted user'}</span>
+                        {' '}
+                        {item.action.replaceAll('_', ' ')}
+                        {item.target ? ` · ${item.target.name || item.target.username || 'Deleted user'}` : ''}
+                      </span>
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-slate-500 dark:text-slate-400">No moderation activity yet.</p>
+                  <p className="text-sm text-[color:var(--bl-text-muted)]">No moderation activity yet.</p>
                 )}
               </div>
-            </div>
+            </SectionCard>
           )}
 
-          <div className="space-y-3 border-t border-slate-200 p-5 dark:border-slate-700">
-            <button
-              onClick={leave}
-              disabled={leaveGroup.isPending || isOwner}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              {isOwner ? 'Transfer ownership before leaving' : leaveGroup.isPending ? 'Leaving...' : 'Leave group'}
-            </button>
-            {isOwner && (
-              <div className="rounded-xl border border-rose-200 p-3 dark:border-rose-500/30">
-                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-rose-700 dark:text-rose-300">
-                  <Trash2 size={15} />
-                  Delete group
+          <SectionCard icon={AlertTriangle} title="Danger zone" description="These actions cannot be undone." tone="danger">
+            <div className="space-y-3">
+              <button
+                onClick={leave}
+                disabled={leaveGroup.isPending || isOwner}
+                className="rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4 py-2 text-sm font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)] disabled:opacity-50"
+              >
+                {isOwner ? 'Transfer ownership before leaving' : leaveGroup.isPending ? 'Leaving...' : 'Leave group'}
+              </button>
+              {isOwner && (
+                <div className="rounded-xl border border-rose-300/60 bg-[color:var(--bl-panel)] p-3.5 dark:border-rose-500/30">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-rose-700 dark:text-rose-300">
+                    <Trash2 size={15} />
+                    Delete group
+                  </div>
+                  <p className="mb-2 text-xs text-[color:var(--bl-text-muted)]">
+                    Permanently delete this group and all its messages for everyone.
+                  </p>
+                  <input
+                    value={deleteConfirmation}
+                    onChange={(event) => setDeleteConfirmation(event.target.value)}
+                    placeholder={`Type "${title}" to delete`}
+                    className="w-full rounded-xl border border-rose-300/60 bg-[color:var(--bl-panel)] px-3 py-2 text-sm text-[color:var(--bl-text)] outline-none placeholder:text-[color:var(--bl-text-muted)] focus:border-rose-400 focus:ring-2 focus:ring-rose-100 dark:border-rose-500/40 dark:focus:ring-rose-500/20"
+                  />
+                  <button
+                    onClick={deleteForEveryone}
+                    disabled={deleteConfirmation !== title || deleteGroup.isPending}
+                    className="mt-2.5 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-60"
+                  >
+                    {deleteGroup.isPending ? 'Deleting...' : 'Delete for everyone'}
+                  </button>
                 </div>
-                <input
-                  value={deleteConfirmation}
-                  onChange={(event) => setDeleteConfirmation(event.target.value)}
-                  placeholder={`Type "${title}" to delete`}
-                  className="w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 dark:border-rose-500/40 dark:bg-slate-800 dark:text-white"
-                />
-                <button
-                  onClick={deleteForEveryone}
-                  disabled={deleteConfirmation !== title || deleteGroup.isPending}
-                  className="mt-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
-                >
-                  {deleteGroup.isPending ? 'Deleting...' : 'Delete for everyone'}
-                </button>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </SectionCard>
         </div>
       </div>
     </div>
@@ -840,20 +1089,17 @@ export default function ChatHeader({
   isGroupChat,
   onOpenIntelligence,
   intelligenceEnabled = true,
+  intelligenceOpen = false,
   onJumpToMessage,
   pinnedCount = 0,
   onOpenPins,
   onOpenShared,
-  onArchiveChat,
-  onUnarchiveChat,
-  isArchived = false,
 }: ChatHeaderProps) {
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
   const setActiveCall = useAppStore((state) => state.setActiveCall);
   const socket = useAppStore((state) => state.socket);
   const isConnected = useAppStore((state) => state.isConnected);
-  const [showMenu, setShowMenu] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [profileUser, setProfileUser] = useState<DisplayUser | null>(null);
@@ -862,10 +1108,7 @@ export default function ChatHeader({
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const participantQueries = useQueries({
     queries: chat.participants.map((participantId) => ({
       queryKey: ['users', participantId] as const,
@@ -981,38 +1224,6 @@ export default function ChatHeader({
     jumpToSearchResult(nextIndex);
   };
 
-  const positionMenu = () => {
-    const rect = menuButtonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const menuWidth = 208;
-    const margin = 8;
-    const maxLeft = Math.max(margin, window.innerWidth - menuWidth - margin);
-    setMenuPosition({
-      top: rect.bottom + 6,
-      left: Math.min(maxLeft, Math.max(margin, rect.right - menuWidth)),
-    });
-  };
-
-  // Close menu on outside click or Escape
-  useEffect(() => {
-    if (!showMenu) return;
-    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowMenu(false); };
-    const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false);
-    };
-    const handleReposition = () => positionMenu();
-    document.addEventListener('keydown', handleKey);
-    document.addEventListener('mousedown', handleClick);
-    window.addEventListener('resize', handleReposition);
-    window.addEventListener('scroll', handleReposition, true);
-    return () => {
-      document.removeEventListener('keydown', handleKey);
-      document.removeEventListener('mousedown', handleClick);
-      window.removeEventListener('resize', handleReposition);
-      window.removeEventListener('scroll', handleReposition, true);
-    };
-  }, [showMenu]);
-
   // Focus search input when opened
   useEffect(() => {
     if (showSearch) {
@@ -1051,7 +1262,7 @@ export default function ChatHeader({
   };
 
   const btnBase =
-    'rounded-full p-2 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white';
+    'bl-focus-ring rounded-full p-2 transition hover:bg-teal-50 hover:text-teal-800 dark:hover:bg-teal-500/15 dark:hover:text-teal-100';
 
   const createDirectCallId = () =>
     globalThis.crypto?.randomUUID?.() || `call-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1142,15 +1353,20 @@ export default function ChatHeader({
           </button>
 
           {/* Right: action buttons */}
-          <div className="flex items-center gap-0.5 text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-0.5 text-teal-600 dark:text-teal-300">
             {intelligenceEnabled && (
               <button
                 onClick={() => { onOpenIntelligence?.(); setShowSearch(false); }}
                 aria-label="Open Chat Intelligence"
                 title="Open Chat Intelligence"
-                className={btnBase}
+                aria-pressed={intelligenceOpen}
+                className={`bl-focus-ring mr-1 flex h-9 w-9 items-center justify-center rounded-full border transition ${
+                  intelligenceOpen
+                    ? 'border-teal-500/50 bg-teal-50 text-teal-700 shadow-[0_0_12px_rgba(45,212,191,0.35)] dark:border-teal-400/50 dark:bg-teal-500/20 dark:text-teal-200 dark:shadow-[0_0_14px_rgba(45,212,191,0.45)]'
+                    : 'border-teal-500/25 bg-teal-50/70 text-teal-600 hover:border-teal-500/45 hover:bg-teal-50 hover:text-teal-800 hover:shadow-[0_0_10px_rgba(45,212,191,0.25)] dark:border-teal-400/20 dark:bg-teal-500/10 dark:text-teal-300 dark:hover:border-teal-400/40 dark:hover:bg-teal-500/20 dark:hover:text-teal-100'
+                }`}
               >
-                <Sparkles size={18} />
+                <Sparkles size={17} />
               </button>
             )}
 
@@ -1186,7 +1402,7 @@ export default function ChatHeader({
               onClick={() => { setShowSearch((v) => !v); }}
               aria-label="Search in chat"
               aria-pressed={showSearch}
-              className={`${btnBase} ${showSearch ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white' : ''}`}
+              className={`${btnBase} ${showSearch ? 'bg-teal-100 text-teal-800 dark:bg-teal-500/25 dark:text-teal-100' : ''}`}
             >
               <Search size={18} />
             </button>
@@ -1208,73 +1424,6 @@ export default function ChatHeader({
             >
               <Phone size={18} />
             </button>
-
-            {/* Three-dot menu — anchored with relative wrapper */}
-            <div ref={menuRef} className="relative">
-              <button
-                ref={menuButtonRef}
-                onClick={() => {
-                  if (!showMenu) positionMenu();
-                  setShowMenu((v) => !v);
-                }}
-                aria-label="More options"
-                aria-expanded={showMenu}
-                aria-haspopup="menu"
-                className={`${btnBase} ${showMenu ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white' : ''}`}
-              >
-                <MoreVertical size={18} />
-              </button>
-
-              {showMenu && (
-                <div
-                  role="menu"
-                  className="fixed z-[100] w-52 max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-800"
-                  style={{ top: menuPosition.top, left: menuPosition.left }}
-                >
-                  <button
-                    role="menuitem"
-                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-                    onClick={() => { setShowMenu(false); openProfileOrGroupInfo(); }}
-                  >
-                    View profile
-                  </button>
-                  <button
-                    role="menuitem"
-                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-                    onClick={() => { setShowMenu(false); setShowSearch(true); }}
-                  >
-                    Search in chat
-                  </button>
-                  <button
-                    role="menuitem"
-                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-                    onClick={() => { setShowMenu(false); onOpenShared?.(); }}
-                  >
-                    Shared
-                  </button>
-                  <button
-                    role="menuitem"
-                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-                    onClick={() => setShowMenu(false)}
-                  >
-                    Mute notifications
-                  </button>
-                  {(onArchiveChat || onUnarchiveChat) && (
-                    <button
-                      role="menuitem"
-                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-                      onClick={() => {
-                        setShowMenu(false);
-                        if (isArchived) onUnarchiveChat?.();
-                        else onArchiveChat?.();
-                      }}
-                    >
-                      {isArchived ? 'Unarchive chat' : 'Archive chat'}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
@@ -1299,7 +1448,7 @@ export default function ChatHeader({
                   }
                 }}
                 placeholder="Search in this chat…"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-8 pr-28 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-500"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-8 pr-28 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-400"
               />
               {trimmedSearch && (
                 <div className="absolute right-9 flex items-center gap-1">
@@ -1391,6 +1540,11 @@ export default function ChatHeader({
 
       <UserProfileModal
         user={profileUser}
+        online={
+          profileUser && directProfileUser && profileUser._id === directProfileUser._id
+            ? onlineStatus?.online
+            : undefined
+        }
         onClose={() => setProfileUser(null)}
       />
 

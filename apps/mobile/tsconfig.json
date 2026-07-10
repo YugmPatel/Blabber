@@ -6,7 +6,9 @@
     "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": [
+        "src/*"
+      ]
     }
   },
   "include": [
@@ -14,6 +16,7 @@
     "src",
     "tests",
     "app.config.ts",
-    "expo-env.d.ts"
+    "expo-env.d.ts",
+    ".expo/types/**/*.ts"
   ]
 }

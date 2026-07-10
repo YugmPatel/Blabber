@@ -5,7 +5,8 @@ import { join } from 'path';
 import { promisify } from 'util';
 import { logger } from '@repo/utils';
 import { getDatabase } from './db';
-import { getReelsCollection, ReelDocument, ReelHlsSegment } from './models/reel';
+import { getReelsCollection, ReelDocument, ReelHlsSegment, ReelProcessingStatus } from './models/reel';
+import { getMomentVideosCollection, MomentVideoDocument } from './models/moment-video';
 import {
   REEL_ERROR_MESSAGE,
   REEL_MAX_BITRATE,
@@ -20,6 +21,10 @@ import {
 
 const execFileAsync = promisify(execFile);
 const MEDIA_ROOT = process.env.LOCAL_MEDIA_DIR || '/data/blabber-media';
+const REEL_STALE_PROCESSING_MS = Math.max(
+  REEL_PROCESSING_TIMEOUT_MS * 2,
+  Number(process.env.REEL_STALE_PROCESSING_MS || 0) || 5 * 60 * 1000
+);
 
 type ProbeStream = {
   codec_type?: string;
@@ -108,7 +113,35 @@ function segmentToken() {
   return crypto.randomBytes(18).toString('base64url');
 }
 
-async function processReel(reel: ReelDocument) {
+function activeLeaseFilter(reel: ReelDocument, processingLeaseId: string) {
+  return {
+    _id: reel._id,
+    processingLeaseId,
+    processingStatus: { $nin: ['deleted', 'ready'] as ReelProcessingStatus[] },
+    deletedAt: { $exists: false },
+  };
+}
+
+function activeMomentVideoLeaseFilter(video: MomentVideoDocument, processingLeaseId: string) {
+  return {
+    _id: video._id,
+    processingLeaseId,
+    processingStatus: { $nin: ['deleted', 'ready'] as ReelProcessingStatus[] },
+    deletedAt: { $exists: false },
+  };
+}
+
+async function assertActiveLease(reel: ReelDocument, processingLeaseId: string) {
+  const current = await getReelsCollection().findOne(activeLeaseFilter(reel, processingLeaseId));
+  if (!current) throw new Error('reel_no_longer_claimed');
+}
+
+async function assertActiveMomentVideoLease(video: MomentVideoDocument, processingLeaseId: string) {
+  const current = await getMomentVideosCollection().findOne(activeMomentVideoLeaseFilter(video, processingLeaseId));
+  if (!current) throw new Error('moment_video_no_longer_claimed');
+}
+
+async function processReel(reel: ReelDocument, processingLeaseId: string) {
   const db = getDatabase();
   const source = await db.collection('media').findOne({
     _id: reel.sourceMediaId,
@@ -119,12 +152,14 @@ async function processReel(reel: ReelDocument) {
   });
   if (!source?.localPath || !isSafeMediaPath(source.localPath)) throw new Error('source_unavailable');
 
-  await getReelsCollection().updateOne(
-    { _id: reel._id, processingStatus: { $nin: ['deleted', 'ready'] } },
+  const validating = await getReelsCollection().updateOne(
+    activeLeaseFilter(reel, processingLeaseId),
     { $set: { processingStatus: 'validating', updatedAt: new Date() } }
   );
+  if (!validating.matchedCount) throw new Error('reel_no_longer_claimed');
   const probe = await probeSource(source.localPath);
   const outputDir = join(MEDIA_ROOT, 'reels', reel._id.toString());
+  await assertActiveLease(reel, processingLeaseId);
   await cleanDir(outputDir);
   const dims = scaledDimensions(probe.width, probe.height);
   const fallbackPath = join(outputDir, 'fallback.mp4');
@@ -132,10 +167,11 @@ async function processReel(reel: ReelDocument) {
   const playlistPath = join(outputDir, 'playlist.m3u8');
   const segmentPattern = join(outputDir, 'segment_%03d.ts');
 
-  await getReelsCollection().updateOne(
-    { _id: reel._id, processingStatus: { $nin: ['deleted', 'ready'] } },
+  const processing = await getReelsCollection().updateOne(
+    activeLeaseFilter(reel, processingLeaseId),
     { $set: { processingStatus: 'processing', updatedAt: new Date() } }
   );
+  if (!processing.matchedCount) throw new Error('reel_no_longer_claimed');
 
   const scale = `scale=${dims.width}:${dims.height}`;
   await runTool('ffmpeg', [
@@ -173,7 +209,7 @@ async function processReel(reel: ReelDocument) {
 
   const now = new Date();
   const result = await getReelsCollection().findOneAndUpdate(
-    { _id: reel._id, processingStatus: { $nin: ['deleted'] } },
+    activeLeaseFilter(reel, processingLeaseId),
     {
       $set: {
         processingStatus: 'ready',
@@ -187,32 +223,134 @@ async function processReel(reel: ReelDocument) {
         processedAt: now,
         updatedAt: now,
       },
-      $unset: { validationFailureCategory: '' },
+      $unset: { validationFailureCategory: '', processingLeaseId: '' },
     },
     { returnDocument: 'after' }
   );
-  if (!result) await cleanDir(outputDir);
+  if (!result) throw new Error('reel_no_longer_claimed');
+}
+
+async function processMomentVideo(video: MomentVideoDocument, processingLeaseId: string) {
+  const db = getDatabase();
+  const source = await db.collection('media').findOne({
+    _id: video.sourceMediaId,
+    userId: video.authorUserId,
+    status: 'approved',
+    purpose: 'moment_video_source',
+    fileType: 'video/mp4',
+  });
+  if (!source?.localPath || !isSafeMediaPath(source.localPath)) throw new Error('source_unavailable');
+
+  const validating = await getMomentVideosCollection().updateOne(
+    activeMomentVideoLeaseFilter(video, processingLeaseId),
+    { $set: { processingStatus: 'validating', updatedAt: new Date() } }
+  );
+  if (!validating.matchedCount) throw new Error('moment_video_no_longer_claimed');
+  const probe = await probeSource(source.localPath);
+  const outputDir = join(MEDIA_ROOT, 'moment-videos', video._id.toString());
+  await assertActiveMomentVideoLease(video, processingLeaseId);
+  await cleanDir(outputDir);
+  const dims = scaledDimensions(probe.width, probe.height);
+  const fallbackPath = join(outputDir, 'fallback.mp4');
+  const posterPath = join(outputDir, 'poster.jpg');
+  const playlistPath = join(outputDir, 'playlist.m3u8');
+  const segmentPattern = join(outputDir, 'segment_%03d.ts');
+
+  const processing = await getMomentVideosCollection().updateOne(
+    activeMomentVideoLeaseFilter(video, processingLeaseId),
+    { $set: { processingStatus: 'processing', updatedAt: new Date() } }
+  );
+  if (!processing.matchedCount) throw new Error('moment_video_no_longer_claimed');
+
+  const scale = `scale=${dims.width}:${dims.height}`;
+  await runTool('ffmpeg', [
+    '-y', '-i', source.localPath,
+    '-map', '0:v:0', '-map', '0:a:0?',
+    '-vf', scale,
+    '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'main', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', '96k',
+    '-sn', '-dn', '-map_metadata', '-1', '-movflags', '+faststart',
+    fallbackPath,
+  ]);
+  await runTool('ffmpeg', [
+    '-y', '-ss', '1', '-i', source.localPath,
+    '-frames:v', '1', '-vf', scale,
+    '-q:v', '3', '-map_metadata', '-1',
+    posterPath,
+  ]);
+  await runTool('ffmpeg', [
+    '-y', '-i', fallbackPath,
+    '-c', 'copy',
+    '-hls_time', '4',
+    '-hls_playlist_type', 'vod',
+    '-hls_segment_filename', segmentPattern,
+    playlistPath,
+  ]);
+
+  const files = await fs.readdir(outputDir);
+  const segmentFiles = files.filter((file) => /^segment_\d+\.ts$/.test(file)).sort();
+  const durationPerSegment = Math.max(1, Math.ceil(probe.durationSeconds / Math.max(1, segmentFiles.length)));
+  const segments: ReelHlsSegment[] = segmentFiles.map((file) => ({
+    token: segmentToken(),
+    path: join(outputDir, file),
+    durationSeconds: durationPerSegment,
+  }));
+
+  const now = new Date();
+  const result = await getMomentVideosCollection().findOneAndUpdate(
+    activeMomentVideoLeaseFilter(video, processingLeaseId),
+    {
+      $set: {
+        processingStatus: 'ready',
+        durationSeconds: probe.durationSeconds,
+        width: dims.width,
+        height: dims.height,
+        fallbackPath,
+        posterPath,
+        hlsPlaylistPath: playlistPath,
+        hlsSegments: segments,
+        processedAt: now,
+        updatedAt: now,
+      },
+      $unset: { validationFailureCategory: '', processingLeaseId: '' },
+    },
+    { returnDocument: 'after' }
+  );
+  if (!result) throw new Error('moment_video_no_longer_claimed');
 }
 
 export async function processOnePendingReel() {
   const now = new Date();
+  const processingLeaseId = crypto.randomUUID();
+  const staleBefore = new Date(now.getTime() - REEL_STALE_PROCESSING_MS);
   const reel = await getReelsCollection().findOneAndUpdate(
-    { processingStatus: 'uploaded', deletedAt: { $exists: false } },
     {
-      $set: { processingStatus: 'validating', processingStartedAt: now, updatedAt: now },
+      deletedAt: { $exists: false },
+      publishState: { $ne: 'deleted' },
+      $or: [
+        { processingStatus: 'uploaded' },
+        {
+          processingStatus: { $in: ['validating', 'processing'] },
+          processingStartedAt: { $lte: staleBefore },
+        },
+      ],
+    },
+    {
+      $set: { processingStatus: 'validating', processingStartedAt: now, processingLeaseId, updatedAt: now },
       $inc: { processingAttempt: 1 },
     },
     { sort: { updatedAt: 1 }, returnDocument: 'after' }
   );
   if (!reel) return false;
   try {
-    await processReel(reel);
+    await processReel(reel, processingLeaseId);
   } catch (error) {
     logger.warn({ reelId: reel._id.toString(), category: error instanceof Error ? error.message : 'processing_failed' }, 'Reel processing failed');
     const outputDir = join(MEDIA_ROOT, 'reels', reel._id.toString());
-    await cleanDir(outputDir).catch(() => undefined);
+    const stillOwned = await getReelsCollection().findOne({ _id: reel._id, processingLeaseId, deletedAt: { $exists: false } });
+    if (stillOwned) await cleanDir(outputDir).catch(() => undefined);
     await getReelsCollection().updateOne(
-      { _id: reel._id, processingStatus: { $ne: 'deleted' } },
+      { _id: reel._id, processingLeaseId, processingStatus: { $ne: 'deleted' }, deletedAt: { $exists: false } },
       {
         $set: {
           processingStatus: error instanceof Error && error.message.includes('unsupported') || error instanceof Error && error.message.includes('invalid') || error instanceof Error && error.message.includes('out_of_bounds')
@@ -221,7 +359,53 @@ export async function processOnePendingReel() {
           validationFailureCategory: error instanceof Error ? error.message : 'processing_failed',
           updatedAt: new Date(),
         },
-        $unset: { fallbackPath: '', posterPath: '', hlsPlaylistPath: '', hlsSegments: '' },
+        $unset: { fallbackPath: '', posterPath: '', hlsPlaylistPath: '', hlsSegments: '', processingLeaseId: '' },
+      }
+    );
+  }
+  return true;
+}
+
+export async function processOnePendingMomentVideo() {
+  const now = new Date();
+  const processingLeaseId = crypto.randomUUID();
+  const staleBefore = new Date(now.getTime() - REEL_STALE_PROCESSING_MS);
+  const video = await getMomentVideosCollection().findOneAndUpdate(
+    {
+      deletedAt: { $exists: false },
+      $or: [
+        { processingStatus: 'uploaded' },
+        {
+          processingStatus: { $in: ['validating', 'processing'] },
+          processingStartedAt: { $lte: staleBefore },
+        },
+      ],
+    },
+    {
+      $set: { processingStatus: 'validating', processingStartedAt: now, processingLeaseId, updatedAt: now },
+      $inc: { processingAttempt: 1 },
+    },
+    { sort: { updatedAt: 1 }, returnDocument: 'after' }
+  );
+  if (!video) return false;
+  try {
+    await processMomentVideo(video, processingLeaseId);
+  } catch (error) {
+    logger.warn({ videoId: video._id.toString(), category: error instanceof Error ? error.message : 'processing_failed' }, 'Moment video processing failed');
+    const outputDir = join(MEDIA_ROOT, 'moment-videos', video._id.toString());
+    const stillOwned = await getMomentVideosCollection().findOne({ _id: video._id, processingLeaseId, deletedAt: { $exists: false } });
+    if (stillOwned) await cleanDir(outputDir).catch(() => undefined);
+    await getMomentVideosCollection().updateOne(
+      { _id: video._id, processingLeaseId, processingStatus: { $ne: 'deleted' }, deletedAt: { $exists: false } },
+      {
+        $set: {
+          processingStatus: error instanceof Error && error.message.includes('unsupported') || error instanceof Error && error.message.includes('invalid') || error instanceof Error && error.message.includes('out_of_bounds')
+            ? 'rejected'
+            : 'failed',
+          validationFailureCategory: error instanceof Error ? error.message : 'processing_failed',
+          updatedAt: new Date(),
+        },
+        $unset: { fallbackPath: '', posterPath: '', hlsPlaylistPath: '', hlsSegments: '', processingLeaseId: '' },
       }
     );
   }
@@ -237,8 +421,9 @@ export function startReelVideoProcessor() {
     running = true;
     try {
       for (let i = 0; i < REEL_PROCESSOR_BATCH_SIZE; i += 1) {
-        const processed = await processOnePendingReel();
-        if (!processed) break;
+        const processedReel = await processOnePendingReel();
+        const processedMomentVideo = await processOnePendingMomentVideo();
+        if (!processedReel && !processedMomentVideo) break;
       }
     } catch (error) {
       logger.error({ error }, 'Reel processor tick failed');
@@ -256,6 +441,12 @@ export function startReelVideoProcessor() {
 
 export async function deleteReelFiles(reel: Pick<ReelDocument, '_id' | 'fallbackPath' | 'posterPath' | 'hlsPlaylistPath' | 'hlsSegments'>) {
   const outputDir = join(MEDIA_ROOT, 'reels', reel._id.toString());
+  await cleanDir(outputDir).catch(() => undefined);
+  await fs.rm(outputDir, { recursive: true, force: true }).catch(() => undefined);
+}
+
+export async function deleteMomentVideoFiles(video: Pick<MomentVideoDocument, '_id' | 'fallbackPath' | 'posterPath' | 'hlsPlaylistPath' | 'hlsSegments'>) {
+  const outputDir = join(MEDIA_ROOT, 'moment-videos', video._id.toString());
   await cleanDir(outputDir).catch(() => undefined);
   await fs.rm(outputDir, { recursive: true, force: true }).catch(() => undefined);
 }

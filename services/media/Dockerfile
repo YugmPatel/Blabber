@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for Media Service
 
 # Stage 1: Base - Install dependencies
-FROM node:20.11.0-alpine AS base
+FROM node:20.19.4-alpine AS base
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
@@ -44,9 +44,9 @@ RUN pnpm --filter @repo/utils build
 RUN pnpm --filter @services/media build
 
 # Stage 3: Production - Create minimal runtime image
-FROM node:20.11.0-alpine AS production
+FROM node:20.19.4-alpine AS production
 
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg libheif-tools
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@8.15.0 --activate

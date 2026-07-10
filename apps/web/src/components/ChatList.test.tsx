@@ -107,7 +107,10 @@ describe('ChatList', () => {
       </BrowserRouter>
     );
 
-    const chatTitles = screen.getAllByRole('button').map((el) => el.textContent);
+    const chatTitles = screen
+      .getAllByRole('button')
+      .map((el) => el.textContent || '')
+      .filter((text) => text.includes('Chat'));
     // Chat 2 has the most recent message (13:00), then Chat 1 (12:00), then Chat 3 (11:30)
     expect(chatTitles[0]).toContain('Chat 2');
     expect(chatTitles[1]).toContain('Chat 1');
@@ -121,7 +124,10 @@ describe('ChatList', () => {
       </BrowserRouter>
     );
 
-    const chatTitles = screen.getAllByRole('button').map((el) => el.textContent);
+    const chatTitles = screen
+      .getAllByRole('button')
+      .map((el) => el.textContent || '')
+      .filter((text) => text.includes('Chat'));
     // Chat 1 should be first because it's pinned
     expect(chatTitles[0]).toContain('Chat 1');
   });

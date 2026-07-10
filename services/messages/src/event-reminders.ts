@@ -20,7 +20,7 @@ interface EventReminderNotificationPayload {
 }
 
 export interface EventReminderSender {
-  send(payload: EventReminderNotificationPayload): Promise<{ sent: number; message?: string }>;
+  send(payload: EventReminderNotificationPayload): Promise<{ sent: number; inboxRecorded?: boolean; message?: string }>;
 }
 
 export class HttpEventReminderSender implements EventReminderSender {
@@ -36,16 +36,24 @@ export class HttpEventReminderSender implements EventReminderSender {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await response.json().catch(() => ({})) as { sent?: unknown; message?: unknown };
+    const data = await response.json().catch(() => ({})) as { sent?: unknown; inboxRecorded?: unknown; message?: unknown };
     if (!response.ok) {
       throw new Error(typeof data.message === 'string' ? data.message : 'Notification delivery failed');
     }
     return {
       sent: typeof data.sent === 'number' ? data.sent : 0,
+      inboxRecorded: data.inboxRecorded === true,
       message: typeof data.message === 'string' ? data.message : undefined,
     };
   }
 }
+
+const OFFSET_REMINDER_TYPES = new Map<number, EventReminderType>([
+  [5, 'five_minutes_before'],
+  [15, 'fifteen_minutes_before'],
+  [60, 'hour_before'],
+  [1440, 'day_before'],
+]);
 
 function eventStart(message: MessageDocument) {
   if (!message.event) return null;
@@ -56,6 +64,12 @@ function eventStart(message: MessageDocument) {
 function reminderWindows(message: MessageDocument, now: Date) {
   const startAt = eventStart(message);
   if (!startAt || startAt.getTime() <= now.getTime()) return [];
+  const offsetMinutes = message.event?.reminderOffsetMinutes;
+  if (offsetMinutes) {
+    const reminderType = OFFSET_REMINDER_TYPES.get(offsetMinutes);
+    if (!reminderType) return [];
+    return now.getTime() >= startAt.getTime() - offsetMinutes * 60 * 1000 ? [reminderType] : [];
+  }
   const windows: EventReminderType[] = [];
   if (now.getTime() >= startAt.getTime() - 24 * 60 * 60 * 1000) windows.push('day_before');
   if (now.getTime() >= startAt.getTime() - 60 * 60 * 1000) windows.push('hour_before');
@@ -100,7 +114,7 @@ export class EventReminderProcessor {
       if (!message.event?.rsvps?.length || windows.length === 0) continue;
 
       for (const rsvp of message.event.rsvps) {
-        if (rsvp.status === 'declined') continue;
+        if (rsvp.status !== 'going') continue;
         for (const reminderType of windows) {
           const reserved = await reserveEventReminderDelivery({
             eventId: message._id,
@@ -132,7 +146,7 @@ export class EventReminderProcessor {
     if (!eligible) return 'skipped' as const;
 
     const startAt = eventStart(message)!;
-    const title = reminderType === 'hour_before' ? 'Event starts in 1 hour' : 'Event tomorrow';
+    const title = reminderTitle(reminderType);
     const time = new Intl.DateTimeFormat('en-US', {
       dateStyle: 'medium',
       timeStyle: 'short',
@@ -151,7 +165,7 @@ export class EventReminderProcessor {
           route: `/chats/${message.chatId.toString()}?message=${message._id.toString()}`,
         },
       });
-      return result.sent > 0 ? 'sent' as const : 'skipped' as const;
+      return result.inboxRecorded || result.sent > 0 ? 'sent' as const : 'skipped' as const;
     } catch (error) {
       logger.error({ error, messageId: message._id.toString(), userId: userId.toString() }, 'Event reminder failed');
       return 'failed' as const;
@@ -171,6 +185,8 @@ export class EventReminderProcessor {
     if (preferences?.eventRemindersEnabled === false) return false;
     if (reminderType === 'day_before' && preferences?.eventReminderDayBeforeEnabled === false) return false;
     if (reminderType === 'hour_before' && preferences?.eventReminderHourBeforeEnabled === false) return false;
+    const latestRsvp = latest.event.rsvps?.find((rsvp) => rsvp.userId.equals(userId));
+    if (latestRsvp?.status !== 'going') return false;
     return true;
   }
 
@@ -187,4 +203,11 @@ export class EventReminderProcessor {
     if (this.interval) clearInterval(this.interval);
     this.interval = null;
   }
+}
+
+function reminderTitle(reminderType: EventReminderType) {
+  if (reminderType === 'five_minutes_before') return 'Event starts in 5 minutes';
+  if (reminderType === 'fifteen_minutes_before') return 'Event starts in 15 minutes';
+  if (reminderType === 'hour_before') return 'Event starts in 1 hour';
+  return 'Event tomorrow';
 }

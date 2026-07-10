@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { resetPassword } from '@/api/client';
-import BlabberLogo from '@/components/BlabberLogo';
+import BlabberMark from '@/components/brand/BlabberMark';
 
 const serifStyle: React.CSSProperties = { fontFamily: "Georgia, 'Times New Roman', serif" };
 
@@ -67,9 +67,8 @@ export default function ResetPasswordPage() {
         aria-labelledby="reset-password-title"
       >
         <div className="mb-8 flex flex-col items-center gap-1">
-          <div className="mb-1 flex items-center gap-2.5">
-            <BlabberLogo size={30} />
-            <span className="text-[17px] font-semibold tracking-tight text-slate-900">Blabber</span>
+          <div className="mb-1 flex items-center justify-center">
+            <BlabberMark size={34} variant="lockup" mode="light" />
           </div>
           <h1
             id="reset-password-title"

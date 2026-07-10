@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Search, Loader2, Users, Check, Clock, Timer, Archive, Camera } from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { apiClient } from '@/api/client';
-import { chatKeys } from '@/hooks/useChats';
+import { chatKeys, useChats } from '@/hooks/useChats';
 import { useFileUpload } from '@/hooks/useFileUpload';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Chat, User } from '@repo/types';
@@ -44,6 +44,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
   const { uploadMedia } = useFileUpload();
+  const { data: chats = [], isLoading: isLoadingChats } = useChats();
 
   const getExpirationDate = (): Date | null => {
     if (!isTemporary) return null;
@@ -57,16 +58,35 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     return null;
   };
 
-  // Search users
-  const { data: searchResults, isLoading: isSearching } = useQuery({
-    queryKey: ['users', 'search', searchQuery],
-    queryFn: async () => {
-      if (!searchQuery.trim()) return { users: [] };
-      const response = await apiClient.get(`/api/users/search?q=${searchQuery}`);
-      return response.data;
-    },
-    enabled: searchQuery.trim().length > 0,
+  const eligibleParticipantIds = Array.from(
+    new Set(
+      chats.flatMap((chat) =>
+        chat.participants.filter((participantId) => participantId !== currentUser?._id)
+      )
+    )
+  );
+  const participantQueries = useQueries({
+    queries: eligibleParticipantIds.map((participantId) => ({
+      queryKey: ['users', participantId] as const,
+      queryFn: async () => {
+        const { data } = await apiClient.get<{ user: User }>(`/api/users/${participantId}`);
+        return data.user;
+      },
+      enabled: isOpen,
+      staleTime: 60_000,
+    })),
   });
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const eligibleUsers = participantQueries
+    .map((query) => query.data)
+    .filter((user): user is User => Boolean(user))
+    .filter((user) => {
+      if (!normalizedSearch) return true;
+      return [user.name, user.username, user.email]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedSearch));
+    });
+  const isSearching = isLoadingChats || participantQueries.some((query) => query.isLoading);
 
   // Create group mutation
   const createGroupMutation = useMutation({
@@ -262,7 +282,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                 />
                 <input
                   type="text"
-                  placeholder="Search users..."
+                  placeholder="Search people you can message..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-teal-500"
@@ -279,22 +299,22 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                 </div>
               )}
 
-              {!isSearching && searchQuery && searchResults?.users?.length === 0 && (
+              {!isSearching && searchQuery && eligibleUsers.length === 0 && (
                 <div className="py-8 text-center text-slate-500 dark:text-slate-400">
-                  <p>No users found</p>
+                  <p>No people found</p>
                 </div>
               )}
 
-              {!isSearching && !searchQuery && (
+              {!isSearching && !searchQuery && eligibleUsers.length === 0 && (
                 <div className="py-8 text-center text-slate-500 dark:text-slate-400">
                   <Users size={48} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
-                  <p>Search for users to add to group</p>
+                  <p>Select people from your conversations</p>
                 </div>
               )}
 
-              {!isSearching && searchResults?.users && searchResults.users.length > 0 && (
+              {!isSearching && eligibleUsers.length > 0 && (
                 <div className="space-y-2">
-                  {searchResults.users
+                  {eligibleUsers
                     .filter((user: User) => user._id !== currentUser?._id)
                     .map((user: User) => {
                       const isSelected = selectedUsers.some((u) => u._id === user._id);

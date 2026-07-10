@@ -15,6 +15,10 @@ export interface PostDocument {
   discoverable?: boolean;
   discoveryTopicIds?: string[];
   discoverableUpdatedAt?: Date;
+  importer?: {
+    provider?: string;
+    providerCreatorName?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
   editedAt?: Date;

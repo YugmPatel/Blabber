@@ -1,7 +1,7 @@
 import express, { Request, Response, Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
-import { loadCommonConfig, loadCORSConfig } from '@repo/config';
+import { loadCommonConfig, loadCORSConfig, structuredJsonParserOptions, structuredUrlEncodedParserOptions } from '@repo/config';
 import {
   createAuthMiddleware,
   errorHandler,
@@ -40,13 +40,13 @@ app.use(
 app.use(
   cors({
     origin: corsConfig.origins,
-    credentials: true,
+    credentials: corsConfig.credentials,
   })
 );
 
 // Body parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json(structuredJsonParserOptions()));
+app.use(express.urlencoded(structuredUrlEncodedParserOptions()));
 
 app.use(requestIdMiddleware);
 app.use(requestLogger('media'));
@@ -82,6 +82,7 @@ import {
   deleteReel,
   deleteReelComment,
   getReel,
+  getReelPoster,
   getReelStatus,
   initiateReelUpload,
   listReelComments,
@@ -110,11 +111,19 @@ import {
   uploadReelSource,
   getReelsForYouExplanation,
 } from './routes/reels';
+import {
+  getMomentVideoStatus,
+  initiateMomentVideoUpload,
+  uploadMomentVideoSource,
+} from './routes/moment-videos';
 app.post('/presign', authMiddleware, presign);
 app.post('/upload', authMiddleware, express.raw({ type: 'multipart/form-data', limit: '50mb' }), uploadMultipartMedia);
 app.put('/local/:id', authMiddleware, express.raw({ type: '*/*', limit: '50mb' }), uploadLocalMedia);
 app.get('/local/:id', getLocalMedia);
 app.get('/link-preview', linkPreview);
+app.post('/moment-videos/upload-init', authMiddleware, initiateMomentVideoUpload);
+app.put('/moment-videos/uploads/:videoId/source', authMiddleware, express.raw({ type: '*/*', limit: '110mb' }), uploadMomentVideoSource);
+app.get('/moment-videos/:videoId/status', authMiddleware, getMomentVideoStatus);
 app.post('/reels/upload-init', authMiddleware, initiateReelUpload);
 app.put('/reels/uploads/:reelId/source', authMiddleware, express.raw({ type: '*/*', limit: '110mb' }), uploadReelSource);
 app.post('/reels', authMiddleware, publishReel);
@@ -123,6 +132,7 @@ app.get('/reels/for-you', authMiddleware, listReelsForYou);
 app.post('/reels/for-you/refresh', authMiddleware, refreshReelsForYou);
 app.get('/reels/for-you/explanations/:reelId', authMiddleware, getReelsForYouExplanation);
 app.get('/reels/saved', authMiddleware, listSavedReels);
+app.get('/reels/:reelId/poster', authMiddleware, getReelPoster);
 app.get('/reels/:reelId/status', authMiddleware, getReelStatus);
 app.patch('/reels/:reelId/discovery', authMiddleware, updateReelDiscovery);
 app.post('/reels/:reelId/playback-session', authMiddleware, createPlaybackSession);

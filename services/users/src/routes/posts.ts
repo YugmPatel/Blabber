@@ -11,6 +11,8 @@ import { getPostsCollection, PostDocument, PostVisibility } from '../models/post
 import { getPostCommentsCollection, PostCommentDocument } from '../models/post-comment';
 import { getPostReactionsCollection, POST_REACTION_EMOJIS, PostReactionEmoji } from '../models/post-reaction';
 import { getPostNotificationCooldownsCollection } from '../models/post-notification-cooldown';
+import { getPostSavesCollection } from '../models/post-save';
+import { PostRepostDocument, getPostRepostsCollection } from '../models/post-repost';
 import { safelyDeletePostMedia } from '../post-media-cleanup';
 import { getPubSub } from '../pubsub';
 import { normalizeDiscoveryTopicIds } from '../discovery-topics';
@@ -66,8 +68,8 @@ function normalizeBody(value?: string) {
   return normalized;
 }
 
-function encodeCursor(post: PostDocument) {
-  return Buffer.from(JSON.stringify({ createdAt: post.createdAt.toISOString(), id: post._id.toString() })).toString('base64url');
+function encodeCursor(item: { createdAt: Date; _id: ObjectId }) {
+  return Buffer.from(JSON.stringify({ createdAt: item.createdAt.toISOString(), id: item._id.toString() })).toString('base64url');
 }
 
 function decodeCursor(cursor?: unknown) {
@@ -96,6 +98,15 @@ function publicAuthor(user: any) {
     handle: user.profileHandle || null,
     displayHandle: user.profileHandle ? `@${user.profileHandle}` : null,
     avatarUrl: user.avatarUrl || null,
+    profileVisibility: user.profileVisibility || 'private',
+  };
+}
+
+function pexelsAttribution(post: PostDocument) {
+  if (post.importer?.provider !== 'pexels') return undefined;
+  return {
+    label: 'Photo via Pexels',
+    creatorName: typeof post.importer.providerCreatorName === 'string' ? post.importer.providerCreatorName : null,
   };
 }
 
@@ -127,6 +138,29 @@ async function canViewerReadPostDocument(post: PostDocument, viewerUserId: Objec
     state: 'following',
   });
   return Boolean(relationship);
+}
+
+async function viewerRelationshipToAuthor(viewerUserId: ObjectId, authorUserId: ObjectId) {
+  if (viewerUserId.equals(authorUserId)) return 'self';
+  const outgoing = await getProfileRelationshipsCollection().findOne({ followerUserId: viewerUserId, targetUserId: authorUserId });
+  if (outgoing?.state === 'following') return 'following';
+  if (outgoing?.state === 'requested') return 'requested_outgoing';
+  return 'none';
+}
+
+async function canPubliclyResharePost(post: PostDocument, viewerUserId: ObjectId) {
+  if (post.visibility !== 'public' || post.deletedAt) return false;
+  if (!(await canViewerReadPostDocument(post, viewerUserId))) return false;
+  const author = await loadActiveUser(post.authorUserId);
+  if (!author || author.profileVisibility !== 'public') return false;
+  if (post.mediaIds.length === 0) return true;
+  const approved = await getDatabase().collection('media').countDocuments({
+    _id: { $in: post.mediaIds },
+    userId: post.authorUserId,
+    status: 'approved',
+    fileType: /^image\//,
+  });
+  return approved === post.mediaIds.length;
 }
 
 export async function loadReadablePost(postId: ObjectId, viewerUserId: ObjectId) {
@@ -178,15 +212,22 @@ async function recomputeCommentCount(postId: ObjectId) {
   return commentCount;
 }
 
-async function serializePost(post: PostDocument, viewerUserId: ObjectId) {
-  const [author, myReaction] = await Promise.all([
+async function serializePost(post: PostDocument, viewerUserId: ObjectId, repost?: PostRepostDocument) {
+  const [author, myReaction, save, ownRepost, canReshare] = await Promise.all([
     getUsersCollection().findOne(activeUserQuery({ _id: post.authorUserId }) as any),
     getPostReactionsCollection().findOne({ postId: post._id, reactingUserId: viewerUserId }),
+    getPostSavesCollection().findOne({ postId: post._id, userId: viewerUserId }),
+    getPostRepostsCollection().findOne({ postId: post._id, userId: viewerUserId }),
+    canPubliclyResharePost(post, viewerUserId),
   ]);
   if (!author) return null;
+  const repostedBy = repost ? await loadActiveUser(repost.userId) : null;
   return {
     id: post._id.toString(),
-    author: publicAuthor(author),
+    author: {
+      ...publicAuthor(author),
+      relationship: await viewerRelationshipToAuthor(viewerUserId, post.authorUserId),
+    },
     body: post.body || '',
     visibility: viewerUserId.equals(post.authorUserId) ? post.visibility : undefined,
     media: post.mediaIds.map((mediaId) => ({
@@ -194,9 +235,20 @@ async function serializePost(post: PostDocument, viewerUserId: ObjectId) {
       type: 'image',
       url: `/api/posts/${post._id.toString()}/media/${mediaId.toString()}`,
     })),
+    sourceAttribution: pexelsAttribution(post),
     commentCount: post.commentCount || 0,
     reactionCounts: post.reactionCounts || {},
     myReaction: myReaction?.emoji || null,
+    saved: Boolean(save),
+    reposted: Boolean(ownRepost),
+    canSave: true,
+    canRepost: canReshare && !viewerUserId.equals(post.authorUserId),
+    canShare: canReshare,
+    repost: repost && repostedBy ? {
+      id: repost._id.toString(),
+      createdAt: repost.createdAt,
+      repostedBy: publicAuthor(repostedBy),
+    } : null,
     discovery: viewerUserId.equals(post.authorUserId)
       ? {
           discoverable: Boolean(post.discoverable),
@@ -284,6 +336,61 @@ async function listAuthorizedPosts(posts: PostDocument[], viewerUserId: ObjectId
   const items = [];
   for (const post of posts) {
     if (!(await canViewerReadPostDocument(post, viewerUserId))) continue;
+    const serialized = await serializePost(post, viewerUserId);
+    if (serialized) items.push(serialized);
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
+async function listFollowingTimelinePosts(candidates: PostDocument[], reposts: PostRepostDocument[], viewerUserId: ObjectId, limit: number) {
+  const items: Array<any> = [];
+  for (const post of candidates) {
+    if (!(await canViewerReadPostDocument(post, viewerUserId))) continue;
+    const serialized = await serializePost(post, viewerUserId);
+    if (serialized) items.push({ cursorItem: post, post: serialized });
+  }
+  for (const repost of reposts) {
+    if (repost.userId.equals(viewerUserId)) continue;
+    const original = await getPostsCollection().findOne({ _id: repost.postId, deletedAt: { $exists: false } });
+    if (!original || !(await canPubliclyResharePost(original, viewerUserId))) continue;
+    const serialized = await serializePost(original, viewerUserId, repost);
+    if (serialized) items.push({ cursorItem: repost, post: serialized });
+  }
+  items.sort((a, b) => {
+    const diff = b.cursorItem.createdAt.getTime() - a.cursorItem.createdAt.getTime();
+    return diff || b.cursorItem._id.toString().localeCompare(a.cursorItem._id.toString());
+  });
+  return items.slice(0, limit);
+}
+
+async function canViewerReadFeaturedPost(post: PostDocument, viewerUserId: ObjectId) {
+  if (!post.discoverable || post.visibility !== 'public') return false;
+  if (!(await canViewerReadPostDocument(post, viewerUserId))) return false;
+  const [author, feedback, mutedCreator] = await Promise.all([
+    getUsersCollection().findOne(activeUserQuery({ _id: post.authorUserId }) as any),
+    getDatabase().collection('discovery_feedback').findOne({ userId: viewerUserId, targetType: 'post', targetId: post._id, feedbackType: 'not_interested' }),
+    getDatabase().collection('discovery_feedback').findOne({ userId: viewerUserId, targetType: 'creator', targetId: post.authorUserId, feedbackType: 'muted' }),
+  ]);
+  if (feedback || mutedCreator) return false;
+  if (!author || !(author as any).emailVerified || !author.profileHandle || author.profileVisibility !== 'public' || !author.creatorDiscoveryEnabled) return false;
+  if (!Array.isArray(post.discoveryTopicIds) || post.discoveryTopicIds.length < 1) return false;
+  if (post.mediaIds.length) {
+    const approved = await getDatabase().collection('media').countDocuments({
+      _id: { $in: post.mediaIds },
+      userId: post.authorUserId,
+      status: 'approved',
+      fileType: /^image\//,
+    });
+    if (approved !== post.mediaIds.length) return false;
+  }
+  return true;
+}
+
+async function listFeaturedPosts(candidates: PostDocument[], viewerUserId: ObjectId, limit: number) {
+  const items = [];
+  for (const post of candidates) {
+    if (!(await canViewerReadFeaturedPost(post, viewerUserId))) continue;
     const serialized = await serializePost(post, viewerUserId);
     if (serialized) items.push(serialized);
     if (items.length >= limit) break;
@@ -423,10 +530,62 @@ export const deletePost = asyncHandler(async (req: Request, res: Response) => {
     getPostCommentsCollection().deleteMany({ postId: post._id }),
     getPostReactionsCollection().deleteMany({ postId: post._id }),
     getPostNotificationCooldownsCollection().deleteMany({ postId: post._id }),
+    getPostSavesCollection().deleteMany({ postId: post._id }),
+    getPostRepostsCollection().deleteMany({ postId: post._id }),
   ]);
   await Promise.all(post.mediaIds.map((mediaId) => safelyDeletePostMedia(mediaId, post._id)));
   publish(EventType.POST_DELETED, { postId: post._id.toString(), authorUserId: userId.toString() });
   res.status(200).json({ success: true });
+});
+
+export const savePost = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  if (!ObjectId.isValid(req.params.postId)) throw new ValidationError('Invalid post ID');
+  const post = await loadReadablePost(new ObjectId(req.params.postId), userId);
+  if (!post) {
+    res.status(404).json({ error: 'Not Found', message: 'Post not found' });
+    return;
+  }
+  await getPostSavesCollection().updateOne(
+    { userId, postId: post._id },
+    { $setOnInsert: { _id: new ObjectId(), userId, postId: post._id, createdAt: new Date() } },
+    { upsert: true }
+  );
+  res.status(200).json({ saved: true });
+});
+
+export const unsavePost = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  if (!ObjectId.isValid(req.params.postId)) throw new ValidationError('Invalid post ID');
+  await getPostSavesCollection().deleteOne({ userId, postId: new ObjectId(req.params.postId) });
+  res.status(200).json({ saved: false });
+});
+
+export const repostPost = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  if (!ObjectId.isValid(req.params.postId)) throw new ValidationError('Invalid post ID');
+  const post = await getPostsCollection().findOne({ _id: new ObjectId(req.params.postId), deletedAt: { $exists: false } });
+  if (!post || post.authorUserId.equals(userId) || !(await canPubliclyResharePost(post, userId))) {
+    throw new ValidationError('This post cannot be reposted.');
+  }
+  const now = new Date();
+  await getPostRepostsCollection().updateOne(
+    { userId, postId: post._id },
+    { $setOnInsert: { _id: new ObjectId(), userId, postId: post._id, createdAt: now }, $set: { updatedAt: now } },
+    { upsert: true }
+  );
+  res.status(200).json({ reposted: true });
+});
+
+export const undoRepostPost = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  if (!ObjectId.isValid(req.params.postId)) throw new ValidationError('Invalid post ID');
+  await getPostRepostsCollection().deleteOne({ userId, postId: new ObjectId(req.params.postId) });
+  res.status(200).json({ reposted: false });
 });
 
 export const listFeed = asyncHandler(async (req: Request, res: Response) => {
@@ -437,16 +596,53 @@ export const listFeed = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
   const limit = limitFromQuery(req);
-  const authorIds = [userId, ...(await getFollowingTargetIds(userId))];
   const cursor = decodeCursor(req.query.cursor);
-  const candidates = await getPostsCollection()
-    .find({ authorUserId: { $in: authorIds }, deletedAt: { $exists: false }, ...cursorFilter(cursor) })
+  const mode = req.query.mode === 'featured' ? 'featured' : 'following';
+  const followingTargetIds = mode === 'following' ? [userId, ...(await getFollowingTargetIds(userId))] : [];
+  const query = mode === 'featured'
+    ? { discoverable: true, visibility: 'public', deletedAt: { $exists: false }, authorUserId: { $ne: userId }, ...cursorFilter(cursor) }
+    : { authorUserId: { $in: followingTargetIds }, deletedAt: { $exists: false }, ...cursorFilter(cursor) };
+  const candidates = await getPostsCollection().find(query as any).sort({ createdAt: -1, _id: -1 }).limit(limit * 3 + 1).toArray();
+  if (mode === 'featured') {
+    const posts = await listFeaturedPosts(candidates, userId, limit);
+    const last = candidates[Math.min(candidates.length, limit) - 1];
+    res.status(200).json({ posts, nextCursor: candidates.length > limit && last ? encodeCursor(last) : null, mode });
+    return;
+  }
+  const reposts = await getPostRepostsCollection()
+    .find({ userId: { $in: followingTargetIds }, ...cursorFilter(cursor) } as any)
     .sort({ createdAt: -1, _id: -1 })
     .limit(limit * 3 + 1)
     .toArray();
-  const posts = await listAuthorizedPosts(candidates, userId, limit);
-  const last = candidates[Math.min(candidates.length, limit) - 1];
-  res.status(200).json({ posts, nextCursor: candidates.length > limit && last ? encodeCursor(last) : null });
+  const timeline = await listFollowingTimelinePosts(candidates, reposts, userId, limit);
+  const last = timeline[timeline.length - 1]?.cursorItem;
+  res.status(200).json({ posts: timeline.map((item) => item.post), nextCursor: last && (candidates.length > limit || reposts.length > limit) ? encodeCursor(last) : null, mode });
+});
+
+export const listSavedPosts = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  if (!(await loadActiveUser(userId))) {
+    res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+    return;
+  }
+  const limit = limitFromQuery(req);
+  const cursor = decodeCursor(req.query.cursor);
+  const saves = await getPostSavesCollection()
+    .find({ userId, ...cursorFilter(cursor) } as any)
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(limit * 3 + 1)
+    .toArray();
+  const posts = [];
+  for (const save of saves) {
+    const post = await loadReadablePost(save.postId, userId);
+    if (!post) continue;
+    const serialized = await serializePost(post, userId);
+    if (serialized) posts.push({ savedAt: save.createdAt, post: serialized });
+    if (posts.length >= limit) break;
+  }
+  const last = saves[Math.min(saves.length, limit) - 1];
+  res.status(200).json({ savedPosts: posts, nextCursor: saves.length > limit && last ? encodeCursor(last) : null });
 });
 
 export const listProfilePosts = asyncHandler(async (req: Request, res: Response) => {

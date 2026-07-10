@@ -21,7 +21,18 @@ import type {
   UpdateEventDTO,
 } from '@repo/types';
 
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+function resolveApiUrl() {
+  const configured = String(import.meta.env.VITE_API_URL || '').trim();
+  if (configured) return configured.replace(/\/+$/, '');
+
+  const allowLocalFallback =
+    import.meta.env.DEV || String(import.meta.env.VITE_ALLOW_LOCAL_API_FALLBACK || '').toLowerCase() === 'true';
+  if (allowLocalFallback) return 'http://localhost:3000';
+
+  throw new Error('VITE_API_URL is required for non-local web builds');
+}
+
+export const API_URL = resolveApiUrl();
 
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -48,7 +59,7 @@ export const normalizeMediaUrl = (url?: string | null): string | undefined => {
   try {
     const parsed = new URL(url, apiOrigin);
 
-    if (parsed.pathname.startsWith('/api/media/')) {
+    if (parsed.pathname.startsWith('/api/')) {
       return `${apiOrigin}${parsed.pathname}${parsed.search}`;
     }
 
@@ -65,6 +76,14 @@ export const normalizeMediaUrl = (url?: string | null): string | undefined => {
     return url;
   }
 };
+
+export async function fetchAuthorizedObjectUrl(url?: string | null): Promise<string | undefined> {
+  const normalizedUrl = normalizeMediaUrl(url);
+  if (!normalizedUrl) return undefined;
+  if (normalizedUrl.startsWith('blob:') || normalizedUrl.startsWith('data:')) return normalizedUrl;
+  const response = await apiClient.get<Blob>(normalizedUrl, { responseType: 'blob' });
+  return URL.createObjectURL(response.data);
+}
 
 export interface MessageSearchResult {
   messageId: string;
@@ -310,13 +329,28 @@ export interface SocialProfile {
 
 export interface FeedPost {
   id: string;
-  author: ProfileListItem & { id: string };
+  author: ProfileListItem & {
+    id: string;
+    profileVisibility?: 'private' | 'public';
+    relationship?: 'self' | 'none' | 'following' | 'requested_outgoing' | 'requested_incoming';
+  };
   body: string;
   visibility?: 'public' | 'followers';
   media: Array<{ mediaId: string; type: 'image'; url: string }>;
+  sourceAttribution?: { label: string; creatorName: string | null };
   commentCount: number;
   reactionCounts: Record<string, number>;
   myReaction: string | null;
+  saved?: boolean;
+  reposted?: boolean;
+  canSave?: boolean;
+  canRepost?: boolean;
+  canShare?: boolean;
+  repost?: {
+    id: string;
+    createdAt: string;
+    repostedBy: ProfileListItem & { id: string };
+  } | null;
   createdAt: string;
   updatedAt: string;
   editedAt: string | null;
@@ -388,9 +422,9 @@ export async function fetchIncomingFollowRequests(): Promise<{ requests: Array<{
   return data;
 }
 
-export async function fetchFeed(cursor?: string | null): Promise<{ posts: FeedPost[]; nextCursor: string | null }> {
+export async function fetchFeed(cursor?: string | null, mode: 'following' | 'featured' = 'following'): Promise<{ posts: FeedPost[]; nextCursor: string | null; mode?: string }> {
   const { data } = await apiClient.get<{ posts: FeedPost[]; nextCursor: string | null }>('/api/feed', {
-    params: { cursor: cursor || undefined },
+    params: { cursor: cursor || undefined, mode },
   });
   return data;
 }
@@ -414,6 +448,38 @@ export async function createPost(payload: {
 
 export async function deletePost(postId: string) {
   await apiClient.delete(`/api/posts/${postId}`);
+}
+
+export async function fetchPost(postId: string): Promise<FeedPost> {
+  const { data } = await apiClient.get<{ post: FeedPost }>(`/api/posts/${postId}`);
+  return data.post;
+}
+
+export async function savePost(postId: string) {
+  const { data } = await apiClient.post<{ saved: boolean }>(`/api/posts/${postId}/save`);
+  return data;
+}
+
+export async function unsavePost(postId: string) {
+  const { data } = await apiClient.delete<{ saved: boolean }>(`/api/posts/${postId}/save`);
+  return data;
+}
+
+export async function fetchSavedPosts(cursor?: string | null): Promise<{ savedPosts: Array<{ savedAt: string; post: FeedPost }>; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ savedPosts: Array<{ savedAt: string; post: FeedPost }>; nextCursor: string | null }>('/api/posts/saved', {
+    params: { cursor: cursor || undefined },
+  });
+  return data;
+}
+
+export async function repostPost(postId: string) {
+  const { data } = await apiClient.post<{ reposted: boolean }>(`/api/posts/${postId}/repost`);
+  return data;
+}
+
+export async function undoRepostPost(postId: string) {
+  const { data } = await apiClient.delete<{ reposted: boolean }>(`/api/posts/${postId}/repost`);
+  return data;
 }
 
 export async function updatePostDiscovery(postId: string, payload: { discoverable: boolean; discoveryTopicIds: string[] }): Promise<FeedPost> {
@@ -454,6 +520,237 @@ export async function createPostComment(postId: string, body: string): Promise<{
 
 export async function deletePostComment(postId: string, commentId: string): Promise<{ commentCount: number }> {
   const { data } = await apiClient.delete<{ commentCount: number }>(`/api/posts/${postId}/comments/${commentId}`);
+  return data;
+}
+
+export type PlanThisSourceType = 'post' | 'reel';
+export type PlanThisVoteStatus = 'going' | 'maybe' | 'not_joining';
+export type PlanThisTaskStatus = 'unassigned' | 'pending_response' | 'accepted' | 'declined' | 'cancelled' | 'completed';
+
+export interface PlanThisPlan {
+  id: string;
+  chatId: string;
+  creatorUserId: string;
+  source: {
+    type: PlanThisSourceType;
+    available: boolean;
+    sourceId?: string;
+    previewLabel?: string;
+    creatorLabel?: string;
+    topics?: string[];
+  };
+  state: 'draft' | 'proposed' | 'voting' | 'ready_to_finalize' | 'finalized' | 'cancelled' | 'expired';
+  title: string;
+  description: string;
+  suggestedAt: string | null;
+  suggestedLocation: string;
+  budgetNotes: string;
+  checklist: string[];
+  participants: Array<{ userId: string; displayName?: string }>;
+  votes: Array<{ userId: string; status: PlanThisVoteStatus; planVersion?: number; current?: boolean; updatedAt: string }>;
+  myVote: PlanThisVoteStatus | null;
+  assignments: Array<{
+    id: string;
+    title: string;
+    details?: string;
+    dueAt?: string;
+    assigneeUserId?: string;
+    status: 'requested' | 'accepted' | 'declined';
+    taskStatus?: PlanThisTaskStatus;
+    acceptedBy?: string;
+    acceptedAt?: string;
+    declinedAt?: string;
+    actionId?: string;
+  }>;
+  proposalMessageId?: string;
+  eventMessageId?: string;
+  eventReminderOffsetMinutes?: number;
+  updateCount: number;
+  planVersion?: number;
+  lastMaterialChangeAt?: string;
+  finalizedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  permissions: { canEdit: boolean; canCancel?: boolean; canFinalize: boolean; canVote: boolean };
+}
+
+export interface PlanThisDestination {
+  id: string;
+  type: 'direct' | 'group';
+  name: string;
+  avatarUrl?: string | null;
+  memberCount?: number;
+  participants: Array<{ userId: string; displayName: string }>;
+}
+
+export interface PlanThisEligibilitySource {
+  type: PlanThisSourceType;
+  previewLabel: string;
+  creatorLabel?: string;
+  topics: string[];
+}
+
+export async function checkPlanThisEligibility(source: { type: PlanThisSourceType; id: string }) {
+  const { data } = await apiClient.get<{ eligible: boolean; source: PlanThisEligibilitySource | null }>('/api/plan-this/eligibility', { params: source });
+  return data;
+}
+
+export async function fetchPlanThisDestinations(): Promise<PlanThisDestination[]> {
+  const { data } = await apiClient.get<{ destinations: PlanThisDestination[] }>('/api/plan-this/destinations');
+  return data.destinations;
+}
+
+export async function generatePlanThisDraft(payload: { source: { type: PlanThisSourceType; id: string }; note?: string }) {
+  const { data } = await apiClient.post<{
+    draft: {
+      title: string;
+      description: string;
+      suggestedLocation: string;
+      budgetNotes: string;
+      checklist: string[];
+      aiContextUsed: {
+        sourceType: PlanThisSourceType;
+        captionOrTitle: string;
+        controlledTopics: string[];
+        safeCreatorDisplayLabel: string;
+        userEnteredNoteIncluded: boolean;
+      };
+    };
+  }>('/api/plan-this/draft', payload);
+  return data.draft;
+}
+
+export async function createPlanThisProposal(payload: {
+  source: { type: PlanThisSourceType; id: string };
+  chatId: string;
+  participantUserIds: string[];
+  title: string;
+  description: string;
+  suggestedAt?: string;
+  suggestedLocation?: string;
+  budgetNotes?: string;
+  checklist: string[];
+  clientRequestId: string;
+}): Promise<PlanThisPlan> {
+  const { data } = await apiClient.post<{ plan: PlanThisPlan }>('/api/plan-this/plans', payload);
+  return data.plan;
+}
+
+export async function fetchPlanThisPlan(planId: string): Promise<PlanThisPlan> {
+  const { data } = await apiClient.get<{ plan: PlanThisPlan }>(`/api/plan-this/plans/${planId}`);
+  return data.plan;
+}
+
+export async function votePlanThis(planId: string, status: PlanThisVoteStatus): Promise<PlanThisPlan> {
+  const { data } = await apiClient.post<{ plan: PlanThisPlan }>(`/api/plan-this/plans/${planId}/vote`, { status });
+  return data.plan;
+}
+
+export async function updatePlanThis(planId: string, payload: Partial<{
+  title: string;
+  description: string;
+  suggestedAt: string | null;
+  suggestedLocation: string | null;
+  budgetNotes: string | null;
+  checklist: string[];
+  participantUserIds: string[];
+}>): Promise<PlanThisPlan> {
+  const { data } = await apiClient.patch<{ plan: PlanThisPlan }>(`/api/plan-this/plans/${planId}`, payload);
+  return data.plan;
+}
+
+export async function finalizePlanThis(planId: string, payload: {
+  createEvent: boolean;
+  finalDateTime?: string;
+  reminderEnabled: boolean;
+  reminderOffsetMinutes?: number;
+  assignments: Array<{ title: string; details?: string; assigneeUserId?: string; dueAt?: string }>;
+}): Promise<PlanThisPlan> {
+  const { data } = await apiClient.post<{ plan: PlanThisPlan }>(`/api/plan-this/plans/${planId}/finalize`, payload);
+  return data.plan;
+}
+
+export async function cancelPlanThis(planId: string): Promise<PlanThisPlan> {
+  const { data } = await apiClient.post<{ plan: PlanThisPlan }>(`/api/plan-this/plans/${planId}/cancel`);
+  return data.plan;
+}
+
+export async function respondPlanThisAssignment(planId: string, assignmentId: string, status: 'accepted' | 'declined'): Promise<PlanThisPlan> {
+  const { data } = await apiClient.post<{ plan: PlanThisPlan }>(`/api/plan-this/plans/${planId}/assignments/${assignmentId}/respond`, { status });
+  return data.plan;
+}
+
+export interface VeyraSettings {
+  enabled: boolean;
+  voiceRepliesEnabled: boolean;
+  scopes: Array<{ id: string; type: 'general' | 'my_actions' | 'chat' | 'community'; targetId?: string; label?: string; grantedAt: string }>;
+  updatedAt: string;
+}
+
+export async function fetchVeyraSettings() {
+  const { data } = await apiClient.get<{ settings: VeyraSettings; globalAiEnabled: boolean }>('/api/veyra/settings');
+  return data;
+}
+
+export async function updateVeyraSettings(payload: Partial<Pick<VeyraSettings, 'enabled' | 'voiceRepliesEnabled'>>) {
+  const { data } = await apiClient.patch<{ settings: VeyraSettings }>('/api/veyra/settings', payload);
+  return data.settings;
+}
+
+export async function fetchVeyraScopeCandidates() {
+  const { data } = await apiClient.get<{ candidates: Array<{ type: VeyraSettings['scopes'][number]['type']; targetId?: string; label: string }> }>('/api/veyra/scopes/candidates');
+  return data.candidates;
+}
+
+export async function grantVeyraScope(payload: { type: VeyraSettings['scopes'][number]['type']; targetId?: string }) {
+  const { data } = await apiClient.post<{ settings: VeyraSettings }>('/api/veyra/scopes', payload);
+  return data.settings;
+}
+
+export async function revokeVeyraScope(scopeId: string) {
+  const { data } = await apiClient.delete<{ settings: VeyraSettings }>(`/api/veyra/scopes/${encodeURIComponent(scopeId)}`);
+  return data.settings;
+}
+
+export type VeyraResultType = 'chat' | 'message' | 'link' | 'attachment' | 'plan' | 'event' | 'task' | 'empty';
+
+export interface VeyraResultCard {
+  resultType: Exclude<VeyraResultType, 'empty'>;
+  id: string;
+  title: string;
+  subtitle?: string;
+  senderName?: string;
+  chatId?: string;
+  chatLabel?: string;
+  createdAt?: string;
+  sourceLabel?: string;
+  deepLink?: { kind: 'chat_message'; chatId: string; messageId: string } | { kind: 'action'; actionId: string };
+}
+
+export interface VeyraConversationContext {
+  activeSpaceId?: string;
+  activeSpaceName?: string;
+  activePlanId?: string;
+  activePlanTitle?: string;
+  activeEventId?: string;
+  lastResultKind?: VeyraResultType;
+}
+
+export interface VeyraAskResponse {
+  answer: string;
+  intent: string;
+  scope: { id: string; type: string; label: string } | null;
+  resultType: VeyraResultType;
+  results: VeyraResultCard[];
+  ambiguous?: boolean;
+  candidates?: Array<{ scopeId: string; label: string }>;
+  actionDeferred?: boolean;
+  context?: VeyraConversationContext;
+  suggestManageAiPrivacy?: boolean;
+}
+
+export async function askVeyra(payload: { prompt: string; scopeId?: string; context?: VeyraConversationContext }) {
+  const { data } = await apiClient.post<VeyraAskResponse>('/api/veyra/ask', payload);
   return data;
 }
 
@@ -539,7 +836,7 @@ export async function fetchCommunities(): Promise<{ communities: Community[]; pe
 
 export async function createCommunity(payload: {
   name: string;
-  handle: string;
+  handle?: string;
   description?: string;
   membershipMode: 'open' | 'approval_required' | 'private';
   postingPolicy: 'everyone' | 'mods_admins' | 'admins_only';
@@ -621,9 +918,9 @@ export async function previewCommunityInvite(token: string): Promise<Community> 
   return data.community;
 }
 
-export async function acceptCommunityInvite(token: string): Promise<Community> {
-  const { data } = await apiClient.post<{ community: Community }>(`/api/communities/invite/${encodeURIComponent(token)}/accept`);
-  return data.community;
+export async function acceptCommunityInvite(token: string): Promise<{ community: Community; pending?: boolean }> {
+  const { data } = await apiClient.post<{ community: Community; pending?: boolean }>(`/api/communities/invite/${encodeURIComponent(token)}/accept`);
+  return data;
 }
 
 export async function fetchCommunityPosts(handle: string): Promise<{ posts: CommunityPost[]; nextCursor: string | null }> {
@@ -699,6 +996,7 @@ export interface DiscoveryPost {
   author: ProfileListItem & { id: string; topics: DiscoveryTopic[] };
   body: string;
   media: Array<{ type: 'image'; url: string }>;
+  sourceAttribution?: { label: string; creatorName: string | null };
   topics: DiscoveryTopic[];
   commentCount: number;
   reactionCounts: Record<string, number>;
@@ -759,23 +1057,23 @@ export async function updateCreatorDiscovery(payload: { creatorDiscoveryEnabled:
   return data.discovery;
 }
 
-export async function fetchDiscoveryCreators(topic?: string) {
+export async function fetchDiscoveryCreators(topic?: string, cursor?: string | null) {
   const { data } = await apiClient.get<{ creators: DiscoveryCreator[]; nextCursor: string | null }>('/api/discovery/creators', {
-    params: { topic: topic || undefined },
+    params: { topic: topic || undefined, cursor: cursor || undefined },
   });
   return data;
 }
 
-export async function fetchDiscoveryPosts(topic?: string) {
+export async function fetchDiscoveryPosts(topic?: string, cursor?: string | null, q?: string | null) {
   const { data } = await apiClient.get<{ posts: DiscoveryPost[]; nextCursor: string | null }>('/api/discovery/posts', {
-    params: { topic: topic || undefined },
+    params: { topic: topic || undefined, cursor: cursor || undefined, q: q || undefined },
   });
   return data;
 }
 
-export async function fetchDiscoveryCommunities(topic?: string) {
+export async function fetchDiscoveryCommunities(topic?: string, cursor?: string | null) {
   const { data } = await apiClient.get<{ communities: DiscoveryCommunity[]; nextCursor: string | null }>('/api/discovery/communities', {
-    params: { topic: topic || undefined },
+    params: { topic: topic || undefined, cursor: cursor || undefined },
   });
   return data;
 }
@@ -863,6 +1161,7 @@ export interface ReelItem {
   width: number | null;
   height: number | null;
   author?: { name: string; handle: string | null; displayHandle: string | null; avatarUrl?: string | null } | null;
+  sourceAttribution?: { label: string; creatorName: string | null };
   reelDiscoverable?: boolean;
   reelTopics?: DiscoveryTopic[];
   reactionCounts?: Record<string, number>;
@@ -893,6 +1192,38 @@ export async function fetchReelStatus(reelId: string) {
   return data;
 }
 
+export interface MomentVideoStatus {
+  id: string;
+  processingStatus: 'upload_initiated' | 'uploaded' | 'validating' | 'processing' | 'ready' | 'rejected' | 'failed' | 'deleted';
+  durationSeconds: number | null;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function initiateMomentVideoUpload(payload: { fileName: string; fileType: string; fileSize: number }) {
+  const { data } = await apiClient.post<{ videoId: string; uploadUrl: string; uploadMethod: 'PUT'; status: string }>('/api/media/moment-videos/upload-init', payload);
+  return data;
+}
+
+export async function uploadMomentVideoSource(uploadUrl: string, file: File) {
+  const { data } = await apiClient.put<{ videoId: string; status: string }>(uploadUrl, file, {
+    headers: { 'Content-Type': file.type || 'video/mp4' },
+  });
+  return data;
+}
+
+export async function fetchMomentVideoStatus(videoId: string) {
+  const { data } = await apiClient.get<{ video: MomentVideoStatus; message: string | null }>(`/api/media/moment-videos/${videoId}/status`);
+  return data;
+}
+
+export async function createMomentVideoPlaybackSession(momentId: string) {
+  const { data } = await apiClient.post<{ playback: { expiresAt: string } }>(`/api/moments/${momentId}/video/playback-session`);
+  return data.playback;
+}
+
 export async function publishReel(payload: { reelId: string; caption: string; visibility?: 'public' | 'followers'; topicIds?: string[] }) {
   const { data } = await apiClient.post<{ reel: ReelItem }>('/api/reels', payload);
   return data.reel;
@@ -903,9 +1234,9 @@ export async function fetchReel(reelId: string) {
   return data.reel;
 }
 
-export async function fetchReelsBrowse(params: { cursor?: string | null; topic?: string | null } = {}) {
+export async function fetchReelsBrowse(params: { cursor?: string | null; topic?: string | null; q?: string | null } = {}) {
   const { data } = await apiClient.get<{ reels: ReelItem[]; nextCursor: string | null }>('/api/reels/browse', {
-    params: { cursor: params.cursor || undefined, topic: params.topic || undefined },
+    params: { cursor: params.cursor || undefined, topic: params.topic || undefined, q: params.q || undefined },
   });
   return data;
 }
@@ -950,6 +1281,10 @@ export async function fetchProfileReels(handle: string) {
 export async function createReelPlaybackSession(reelId: string) {
   const { data } = await apiClient.post<{ playback: { manifestUrl: string; fallbackUrl: string; posterUrl: string; expiresAt: string } }>(`/api/reels/${reelId}/playback-session`);
   return data.playback;
+}
+
+export function reelPosterUrl(reelId: string) {
+  return `/api/reels/${reelId}/poster`;
 }
 
 export async function createReelEventToken(reelId: string) {

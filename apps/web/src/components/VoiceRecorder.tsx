@@ -6,6 +6,19 @@ interface VoiceRecorderProps {
   onCancel: () => void;
 }
 
+const RECORDING_MIME_TYPES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+];
+
+function supportedRecordingMimeType() {
+  if (typeof MediaRecorder === 'undefined') return '';
+  return RECORDING_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+}
+
 export default function VoiceRecorder({ onSend, onCancel }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -17,24 +30,48 @@ export default function VoiceRecorder({ onSend, onCancel }: VoiceRecorderProps) 
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const discardRecordingRef = useRef(false);
+
+  useEffect(() => {
+    audioUrlRef.current = audioUrl;
+  }, [audioUrl]);
+
+  const clearTemporaryAudio = (discardPendingStop = false) => {
+    if (discardPendingStop) discardRecordingRef.current = true;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    chunksRef.current = [];
+    setAudioBlob(null);
+    setDuration(0);
+    setIsRecording(false);
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+      setAudioUrl(null);
+    }
+  };
 
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (mediaRecorderRef.current?.state === 'recording') {
-        mediaRecorderRef.current.stop();
-      }
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      clearTemporaryAudio(true);
     };
-  }, [audioUrl]);
+  }, []);
 
   const startRecording = async () => {
     try {
       setError(null);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      const mediaRecorder = new MediaRecorder(stream);
+      const mimeType = supportedRecordingMimeType();
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -45,7 +82,12 @@ export default function VoiceRecorder({ onSend, onCancel }: VoiceRecorderProps) 
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          chunksRef.current = [];
+          return;
+        }
+        const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType || mimeType || 'audio/webm' });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach((track) => track.stop());
@@ -81,6 +123,7 @@ export default function VoiceRecorder({ onSend, onCancel }: VoiceRecorderProps) 
       setIsSending(true);
       setError(null);
       await onSend(audioBlob, duration);
+      clearTemporaryAudio(true);
     } catch {
       setError('Audio recording could not be sent. Please try again.');
       setIsSending(false);
@@ -88,11 +131,7 @@ export default function VoiceRecorder({ onSend, onCancel }: VoiceRecorderProps) 
   };
 
   const handleCancel = () => {
-    if (isRecording) {
-      stopRecording();
-    }
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+    clearTemporaryAudio(true);
     onCancel();
   };
 
@@ -137,7 +176,7 @@ export default function VoiceRecorder({ onSend, onCancel }: VoiceRecorderProps) 
               <span className="font-medium text-slate-700 dark:text-slate-200">
                 {formatDuration(duration)}
               </span>
-              <audio src={audioUrl} controls className="h-8 flex-1" />
+              <audio src={audioUrl} controls preload="metadata" aria-label="Play or pause voice message preview" className="h-8 flex-1" />
             </>
           ) : (
             <span className="text-slate-500 dark:text-slate-400">Tap mic to start recording</span>

@@ -224,6 +224,24 @@ export const useArchiveChat = () => {
     mutationFn: async (chatId: string) => {
       await apiClient.post(`/api/chats/${chatId}/archive`);
     },
+    onMutate: async (chatId) => {
+      await queryClient.cancelQueries({ queryKey: chatKeys.lists() });
+      queryClient.getQueryCache().findAll({ queryKey: chatKeys.lists() }).forEach((query) => {
+        queryClient.setQueryData<Chat[]>(query.queryKey, (old) => {
+          if (!old) return old;
+          return old
+            .map((chat) =>
+              chat._id === chatId ? { ...chat, archived: true, archivedAt: new Date() } : chat
+            )
+            .filter((chat) => {
+              const filters = Array.isArray(query.queryKey) ? query.queryKey[2] as { archived?: boolean } | undefined : undefined;
+              if (filters?.archived === true) return Boolean(chat.archived);
+              if (filters?.archived === false || filters === undefined) return !chat.archived;
+              return true;
+            });
+        });
+      });
+    },
     onSuccess: () => {
       // Invalidate chat lists to refetch with updated archive status
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
@@ -237,6 +255,24 @@ export const useUnarchiveChat = () => {
   return useMutation({
     mutationFn: async (chatId: string) => {
       await apiClient.post(`/api/chats/${chatId}/unarchive`);
+    },
+    onMutate: async (chatId) => {
+      await queryClient.cancelQueries({ queryKey: chatKeys.lists() });
+      queryClient.getQueryCache().findAll({ queryKey: chatKeys.lists() }).forEach((query) => {
+        queryClient.setQueryData<Chat[]>(query.queryKey, (old) => {
+          if (!old) return old;
+          return old
+            .map((chat) =>
+              chat._id === chatId ? { ...chat, archived: false, archivedAt: undefined } : chat
+            )
+            .filter((chat) => {
+              const filters = Array.isArray(query.queryKey) ? query.queryKey[2] as { archived?: boolean } | undefined : undefined;
+              if (filters?.archived === true) return Boolean(chat.archived);
+              if (filters?.archived === false || filters === undefined) return !chat.archived;
+              return true;
+            });
+        });
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });

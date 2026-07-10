@@ -20,9 +20,9 @@ describe('MessageBubble', () => {
     expect(screen.getByText('Hello, world!')).toBeInTheDocument();
   });
 
-  it('renders with blue background when sent by me', () => {
+  it('renders with mint background when sent by me', () => {
     const { container } = render(<MessageBubble message={mockMessage} isSentByMe={true} />);
-    const bubble = container.querySelector('.bg-slate-900');
+    const bubble = container.querySelector('.bg-teal-50');
     expect(bubble).toBeInTheDocument();
   });
 

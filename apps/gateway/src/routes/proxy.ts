@@ -363,6 +363,48 @@ router.use(
   })
 );
 
+router.use(
+  '/api/plan-this',
+  createProxyMiddleware({
+    target: serviceUrls.chats,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/plan-this': '/plan-this',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Plan This service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Plan This service unavailable' });
+      }
+    },
+  })
+);
+
+router.use(
+  '/api/veyra',
+  createProxyMiddleware({
+    target: serviceUrls.chats,
+    changeOrigin: true,
+    pathRewrite: {
+      '^/api/veyra': '/veyra',
+    },
+    onProxyReq: (proxyReq, req: any) => {
+      forwardCommonHeaders(proxyReq, req);
+      writeJsonBody(proxyReq, req);
+    },
+    onError: (err, _req, res) => {
+      console.error('Veyra service proxy error:', err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Veyra service unavailable' });
+      }
+    },
+  })
+);
+
 // Proxy to Messages Service
 router.use(
   '/api/messages',

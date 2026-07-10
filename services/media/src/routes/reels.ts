@@ -174,6 +174,16 @@ function cursorFilter(cursor: ReturnType<typeof decodeCursor>, dateField = 'publ
   };
 }
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function searchTerm(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const term = value.trim().slice(0, 80);
+  return term.length >= 2 ? term : null;
+}
+
 function activeUserQuery(extra: Record<string, unknown> = {}) {
   return { ...extra, deletedAt: { $exists: false }, deactivatedAt: { $exists: false } };
 }
@@ -372,6 +382,14 @@ function explanationResponse(snapshot?: Omit<ReelForYouExplanationSnapshot, 'ree
     topicId: snapshot?.topicId || null,
     topicLabel: snapshot?.topicLabel || null,
     creatorHandle: snapshot?.creatorHandle || null,
+  };
+}
+
+function pexelsAttribution(reel: ReelDocument) {
+  if (reel.importer?.provider !== 'pexels') return undefined;
+  return {
+    label: 'Video via Pexels',
+    creatorName: typeof reel.importer.providerCreatorName === 'string' ? reel.importer.providerCreatorName : null,
   };
 }
 
@@ -603,6 +621,7 @@ async function serializeReel(reel: ReelDocument, ownerView = false, viewerUserId
     myReaction: state.myReaction,
     commentCount: reel.commentCount || 0,
     saved: state.saved,
+    sourceAttribution: pexelsAttribution(reel),
     processingStatus: ownerView ? reel.processingStatus : reel.processingStatus === 'ready' ? 'ready' : undefined,
     publishState: reel.publishState,
     durationSeconds: reel.durationSeconds || null,
@@ -1024,9 +1043,11 @@ export const listReelsBrowse = asyncHandler(async (req: Request, res: Response) 
   const viewerUserId = requireUserId(req);
   await requireActiveUser(viewerUserId);
   const topic = typeof req.query.topic === 'string' ? req.query.topic : undefined;
+  const q = searchTerm(req.query.q);
   if (topic && !TOPICS.has(topic)) validationError(res, 'Invalid Reel topic.');
   if (res.headersSent) return;
   const cursor = decodeCursor(req.query.cursor);
+  const regex = q ? new RegExp(escapeRegex(q), 'i') : null;
   const query: any = {
     reelDiscoverable: true,
     publishState: 'published',
@@ -1035,6 +1056,7 @@ export const listReelsBrowse = asyncHandler(async (req: Request, res: Response) 
     deletedAt: { $exists: false },
     moderationRemovedAt: { $exists: false },
     ...(topic ? { reelTopicIds: topic } : {}),
+    ...(regex ? { $or: [{ caption: regex }, { reelTopicIds: regex }, { 'importer.providerCreatorName': regex }] } : {}),
     ...cursorFilter(cursor, 'publishedAt'),
   };
   const candidates = await getReelsCollection()
@@ -1536,6 +1558,22 @@ export const createPlaybackSession = asyncHandler(async (req: Request, res: Resp
     },
   });
 });
+
+export const getReelPoster = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req);
+  await requireActiveUser(userId);
+  if (!ObjectId.isValid(req.params.reelId)) {
+    unavailable(res);
+    return;
+  }
+  const reel = await getReelsCollection().findOne({ _id: new ObjectId(req.params.reelId) });
+  if (!reel || reel.processingStatus !== 'ready' || !reel.posterPath || !(await canAccessReel(reel, userId))) {
+    unavailable(res);
+    return;
+  }
+  await streamFile(res, reel.posterPath, 'image/jpeg');
+});
+
 
 async function sessionReel(req: Request, res: Response) {
   const userId = requireUserId(req);

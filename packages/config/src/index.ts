@@ -4,6 +4,7 @@ export * from './redis';
 export * from './jwt';
 export * from './s3';
 export * from './cors';
+export * from './request-body';
 export * from './vapid';
 export * from './safe';
 export * from './test-env';

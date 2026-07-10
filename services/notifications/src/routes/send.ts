@@ -123,6 +123,8 @@ export async function send(req: Request, res: Response) {
         success: true,
         message: 'No subscriptions found',
         sent: 0,
+        inboxRecorded: true,
+        notificationId: inboxItem._id.toString(),
       });
     }
 
@@ -131,13 +133,27 @@ export async function send(req: Request, res: Response) {
     const mobileFakeMode = process.env.MOBILE_PUSH_PROVIDER_MODE === 'fake';
     if (!pushStatus.enabled && (!mobileFakeMode || mobileDevices.length === 0)) {
       incrementPushCounter('skipped', uniqueSubscriptions.length + mobileDevices.length);
-      return res.status(200).json({ success: true, message: 'Push notifications disabled', sent: 0 });
+      return res.status(200).json({
+        success: true,
+        message: 'Push notifications disabled',
+        sent: 0,
+        inboxRecorded: true,
+        notificationId: inboxItem._id.toString(),
+      });
     }
     if (pushStatus.mockMode) {
       const total = uniqueSubscriptions.length + mobileDevices.length;
       incrementPushCounter('attempted', total);
       incrementPushCounter('delivered', total);
-      return res.status(200).json({ success: true, sent: total, failed: 0, total, mode: 'mock' });
+      return res.status(200).json({
+        success: true,
+        sent: total,
+        failed: 0,
+        total,
+        mode: 'mock',
+        inboxRecorded: true,
+        notificationId: inboxItem._id.toString(),
+      });
     }
     if (uniqueSubscriptions.length) configureVAPID();
 
@@ -252,6 +268,8 @@ export async function send(req: Request, res: Response) {
       sent: successCount,
       failed: failureCount,
       total: uniqueSubscriptions.length + mobileDevices.length,
+      inboxRecorded: true,
+      notificationId: inboxItem._id.toString(),
     });
   } catch (error: any) {
     logger.error({ error: error.message }, 'Failed to send push notifications');

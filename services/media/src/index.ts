@@ -18,11 +18,13 @@ async function startServer() {
     // Create indexes
     const { createMediaIndexes } = await import('./models/media');
     const { createReelIndexes } = await import('./models/reel');
+    const { createMomentVideoIndexes } = await import('./models/moment-video');
     const { createReelPlaybackSessionIndexes } = await import('./models/reel-playback-session');
     const { createReelInteractionIndexes } = await import('./models/reel-interaction');
     const { createReelForYouSessionIndexes } = await import('./models/reel-for-you-session');
     await createMediaIndexes();
     await createReelIndexes();
+    await createMomentVideoIndexes();
     await createReelPlaybackSessionIndexes();
     await createReelInteractionIndexes();
     await createReelForYouSessionIndexes();

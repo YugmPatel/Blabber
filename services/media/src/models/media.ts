@@ -14,8 +14,9 @@ export interface Media {
   storage?: 's3' | 'local';
   localPath?: string;
   status?: 'pending' | 'scanning' | 'approved' | 'rejected' | 'quarantined' | 'deleted';
-  purpose?: 'general' | 'reel_source' | 'reel_derivative' | 'reel_poster';
+  purpose?: 'general' | 'reel_source' | 'reel_derivative' | 'reel_poster' | 'moment_video_source';
   reelId?: ObjectId;
+  momentVideoId?: ObjectId;
   scanMode?: 'clamav' | 'mock' | 'disabled';
   scanResult?: 'clean' | 'infected' | 'error' | 'skipped';
   scanErrorCategory?: string;
@@ -38,4 +39,5 @@ export async function createMediaIndexes(): Promise<void> {
   await collection.createIndex({ createdAt: -1 });
   await collection.createIndex({ status: 1, createdAt: 1 });
   await collection.createIndex({ approvedAt: -1 }, { sparse: true });
+  await collection.createIndex({ momentVideoId: 1 }, { sparse: true });
 }

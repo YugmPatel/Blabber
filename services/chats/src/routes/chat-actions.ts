@@ -21,6 +21,7 @@ import {
   getChatActionsCollection,
   type ChatActionDocument,
 } from '../models/chat-action';
+import { getPlanThisCollection, type PlanThisDocument } from '../models/plan-this';
 import { getDatabase } from '../db';
 import {
   createActionExtractionService,
@@ -131,6 +132,76 @@ function toActionItem(doc: ChatActionDocument, permissions?: ChatActionItem['per
     deletedAt: serializeDate(doc.deletedAt),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
+  };
+}
+
+function currentPlanVotes(plan: PlanThisDocument) {
+  const version = plan.planVersion ?? 0;
+  return plan.votes.filter((vote) => (vote.planVersion ?? 0) === version);
+}
+
+function syntheticPlanAction(
+  plan: PlanThisDocument,
+  chat: any,
+  userObjectId: ObjectId,
+  chatTitle: string,
+  chatAvatarUrl?: string
+): (ChatActionItem & { chatTitle: string; chatAvatarUrl?: string; chatType?: 'direct' | 'group' }) | null {
+  const userId = userObjectId.toString();
+  const activeParticipants = plan.participants.filter((participant) => !participant.removedAt);
+  const isDecisionParticipant = activeParticipants.some((participant) => participant.userId.equals(userObjectId));
+  const isCreator = plan.creatorUserId.equals(userObjectId);
+  const votes = currentPlanVotes(plan);
+  const myVote = votes.find((vote) => vote.userId.equals(userObjectId));
+  const open = !['cancelled', 'expired'].includes(plan.state);
+  if (!open) return null;
+
+  let label: string | null = null;
+  let title = plan.title;
+  let assignedTo = { userId, name: activeParticipants.find((participant) => participant.userId.equals(userObjectId))?.displayName };
+  let createdBy = { userId: plan.creatorUserId.toString(), name: activeParticipants.find((participant) => participant.userId.equals(plan.creatorUserId))?.displayName };
+
+  if (plan.state === 'finalized' && isDecisionParticipant && plan.suggestedAt) {
+    label = 'Upcoming plan';
+    title = `Upcoming plan: ${plan.title}`;
+  } else if (isDecisionParticipant && !myVote && !['finalized'].includes(plan.state)) {
+    label = 'Needs my vote';
+    title = `Vote on plan: ${plan.title}`;
+  } else if (isCreator && !['finalized'].includes(plan.state)) {
+    const waitingVotes = activeParticipants.length - votes.length;
+    const waitingAssignments = plan.assignments.filter((assignment) => assignment.status === 'requested').length;
+    if (waitingVotes > 0 || waitingAssignments > 0) {
+      label = 'Waiting on others';
+      title = `Waiting on others: ${plan.title}`;
+      assignedTo = createdBy;
+    }
+  } else if (plan.state === 'finalized' && isDecisionParticipant) {
+    label = 'Plan finalized';
+    title = `Finalized plan: ${plan.title}`;
+  }
+
+  if (!label) return null;
+  return {
+    id: `plan-this:${plan._id.toString()}:${label.toLowerCase().replace(/\s+/g, '-')}`,
+    chatId: plan.chatId.toString(),
+    type: plan.state === 'finalized' ? 'event' : 'task',
+    title,
+    description: label,
+    assignedTo,
+    createdBy,
+    dueAt: plan.suggestedAt?.toISOString(),
+    eventStart: plan.suggestedAt?.toISOString(),
+    status: 'open',
+    visibility: chat.type === 'direct' ? 'personal' : 'chat',
+    personalOwnerUserId: chat.type === 'direct' ? userId : undefined,
+    sourceMessageIds: plan.proposalMessageId ? [plan.proposalMessageId.toString()] : [],
+    metadata: { origin: 'plan_this', planId: plan._id.toString(), planStatus: plan.state, actionState: label },
+    permissions: { canUpdateStatus: false, canEdit: false, canDelete: false },
+    chatTitle,
+    chatAvatarUrl,
+    chatType: chat.type,
+    createdAt: plan.createdAt.toISOString(),
+    updatedAt: plan.updatedAt.toISOString(),
   };
 }
 
@@ -486,7 +557,24 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
     )
   ).flat();
 
-  return res.status(200).json({ actions: sourcedActions });
+  const plans = await getPlanThisCollection()
+    .find({
+      chatId: { $in: chatIds },
+      $or: [{ creatorUserId: userObjectId }, { 'participants.userId': userObjectId }],
+      state: { $nin: ['cancelled', 'expired'] as any },
+    })
+    .sort({ updatedAt: -1 })
+    .limit(120)
+    .toArray();
+  const planActions = plans
+    .map((plan) => {
+      const chat = chatById.get(plan.chatId.toString());
+      if (!chat) return null;
+      return syntheticPlanAction(plan, chat, userObjectId, chatTitleById.get(plan.chatId.toString()) || 'Chat', chat.avatarUrl);
+    })
+    .filter(Boolean) as Array<ChatActionItem & { chatTitle: string; chatAvatarUrl?: string; chatType?: 'direct' | 'group' }>;
+
+  return res.status(200).json({ actions: [...planActions, ...sourcedActions] });
 });
 
 export const createChatAction = asyncHandler(async (req: Request, res: Response) => {

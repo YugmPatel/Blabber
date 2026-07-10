@@ -3,7 +3,7 @@ import { Component, useEffect, useState, useCallback, useMemo, useRef } from 're
 import type { ErrorInfo, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Check, ExternalLink, FileText, Image as ImageIcon, Link as LinkIcon, Loader2, Search, Send, Sparkles, X } from 'lucide-react';
-import { chatKeys, useArchiveChat, useChat, useChats, useUnarchiveChat } from '@/hooks/useChats';
+import { chatKeys, useChat, useChats } from '@/hooks/useChats';
 import { messageKeys, useMessages, useDeleteMessage, useAddReaction, useVotePoll, useMarkMessagesRead, useForwardMessage, useMessagePins, usePinMessage, useSaveMessage, useUnpinMessage, useUnsaveMessage, useSharedContent, useClosePoll, useRsvpEvent, useCancelEvent, useDownloadEventIcs } from '@/hooks/useMessages';
 import { useChatActions } from '@/hooks/useChatActions';
 import { useGroupBrain } from '@/hooks/useGroupBrain';
@@ -195,8 +195,6 @@ export default function ChatView() {
   // Fetch chat details
   const { data: chat, isLoading: chatLoading } = useChat(id);
   const { data: allChats = [] } = useChats();
-  const archiveChatMutation = useArchiveChat();
-  const unarchiveChatMutation = useUnarchiveChat();
   const { data: userSettings } = useQuery({
     queryKey: ['user-settings'],
     queryFn: async () => {
@@ -302,9 +300,7 @@ export default function ChatView() {
 
   const handleDelete = useCallback(
     (messageId: string) => {
-      if (window.confirm('Delete this message?')) {
-        deleteMessageMutation.mutate(messageId);
-      }
+      deleteMessageMutation.mutate(messageId);
     },
     [deleteMessageMutation]
   );
@@ -585,9 +581,9 @@ export default function ChatView() {
   // Loading state
   if (chatLoading || messagesLoading) {
     return (
-      <div className="flex flex-col h-full bg-gray-50">
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500" />
+      <div className="flex h-full flex-col bg-white dark:bg-slate-900">
+        <div className="flex h-full items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-teal-600 dark:border-teal-400" />
         </div>
       </div>
     );
@@ -596,7 +592,7 @@ export default function ChatView() {
   // Error state
   if (!chat) {
     return (
-      <div className="flex h-full flex-col bg-gray-50 dark:bg-slate-950">
+      <div className="flex h-full flex-col bg-white dark:bg-slate-900">
         <div className="flex h-full items-center justify-center px-6">
           <div className="max-w-sm rounded-lg border border-slate-200 bg-white p-6 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <p className="text-base font-semibold text-slate-900 dark:text-white">Chat not available</p>
@@ -606,9 +602,9 @@ export default function ChatView() {
             <button
               type="button"
               onClick={() => navigate('/chats')}
-              className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-white dark:text-slate-950"
+              className="bl-focus-ring mt-4 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
             >
-              Back to All Chats
+              Back to Convo
             </button>
           </div>
         </div>
@@ -625,14 +621,12 @@ export default function ChatView() {
         onlineStatus={!isGroupChat ? otherUserPresence : null}
         isGroupChat={isGroupChat}
         intelligenceEnabled={chatIntelligenceEnabled}
+        intelligenceOpen={isIntelligenceOpen}
         onOpenIntelligence={() => setIsIntelligenceOpen(true)}
         onJumpToMessage={(messageId) => jumpToMessage(messageId, chat._id)}
         pinnedCount={pinData?.pins.length || 0}
         onOpenPins={() => setIsPinsOpen(true)}
         onOpenShared={() => setIsSharedOpen(true)}
-        isArchived={Boolean(chat.archived)}
-        onArchiveChat={() => archiveChatMutation.mutate(chat._id)}
-        onUnarchiveChat={() => unarchiveChatMutation.mutate(chat._id)}
       />
 
       {isEndedTemporaryGroup && (

@@ -1,3 +1,3 @@
 /// <reference types="expo/types" />
 
-declare module '*.png';
+// NOTE: This file should not be edited and should be in your git ignore

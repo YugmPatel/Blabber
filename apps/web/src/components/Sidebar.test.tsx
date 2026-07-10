@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type React from 'react';
 import Sidebar from './Sidebar';
 
@@ -23,8 +24,14 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({
     theme: 'light',
+    resolvedTheme: 'light',
     toggleTheme: vi.fn(),
   }),
+}));
+
+vi.mock('@/api/client', () => ({
+  fetchMyProfile: vi.fn(),
+  normalizeMediaUrl: (url?: string | null) => url ?? undefined,
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -36,12 +43,16 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-const renderSidebar = (props: React.ComponentProps<typeof Sidebar> = {}) =>
-  render(
-    <BrowserRouter>
-      <Sidebar {...props} />
-    </BrowserRouter>
+const renderSidebar = (props: React.ComponentProps<typeof Sidebar> = {}) => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Sidebar {...props} />
+      </BrowserRouter>
+    </QueryClientProvider>
   );
+};
 
 describe('Sidebar', () => {
   beforeEach(() => {
@@ -52,7 +63,7 @@ describe('Sidebar', () => {
     renderSidebar();
 
     expect(screen.getByText('Blabber')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'All Chats' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Convo' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Groups' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Archived' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'My Actions' })).toBeInTheDocument();
@@ -62,7 +73,7 @@ describe('Sidebar', () => {
     const onNewConversation = vi.fn();
     renderSidebar({ onNewConversation });
 
-    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Convo' }));
 
     expect(onNewConversation).toHaveBeenCalledTimes(1);
   });
@@ -80,11 +91,11 @@ describe('Sidebar', () => {
     renderSidebar();
 
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Saved' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Feed' }));
     fireEvent.click(screen.getByRole('button', { name: 'Calls' }));
 
     expect(mockNavigate).toHaveBeenCalledWith('/archived');
-    expect(mockNavigate).toHaveBeenCalledWith('/saved');
+    expect(mockNavigate).toHaveBeenCalledWith('/feed');
     expect(mockNavigate).toHaveBeenCalledWith('/calls');
   });
 
@@ -95,14 +106,14 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Groups' }));
 
     expect(onChatFilterChange).toHaveBeenCalledWith('groups');
-    expect(mockNavigate).toHaveBeenCalledWith('/chats');
+    expect(mockNavigate).toHaveBeenCalledWith('/chats?filter=groups');
   });
 
   it('renders collapsed icon-only controls', () => {
     renderSidebar({ collapsed: true });
 
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New conversation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New Convo' })).toBeInTheDocument();
     expect(screen.queryByText('New chat')).not.toBeInTheDocument();
   });
 });

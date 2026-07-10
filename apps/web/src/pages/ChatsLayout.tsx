@@ -1,8 +1,10 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Outlet, useNavigate, useParams } from 'react-router-dom';
-import { useQueries } from '@tanstack/react-query';
-import { Menu, Plus, Search, Sparkles, CheckSquare2, Brain } from 'lucide-react';
+import { Outlet, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useQueries, useQuery } from '@tanstack/react-query';
+import { Loader2, Menu, Plus, Search, X } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
+import BlabberMark from '../components/brand/BlabberMark';
+import BrandButton from '../components/ui/BrandButton';
 import ChatList from '../components/ChatList';
 import NewChatModal from '../components/NewChatModal';
 import NewGroupModal from '../components/NewGroupModal';
@@ -10,16 +12,36 @@ import { useChats } from '../hooks/useChats';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useTheme } from '../hooks/useTheme';
 import { useAuth } from '../contexts/AuthContext';
-import { apiClient } from '../api/client';
-import type { User } from '@repo/types';
+import { apiClient, searchGlobalMessages } from '../api/client';
+import type { MessageSearchResult } from '../api/client';
+import type { Chat, User } from '@repo/types';
+
+type SearchSelection =
+  | { kind: 'conversation'; id: string; chat: Chat }
+  | { kind: 'message'; id: string; result: MessageSearchResult };
 
 export default function ChatsLayout() {
   const [showSidebar, setShowSidebar] = useState(false); // mobile overlay
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // desktop collapse
   const [isNewChatModalOpen, setIsNewChatModalOpen] = useState(false);
   const [isNewGroupModalOpen, setIsNewGroupModalOpen] = useState(false);
-  const [chatFilter, setChatFilter] = useState<'all' | 'groups'>('all');
+  // The sidebar hands the Groups intent over via ?filter=groups because other
+  // pages navigate here from outside this layout — local state alone made the
+  // first click land on the default Convo view. The param seeds and syncs the
+  // filter; absence of the param leaves in-layout state untouched (so opening
+  // a chat while in Groups view keeps the Groups list).
+  const [searchParams] = useSearchParams();
+  const filterParam = searchParams.get('filter');
+  const [chatFilter, setChatFilter] = useState<'all' | 'groups'>(
+    filterParam === 'groups' ? 'groups' : 'all'
+  );
+  useEffect(() => {
+    if (filterParam === 'groups') setChatFilter('groups');
+    else if (filterParam === 'all') setChatFilter('all');
+  }, [filterParam]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const { id } = useParams();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
@@ -74,6 +96,11 @@ export default function ChatsLayout() {
 
   const trimmedSearchQuery = searchQuery.trim();
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(trimmedSearchQuery), 250);
+    return () => window.clearTimeout(timer);
+  }, [trimmedSearchQuery]);
+
   const filteredChats = useMemo(() => {
     if (!trimmedSearchQuery) return chats;
     const q = trimmedSearchQuery.toLowerCase();
@@ -95,14 +122,47 @@ export default function ChatsLayout() {
   }, [chatFilter, filteredChats]);
 
   const hasGroups = useMemo(() => chats.some((chat) => chat.type === 'group'), [chats]);
-  const openMessageSearch = () => {
-    const query = searchQuery.trim();
-    navigate(query ? `/search?q=${encodeURIComponent(query)}` : '/search');
+  const messageSearchQuery = debouncedSearchQuery.length >= 2 ? debouncedSearchQuery : '';
+  const messageSearch = useQuery({
+    queryKey: ['chat-dashboard', 'message-search', messageSearchQuery],
+    queryFn: () => searchGlobalMessages({ q: messageSearchQuery, limit: 8 }),
+    enabled: Boolean(messageSearchQuery),
+    staleTime: 15_000,
+  });
+
+  const searchSelections = useMemo<SearchSelection[]>(() => {
+    if (!trimmedSearchQuery) return [];
+    return [
+      ...visibleChats.map((chat) => ({
+        kind: 'conversation' as const,
+        id: `chat:${chat._id}`,
+        chat,
+      })),
+      ...(messageSearch.data?.results ?? []).map((result) => ({
+        kind: 'message' as const,
+        id: `message:${result.messageId}`,
+        result,
+      })),
+    ];
+  }, [messageSearch.data?.results, trimmedSearchQuery, visibleChats]);
+
+  useEffect(() => {
+    setActiveSearchIndex(0);
+  }, [trimmedSearchQuery, messageSearch.data?.results]);
+
+  const openSearchSelection = (selection: SearchSelection | undefined) => {
+    if (!selection) return;
+    if (selection.kind === 'conversation') {
+      navigate(`/chats/${selection.chat._id}`);
+    } else {
+      navigate(`/chats/${selection.result.chatId}?message=${encodeURIComponent(selection.result.messageId)}`);
+    }
+    setShowSidebar(false);
   };
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen overflow-hidden bg-[#f4f5f7] text-slate-900 dark:bg-slate-950 dark:text-white">
+      <div className="flex h-screen overflow-hidden bg-[#f6faf8] text-slate-900 dark:bg-[#071315] dark:text-white">
         {/* Mobile backdrop */}
         <div
           className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${
@@ -132,10 +192,10 @@ export default function ChatsLayout() {
         </div>
 
         {/* Main content column */}
-        <div className="flex min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 gap-3 p-3">
           {/* Chat list panel */}
-          <section className="flex w-full max-w-[340px] flex-col border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 md:w-[340px]">
-            <div className="space-y-3 border-b border-slate-200 p-4 dark:border-slate-700">
+          <section className="flex w-full max-w-[340px] flex-col overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:w-[340px]">
+            <div className="space-y-3 border-b border-[color:var(--bl-border)] p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {/* Mobile hamburger */}
@@ -146,16 +206,10 @@ export default function ChatsLayout() {
                   >
                     <Menu size={16} />
                   </button>
-                  <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Messages</h2>
+                  <h2 className="text-[22px] font-semibold tracking-tight text-slate-900 dark:text-white">
+                    Conversations
+                  </h2>
                 </div>
-                <button
-                  onClick={() => setIsNewChatModalOpen(true)}
-                  className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                  aria-label="Start new chat"
-                  title="New conversation"
-                >
-                  <Plus size={16} />
-                </button>
               </div>
               <div className="relative">
                 <Search
@@ -166,34 +220,49 @@ export default function ChatsLayout() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
+                    if (event.key === 'Escape') {
+                      setSearchQuery('');
+                      return;
+                    }
+                    if (!trimmedSearchQuery) return;
+                    if (event.key === 'ArrowDown') {
                       event.preventDefault();
-                      openMessageSearch();
+                      setActiveSearchIndex((index) =>
+                        Math.min(index + 1, Math.max(searchSelections.length - 1, 0))
+                      );
+                    } else if (event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      setActiveSearchIndex((index) => Math.max(index - 1, 0));
+                    } else if (event.key === 'Enter') {
+                      event.preventDefault();
+                      openSearchSelection(searchSelections[activeSearchIndex]);
                     }
                   }}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-11 text-sm outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-500 dark:focus:bg-slate-800"
-                  placeholder="Search conversations..."
+                  className="w-full rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] py-2.5 pl-9 pr-11 text-sm text-[color:var(--bl-text)] outline-none transition placeholder:text-[color:var(--bl-text-muted)] focus:border-teal-400 focus:bg-[color:var(--bl-panel)] focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-500/20"
+                  placeholder="Search convos and messages"
                 />
-                <button
-                  type="button"
-                  onClick={openMessageSearch}
-                  className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
-                  aria-label="Search messages"
-                  title="Search messages"
-                >
-                  <Brain size={15} />
-                </button>
+                {trimmedSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+                    aria-label="Clear search"
+                    title="Clear search"
+                  >
+                    <X size={15} />
+                  </button>
+                )}
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto">
               {isLoading ? (
-                <p className="p-4 text-sm text-slate-500 dark:text-slate-400">Loading chats...</p>
+                <p className="p-4 text-sm text-slate-500 dark:text-slate-400">Loading conversations...</p>
               ) : error ? (
                 <div className="p-4">
                   <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/60 dark:bg-rose-950/30">
                     <p className="text-sm font-semibold text-rose-700 dark:text-rose-300">
-                      Could not load chats
+                      Could not load conversations
                     </p>
                     <p className="mt-1 text-sm text-rose-600/80 dark:text-rose-200/80">
                       Check your connection and try again.
@@ -208,22 +277,24 @@ export default function ChatsLayout() {
                     </button>
                   </div>
                 </div>
-              ) : trimmedSearchQuery && visibleChats.length === 0 ? (
-                <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-slate-500 dark:text-slate-400">
-                  No conversations found
-                </div>
+              ) : trimmedSearchQuery ? (
+                <CombinedSearchResults
+                  query={trimmedSearchQuery}
+                  conversations={visibleChats}
+                  messages={messageSearch.data?.results ?? []}
+                  isLoadingMessages={messageSearch.isFetching}
+                  isMessageSearchEnabled={trimmedSearchQuery.length >= 2}
+                  isError={messageSearch.isError}
+                  activeIndex={activeSearchIndex}
+                  onOpen={openSearchSelection}
+                  participantSearchText={participantSearchText}
+                />
               ) : chatFilter === 'groups' && !hasGroups ? (
                 <div className="flex h-56 flex-col items-center justify-center px-6 text-center">
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">No groups yet</p>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    Create a group to chat with multiple people.
+                    Use New Convo to create a group with people you can message.
                   </p>
-                  <button
-                    onClick={() => setIsNewGroupModalOpen(true)}
-                    className="mt-4 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
-                  >
-                    Create group
-                  </button>
                 </div>
               ) : (
                 <ChatList chats={visibleChats} />
@@ -232,14 +303,11 @@ export default function ChatsLayout() {
           </section>
 
           {/* Chat view / empty state */}
-          <section className="min-w-0 flex-1">
+          <section className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm">
             {id ? (
               <Outlet />
             ) : (
-              <EmptyState
-                onNewChat={() => setIsNewChatModalOpen(true)}
-                onNewGroup={() => setIsNewGroupModalOpen(true)}
-              />
+              <EmptyState onStartConversation={() => setIsNewChatModalOpen(true)} />
             )}
           </section>
         </div>
@@ -260,78 +328,157 @@ export default function ChatsLayout() {
 
 // ── Empty / no-chat-selected state ──────────────────────────────────────────
 
-function EmptyState({
-  onNewChat,
-  onNewGroup,
+function CombinedSearchResults({
+  query,
+  conversations,
+  messages,
+  isLoadingMessages,
+  isMessageSearchEnabled,
+  isError,
+  activeIndex,
+  onOpen,
+  participantSearchText,
 }: {
-  onNewChat: () => void;
-  onNewGroup: () => void;
+  query: string;
+  conversations: Chat[];
+  messages: MessageSearchResult[];
+  isLoadingMessages: boolean;
+  isMessageSearchEnabled: boolean;
+  isError: boolean;
+  activeIndex: number;
+  onOpen: (selection: SearchSelection) => void;
+  participantSearchText: Map<string, string>;
 }) {
+  const selections: SearchSelection[] = [
+    ...conversations.map((chat) => ({ kind: 'conversation' as const, id: `chat:${chat._id}`, chat })),
+    ...messages.map((result) => ({ kind: 'message' as const, id: `message:${result.messageId}`, result })),
+  ];
+  const hasResults = conversations.length > 0 || messages.length > 0;
+
+  const conversationTitle = (chat: Chat) => {
+    if (chat.title) return chat.title;
+    const participantNames = chat.participants
+      .map((participantId) => participantSearchText.get(participantId))
+      .filter(Boolean);
+    return participantNames.join(', ') || (chat.type === 'group' ? 'Group chat' : 'Direct chat');
+  };
+
   return (
-    <div className="flex h-full items-center justify-center overflow-y-auto bg-white px-6 py-12 dark:bg-slate-900">
-      <div className="mx-auto w-full max-w-lg text-center">
-        {/* Illustration placeholder */}
-        <div className="mx-auto mb-8 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-100 to-teal-50 dark:from-teal-900/40 dark:to-teal-800/20">
-          <Sparkles size={32} className="text-teal-600 dark:text-teal-400" />
+    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+      <section className="py-2">
+        <div className="px-4 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+          Conversations
         </div>
+        {conversations.length === 0 ? (
+          <p className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
+            No conversations found
+          </p>
+        ) : (
+          conversations.map((chat) => {
+            const index = selections.findIndex((selection) => selection.id === `chat:${chat._id}`);
+            return (
+              <button
+                key={chat._id}
+                type="button"
+                aria-selected={index === activeIndex}
+                onClick={() => onOpen({ kind: 'conversation', id: `chat:${chat._id}`, chat })}
+                className={`w-full px-4 py-3 text-left transition ${
+                  index === activeIndex
+                    ? 'bg-teal-50 dark:bg-teal-950/30'
+                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                }`}
+              >
+                <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                  {conversationTitle(chat)}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                  {chat.lastMessageRef?.body || (chat.type === 'group' ? 'Group conversation' : 'Direct conversation')}
+                </p>
+              </button>
+            );
+          })
+        )}
+      </section>
+
+      <section className="py-2">
+        <div className="flex items-center justify-between px-4 py-2">
+          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+            Messages
+          </span>
+          {isLoadingMessages && <Loader2 size={14} className="animate-spin text-slate-400" />}
+        </div>
+        {!isMessageSearchEnabled ? (
+          <p className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
+            Type at least 2 characters to search messages.
+          </p>
+        ) : isError ? (
+          <p className="px-4 py-3 text-sm text-rose-600 dark:text-rose-300">
+            Message search is unavailable. Try again.
+          </p>
+        ) : messages.length === 0 && !isLoadingMessages ? (
+          <p className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
+            No messages found
+          </p>
+        ) : (
+          messages.map((result) => {
+            const index = selections.findIndex(
+              (selection) => selection.id === `message:${result.messageId}`
+            );
+            return (
+              <button
+                key={result.messageId}
+                type="button"
+                aria-selected={index === activeIndex}
+                onClick={() => onOpen({ kind: 'message', id: `message:${result.messageId}`, result })}
+                className={`w-full px-4 py-3 text-left transition ${
+                  index === activeIndex
+                    ? 'bg-teal-50 dark:bg-teal-950/30'
+                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                }`}
+              >
+                <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                  {result.senderDisplayName || 'Message'}
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">
+                  {result.snippet || result.attachmentLabel || `Result for ${query}`}
+                </p>
+              </button>
+            );
+          })
+        )}
+      </section>
+
+      {!hasResults && !isLoadingMessages && isMessageSearchEnabled && (
+        <p className="px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+          No results found
+        </p>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ onStartConversation }: { onStartConversation: () => void }) {
+  return (
+    <div className="relative flex h-full items-center justify-center overflow-y-auto bg-white px-6 py-12 dark:bg-slate-900">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 hidden h-80 dark:block"
+        style={{ background: 'radial-gradient(55% 100% at 50% 0%, rgba(47,92,214,0.16) 0%, rgba(47,92,214,0) 70%)' }}
+      />
+      <div className="relative mx-auto w-full max-w-lg text-center">
+        <BlabberMark size={80} variant="icon" className="mx-auto mb-8" alive />
 
         <h3 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
-          Ready to turn noise into signal?
+          Discover, share, make it happen.
         </h3>
         <p className="mx-auto mt-3 max-w-sm text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">
-          Blabber is your AI-powered companion for group chats. Start a new conversation to see the
-          magic happen.
+          AI-first social conversations that help you find ideas, share them with your people, and turn them into real
+          plans.
         </p>
-
-        <div className="mt-8 flex flex-wrap justify-center gap-3">
-          <button
-            onClick={onNewChat}
-            className="rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
-          >
-            + Start New Chat
-          </button>
-          <button
-            onClick={onNewGroup}
-            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-          >
-            Create Group
-          </button>
-        </div>
-
-        {/* How it works */}
-        <div className="mt-12 border-t border-slate-100 pt-10 dark:border-slate-800">
-          <h4 className="mb-5 text-base font-semibold text-slate-900 dark:text-white">
-            How Blabber works
-          </h4>
-          <div className="grid gap-4 sm:grid-cols-3">
-            {[
-              {
-                icon: Sparkles,
-                title: 'Smart Summaries',
-                desc: 'AI condenses long threads into what matters in seconds.',
-              },
-              {
-                icon: CheckSquare2,
-                title: 'Task Extraction',
-                desc: 'Capture action items and keep follow-through visible.',
-              },
-              {
-                icon: Brain,
-                title: 'Shared Memory',
-                desc: 'Keep decisions and context searchable for the whole team.',
-              },
-            ].map((card) => (
-              <div
-                key={card.title}
-                className="rounded-xl border border-slate-200 p-4 text-left dark:border-slate-700"
-              >
-                <card.icon size={16} className="mb-2 text-teal-600 dark:text-teal-400" />
-                <p className="text-[13px] font-semibold text-slate-900 dark:text-white">{card.title}</p>
-                <p className="mt-1 text-[13px] text-slate-500 dark:text-slate-400">{card.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+        <BrandButton variant="primary" onClick={onStartConversation} className="mx-auto mt-6">
+          <Plus className="h-4 w-4" strokeWidth={2.5} />
+          Start a conversation
+        </BrandButton>
       </div>
     </div>
   );

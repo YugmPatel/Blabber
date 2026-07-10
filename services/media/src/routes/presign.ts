@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import { promises as fs } from 'fs';
 import { dirname, join } from 'path';
+import { tmpdir } from 'os';
+import { promisify } from 'util';
+import { execFile } from 'child_process';
 import { ObjectId } from 'mongodb';
 import { asyncHandler } from '@repo/utils';
 import { getDatabase } from '../db';
@@ -8,6 +11,7 @@ import { getMediaCollection, Media } from '../models/media';
 import {
   allowedMimeTypes,
   maxBytesForCategory,
+  normalizeDeclaredMimeType,
   safeExtension,
   sanitizeDisplayFileName,
   validateMediaPolicy,
@@ -19,9 +23,105 @@ const LOCAL_MEDIA_DIR = process.env.LOCAL_MEDIA_DIR || '/tmp/blabber-media';
 const MULTIPART_FIELD_NAME = 'file';
 const MESSAGE_TOTAL_ATTACHMENT_BYTES = Number(process.env.MEDIA_MESSAGE_TOTAL_BYTES || 30 * 1024 * 1024);
 const GENERIC_UPLOAD_ERROR = 'This file could not be uploaded.';
+const execFileAsync = promisify(execFile);
+const HEIC_DECODE_TIMEOUT_MS = Number(process.env.MEDIA_HEIC_DECODE_TIMEOUT_MS || 10_000);
+const MAX_IMAGE_WIDTH = Number(process.env.MEDIA_MAX_IMAGE_WIDTH || 12_000);
+const MAX_IMAGE_HEIGHT = Number(process.env.MEDIA_MAX_IMAGE_HEIGHT || 12_000);
+const MAX_IMAGE_PIXELS = Number(process.env.MEDIA_MAX_IMAGE_PIXELS || 80_000_000);
 
 function uploadValidationError(res: Response, status = 400) {
   return res.status(status).json({ error: status === 404 ? 'Not Found' : 'Validation Error', message: GENERIC_UPLOAD_ERROR });
+}
+
+function shouldNormalizeImage(mimeType: string) {
+  return ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(mimeType);
+}
+
+function isHeicOrHeif(mimeType: string) {
+  return mimeType === 'image/heic' || mimeType === 'image/heif';
+}
+
+function jpegDerivativeFileName(fileName: string) {
+  const sanitized = sanitizeDisplayFileName(fileName);
+  const withoutExtension = sanitized.replace(/\.[^.]+$/, '') || 'image';
+  return `${withoutExtension}.jpg`;
+}
+
+function assertImageDimensions(width: number, height: number) {
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    width > MAX_IMAGE_WIDTH ||
+    height > MAX_IMAGE_HEIGHT ||
+    width * height > MAX_IMAGE_PIXELS
+  ) {
+    throw new Error('invalid_image_dimensions');
+  }
+}
+
+async function inspectImageDimensions(inputPath: string) {
+  const probe = await execFileAsync(
+    'ffprobe',
+    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', inputPath],
+    { timeout: HEIC_DECODE_TIMEOUT_MS, maxBuffer: 1024 * 1024 }
+  );
+  const probeOutput = typeof probe === 'string' ? probe : probe.stdout;
+  const metadata = JSON.parse(probeOutput || '{}');
+  const stream = metadata.streams?.[0] || {};
+  const width = Number(stream.width || 0);
+  const height = Number(stream.height || 0);
+  assertImageDimensions(width, height);
+}
+
+async function inspectHeicDimensions(inputPath: string) {
+  const info = await execFileAsync('heif-info', [inputPath], {
+    timeout: HEIC_DECODE_TIMEOUT_MS,
+    maxBuffer: 1024 * 1024,
+  });
+  const output = typeof info === 'string' ? info : `${info.stdout || ''}\n${info.stderr || ''}`;
+  const match = output.match(/(\d{1,6})\s*x\s*(\d{1,6})/i);
+  if (!match) throw new Error('invalid_image_dimensions');
+  assertImageDimensions(Number(match[1]), Number(match[2]));
+}
+
+async function normalizeImageToJpeg(buffer: Buffer, fileName: string, mimeType: string) {
+  const tempDir = await fs.mkdtemp(join(tmpdir(), 'blabber-image-'));
+  const inputPath = join(tempDir, sanitizeDisplayFileName(fileName));
+  const decodedPath = join(tempDir, 'decoded.jpg');
+  const outputPath = join(tempDir, 'normalized.jpg');
+  try {
+    await fs.writeFile(inputPath, buffer);
+    const sourcePath = isHeicOrHeif(mimeType) ? decodedPath : inputPath;
+
+    if (isHeicOrHeif(mimeType)) {
+      await inspectHeicDimensions(inputPath);
+      await execFileAsync('heif-convert', [inputPath, decodedPath], {
+        timeout: HEIC_DECODE_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+      });
+    }
+
+    await inspectImageDimensions(sourcePath);
+    await execFileAsync(
+      'ffmpeg',
+      ['-hide_banner', '-loglevel', 'error', '-y', '-i', sourcePath, '-frames:v', '1', '-map_metadata', '-1', '-q:v', '3', outputPath],
+      { timeout: HEIC_DECODE_TIMEOUT_MS, maxBuffer: 1024 * 1024 }
+    );
+    const normalizedBuffer = await fs.readFile(outputPath);
+    if (normalizedBuffer.length === 0 || normalizedBuffer.length > maxBytesForCategory('image')) {
+      throw new Error('invalid_normalized_image');
+    }
+    return {
+      buffer: normalizedBuffer,
+      fileName: jpegDerivativeFileName(fileName),
+      mimeType: 'image/jpeg',
+      extension: '.jpg',
+    };
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 function getMultipartBoundary(req: Request): string | null {
@@ -190,11 +290,15 @@ async function approveLocalBuffer(params: {
   }
 
   const mediaId = params.mediaId || new ObjectId();
-  const fileName = sanitizeDisplayFileName(params.fileName);
-  const localPath = params.mediaDoc?.localPath || join(LOCAL_MEDIA_DIR, `${mediaId.toString()}${policy.extension}`);
+  let approvedBuffer = buffer;
+  let approvedFileName = sanitizeDisplayFileName(params.fileName);
+  let approvedMimeType = policy.mimeType;
+  let approvedExtension = policy.extension;
+  const shouldNormalize = shouldNormalizeImage(policy.mimeType);
   const publicBaseUrl = getPublicMediaBaseUrl(req);
   const mediaUrl = params.mediaDoc?.url || `${publicBaseUrl}/local/${mediaId.toString()}`;
-  const s3Key = params.mediaDoc?.s3Key || `local/${userId}/${mediaId.toString()}${policy.extension}`;
+  const pendingLocalPath = params.mediaDoc?.localPath || join(LOCAL_MEDIA_DIR, `${mediaId.toString()}${policy.extension}`);
+  const pendingS3Key = params.mediaDoc?.s3Key || `local/${userId}/${mediaId.toString()}${policy.extension}`;
   const mediaCollection = getMediaCollection();
   const now = new Date();
 
@@ -208,16 +312,16 @@ async function approveLocalBuffer(params: {
         detectedFileType: policy.mimeType,
         fileType: policy.mimeType,
         fileSize: buffer.length,
-        fileName,
+        fileName: approvedFileName,
       },
       $setOnInsert: {
         _id: mediaId,
         userId: userObjectId,
         originalFileName: params.fileName,
-        s3Key,
+        s3Key: pendingS3Key,
         url: mediaUrl,
         storage: 'local',
-        localPath,
+        localPath: pendingLocalPath,
         createdAt: now,
       },
     },
@@ -242,10 +346,43 @@ async function approveLocalBuffer(params: {
     return uploadValidationError(res);
   }
 
+  if (shouldNormalize) {
+    try {
+      const normalized = await normalizeImageToJpeg(buffer, params.fileName, policy.mimeType);
+      approvedBuffer = normalized.buffer;
+      approvedFileName = normalized.fileName;
+      approvedMimeType = normalized.mimeType;
+      approvedExtension = normalized.extension;
+    } catch {
+      await mediaCollection.updateOne(
+        { _id: mediaId },
+        {
+          $set: {
+            status: 'rejected',
+            scanMode: scan.mode,
+            scanResult: 'clean',
+            scanErrorCategory: undefined,
+            rejectedAt: new Date(),
+          },
+        }
+      );
+      return uploadValidationError(res);
+    }
+  }
+
+  const localPath =
+    params.mediaDoc?.localPath && !shouldNormalize
+      ? params.mediaDoc.localPath
+      : join(LOCAL_MEDIA_DIR, `${mediaId.toString()}${approvedExtension}`);
+  const s3Key =
+    params.mediaDoc?.s3Key && !shouldNormalize
+      ? params.mediaDoc.s3Key
+      : `local/${userId}/${mediaId.toString()}${approvedExtension}`;
+
   await fs.mkdir(dirname(localPath), { recursive: true });
-  await fs.writeFile(localPath, buffer, { flag: 'wx' }).catch(async (error: NodeJS.ErrnoException) => {
+  await fs.writeFile(localPath, approvedBuffer, { flag: 'wx' }).catch(async (error: NodeJS.ErrnoException) => {
     if (error.code !== 'EEXIST') throw error;
-    await fs.writeFile(localPath, buffer);
+    await fs.writeFile(localPath, approvedBuffer);
   });
 
   const approvedAt = new Date();
@@ -253,11 +390,11 @@ async function approveLocalBuffer(params: {
     ...(params.mediaDoc || {}),
     _id: mediaId,
     userId: userObjectId,
-    fileName,
+    fileName: approvedFileName,
     originalFileName: params.fileName,
-    fileType: policy.mimeType,
+    fileType: approvedMimeType,
     detectedFileType: policy.mimeType,
-    fileSize: buffer.length,
+    fileSize: approvedBuffer.length,
     s3Key,
     url: mediaUrl,
     storage: 'local',
@@ -274,11 +411,11 @@ async function approveLocalBuffer(params: {
     { _id: mediaId },
     {
       $set: {
-        fileName,
+        fileName: approvedFileName,
         originalFileName: params.fileName,
-        fileType: policy.mimeType,
+        fileType: approvedMimeType,
         detectedFileType: policy.mimeType,
-        fileSize: buffer.length,
+        fileSize: approvedBuffer.length,
         s3Key,
         url: mediaUrl,
         storage: 'local',
@@ -321,12 +458,12 @@ export const presign = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const fileName = sanitizeDisplayFileName(String(req.body?.fileName || ''));
-  const declaredType = String(req.body?.fileType || '').split(';')[0].trim().toLowerCase();
+  const declaredType = normalizeDeclaredMimeType(String(req.body?.fileType || ''));
   const fileSize = Number(req.body?.fileSize || 0);
   if (!fileName || !Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MESSAGE_TOTAL_ATTACHMENT_BYTES) {
     return uploadValidationError(res);
   }
-  if (declaredType && !allowedMimeTypes().includes(declaredType) && declaredType !== 'image/jpg') {
+  if (declaredType && !allowedMimeTypes().includes(declaredType)) {
     return uploadValidationError(res);
   }
   if (declaredType === 'video/mp4') return uploadValidationError(res);
@@ -402,10 +539,13 @@ export const getLocalMedia = asyncHandler(async (req: Request, res: Response) =>
     return res.status(404).json({ error: 'Not Found', message: 'Media not found' });
   }
 
+  // Media uploaded before the scan pipeline existed has no `status` field at
+  // all; those uploads completed (the `uploadedAt` check below still applies)
+  // and must stay servable — avatars and group photos reference them.
   const mediaDoc = await getMediaCollection().findOne({
     _id: new ObjectId(req.params.id),
     storage: 'local',
-    status: 'approved',
+    $or: [{ status: 'approved' }, { status: { $exists: false } }],
   });
 
   if (!mediaDoc?.localPath || !mediaDoc.uploadedAt) {

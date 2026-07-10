@@ -147,6 +147,16 @@ function cursorFilter(cursor: ReturnType<typeof decodeCursor>, dateField = 'crea
   };
 }
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function searchTerm(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const term = value.trim().slice(0, 80);
+  return term.length >= 2 ? term : null;
+}
+
 function hashToken(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -246,6 +256,14 @@ function publicCreator(user: User) {
   };
 }
 
+function pexelsAttribution(post: PostDocument) {
+  if (post.importer?.provider !== 'pexels') return undefined;
+  return {
+    label: 'Photo via Pexels',
+    creatorName: typeof post.importer.providerCreatorName === 'string' ? post.importer.providerCreatorName : null,
+  };
+}
+
 async function serializeDiscoverPost(post: PostDocument, viewerUserId: ObjectId, sourceContext: DiscoverySourceContext) {
   const [author, reaction] = await Promise.all([
     getUsersCollection().findOne(activeUserQuery({ _id: post.authorUserId }) as any),
@@ -260,6 +278,7 @@ async function serializeDiscoverPost(post: PostDocument, viewerUserId: ObjectId,
       type: 'image',
       url: `/api/posts/${post._id.toString()}/media/${mediaId.toString()}`,
     })),
+    sourceAttribution: pexelsAttribution(post),
     topics: topicLabels(post.discoveryTopicIds || []),
     commentCount: post.commentCount || 0,
     reactionCounts: post.reactionCounts || {},
@@ -956,13 +975,16 @@ export const listPosts = asyncHandler(async (req: Request, res: Response) => {
   const viewerUserId = requireUserId(req);
   await requireActiveUser(viewerUserId);
   const topic = typeof req.query.topic === 'string' ? req.query.topic : undefined;
+  const q = searchTerm(req.query.q);
   if (topic && !DISCOVERY_TOPICS.some((item) => item.id === topic)) throw new ValidationError('Invalid topic.');
   const cursor = decodeCursor(req.query.cursor);
+  const regex = q ? new RegExp(escapeRegex(q), 'i') : null;
   const query: any = {
     discoverable: true,
     visibility: 'public',
     deletedAt: { $exists: false },
     ...(topic ? { discoveryTopicIds: topic } : {}),
+    ...(regex ? { $or: [{ body: regex }, { discoveryTopicIds: regex }, { 'importer.providerCreatorName': regex }] } : {}),
     ...cursorFilter(cursor),
   };
   const candidates = await getPostsCollection().find(query).sort({ createdAt: -1, _id: -1 }).limit(PAGE_LIMIT * 3 + 1).toArray();

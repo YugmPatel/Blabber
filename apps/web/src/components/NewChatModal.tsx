@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Search, Loader2, Users, ArrowLeft, ChevronRight } from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/api/client';
-import { chatKeys } from '@/hooks/useChats';
+import { chatKeys, useChats } from '@/hooks/useChats';
 import { useAuth } from '@/contexts/AuthContext';
-import type { User } from '@repo/types';
+import type { Chat, User } from '@repo/types';
 
 interface NewChatModalProps {
   isOpen: boolean;
@@ -39,6 +39,7 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
+  const { data: chats = [], isLoading: isLoadingChats } = useChats();
 
   // Focus search on open
   useEffect(() => {
@@ -59,33 +60,54 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
     return () => document.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
 
-  // Search results
-  const { data: searchResults, isLoading: isSearching } = useQuery({
-    queryKey: ['users', 'search', searchQuery],
-    queryFn: async () => {
-      const response = await apiClient.get(`/api/users/search?q=${encodeURIComponent(searchQuery)}`);
-      return response.data;
-    },
-    enabled: isOpen && searchQuery.trim().length > 0,
+  const directChats = chats.filter((chat) => chat.type === 'direct');
+  const eligibleParticipantIds = Array.from(
+    new Set(
+      chats.flatMap((chat) =>
+        chat.participants.filter((participantId) => participantId !== currentUser?._id)
+      )
+    )
+  );
+  const participantQueries = useQueries({
+    queries: eligibleParticipantIds.map((participantId) => ({
+      queryKey: ['users', participantId] as const,
+      queryFn: async () => {
+        const { data } = await apiClient.get<{ user: User }>(`/api/users/${participantId}`);
+        return data.user;
+      },
+      enabled: isOpen,
+      staleTime: 60_000,
+    })),
   });
-
-  const displayedUsers: User[] = searchQuery.trim() ? (searchResults?.users ?? []) : [];
-
-  const isLoading = searchQuery.trim() ? isSearching : false;
-
-  // Filter out current user from list
-  const filteredUsers = displayedUsers.filter((u) => u._id !== currentUser?._id);
+  const eligibleUsers = participantQueries
+    .map((query) => query.data)
+    .filter((user): user is User => Boolean(user));
+  const userById = new Map(eligibleUsers.map((user) => [user._id, user]));
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const recentDirectUsers = directChats
+    .map((chat) => chat.participants.find((participantId) => participantId !== currentUser?._id))
+    .map((participantId) => (participantId ? userById.get(participantId) : undefined))
+    .filter((user): user is User => Boolean(user));
+  const filteredUsers = eligibleUsers.filter((user) => {
+    if (!normalizedSearch) return true;
+    return [user.name, user.username, user.email]
+      .filter(Boolean)
+      .some((value) => value!.toLowerCase().includes(normalizedSearch));
+  });
+  const displayedUsers = normalizedSearch
+    ? filteredUsers
+    : recentDirectUsers.length > 0
+      ? recentDirectUsers
+      : eligibleUsers;
+  const isLoading = isLoadingChats || participantQueries.some((query) => query.isLoading);
 
   // Create / open direct chat
   const createChatMutation = useMutation({
     mutationFn: async (userId: string) => {
       if (!currentUser?._id) throw new Error('Not authenticated');
 
-      // Check if a direct chat with this user already exists
-      const chatsRes = await apiClient.get('/api/chats');
-      const chats = chatsRes.data.chats ?? [];
       const existing = chats.find(
-        (c: any) =>
+        (c: Chat) =>
           c.type === 'direct' &&
           c.participants.length === 2 &&
           c.participants.includes(currentUser._id) &&
@@ -131,7 +153,7 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
             <ArrowLeft size={18} />
           </button>
           <h2 className="flex-1 text-[15px] font-semibold text-slate-900 dark:text-white">
-            New chat
+            New Chat
           </h2>
           {/* X only on desktop */}
           <button
@@ -155,7 +177,7 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search name or email"
+              placeholder="Search people or existing conversations"
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
             />
           </div>
@@ -175,33 +197,45 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
               <Users size={18} className="text-teal-700 dark:text-teal-400" />
             </div>
             <span className="flex-1 text-left text-[14px] font-medium text-slate-900 dark:text-white">
-              New Group
+              Create a group
             </span>
             <ChevronRight size={16} className="text-slate-400" />
           </button>
 
           <div className="mx-4 h-px bg-slate-100 dark:bg-slate-800" />
 
+          {!normalizedSearch && recentDirectUsers.length > 0 && (
+            <div className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+              Recent
+            </div>
+          )}
+
+          {(normalizedSearch || recentDirectUsers.length === 0) && (
+            <div className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+              People you can message
+            </div>
+          )}
+
           {/* User list */}
           {isLoading ? (
             <div className="flex items-center justify-center py-10">
               <Loader2 size={22} className="animate-spin text-slate-400" />
             </div>
-          ) : filteredUsers.length === 0 ? (
+          ) : displayedUsers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Search size={32} className="mb-3 text-slate-300 dark:text-slate-600" />
               <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                {searchQuery.trim() ? 'No users found' : 'Search for a teammate'}
+                {searchQuery.trim() ? 'No people found' : 'No recent people yet'}
               </p>
               <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
                 {searchQuery.trim()
-                  ? 'Try a different name or email'
-                  : 'Type a name, username, or email to start a chat'}
+                  ? 'Try another name from your conversations'
+                  : 'People from your existing conversations will appear here'}
               </p>
             </div>
           ) : (
             <ul>
-              {filteredUsers.map((user) => (
+              {displayedUsers.map((user) => (
                 <li key={user._id}>
                   <button
                     onClick={() => createChatMutation.mutate(user._id)}

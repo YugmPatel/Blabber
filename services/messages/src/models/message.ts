@@ -61,12 +61,22 @@ export interface MessageDocument {
     cancelledAt?: Date;
     cancelledBy?: ObjectId;
     reminderEnabled?: boolean;
+    reminderOffsetMinutes?: number;
     rsvps?: Array<{
       userId: ObjectId;
       status: 'going' | 'maybe' | 'declined';
       respondedAt: Date;
       updatedAt: Date;
     }>;
+  };
+  planThis?: {
+    planId: ObjectId;
+    kind: 'proposal' | 'finalized' | 'updated' | 'cancelled';
+    planVersion?: number;
+    title?: string;
+    status?: string;
+    createdAt?: Date;
+    updatedAt?: Date;
   };
   replyTo?: {
     messageId: ObjectId;

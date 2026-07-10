@@ -27,4 +27,28 @@ describe('Media Service App', () => {
       });
     });
   });
+
+  describe('structured body limits', () => {
+    it('returns a safe oversized JSON error before route handling', async () => {
+      const response = await request(app)
+        .post('/reels/upload-init')
+        .set('Content-Type', 'application/json')
+        .send({ payload: 'x'.repeat(300 * 1024) });
+
+      expect(response.status).toBe(413);
+      expect(response.body.error).toBe('PayloadTooLargeError');
+      expect(response.body.message).not.toContain('256');
+    });
+
+    it('returns a safe oversized URL-encoded error before route handling', async () => {
+      const response = await request(app)
+        .post('/reels/upload-init')
+        .set('Content-Type', 'application/x-www-form-urlencoded')
+        .send(`payload=${'x'.repeat(300 * 1024)}`);
+
+      expect(response.status).toBe(413);
+      expect(response.body.error).toBe('PayloadTooLargeError');
+      expect(response.body.message).not.toContain('256');
+    });
+  });
 });

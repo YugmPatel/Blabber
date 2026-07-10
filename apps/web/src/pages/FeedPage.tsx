@@ -1,24 +1,34 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ImagePlus, Loader2, Menu, MessageCircle, Send, Trash2, X } from 'lucide-react';
+import { Bookmark, CalendarClock, ChevronDown, Globe, ImagePlus, Loader2, Menu, MessageCircle, Repeat2, Send, Share2, Trash2, UserPlus, Users, X } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import Sidebar from '@/components/Sidebar';
+import PlanThisDialog from '@/components/PlanThisDialog';
 import {
+  apiClient,
   createPost,
+  fetchAuthorizedObjectUrl,
   createPostComment,
   deletePost,
   fetchFeed,
   fetchDiscoveryTopics,
   fetchMyProfile,
   fetchPostComments,
+  followProfile,
   normalizeMediaUrl,
   removePostReaction,
+  repostPost,
+  savePost,
   setPostReaction,
+  undoRepostPost,
+  unfollowProfile,
+  unsavePost,
   updatePostDiscovery,
 } from '@/api/client';
 import type { FeedPost } from '@/api/client';
 import { useFileUpload } from '@/hooks/useFileUpload';
+import { useChats } from '@/hooks/useChats';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🙌'];
 
@@ -26,12 +36,75 @@ function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
 }
 
+function updateFeedPost(queryClient: ReturnType<typeof useQueryClient>, postId: string, update: (post: FeedPost) => FeedPost) {
+  queryClient.setQueriesData({ queryKey: ['feed'] }, (old: any) =>
+    old?.posts
+      ? {
+          ...old,
+          posts: old.posts.map((item: FeedPost) => item.id === postId ? update(item) : item),
+        }
+      : old
+  );
+}
+
+function FeedImage({ src, wide }: { src?: string; wide?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const [objectUrl, setObjectUrl] = useState<string | undefined>();
+  const shapeClass = wide ? 'max-h-[440px] w-full' : 'aspect-square w-full';
+
+  useEffect(() => {
+    let alive = true;
+    let createdUrl: string | undefined;
+    setFailed(false);
+    setObjectUrl(undefined);
+    fetchAuthorizedObjectUrl(src)
+      .then((value) => {
+        if (!alive) {
+          if (value?.startsWith('blob:')) URL.revokeObjectURL(value);
+          return;
+        }
+        createdUrl = value;
+        setObjectUrl(value);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+      if (createdUrl?.startsWith('blob:')) URL.revokeObjectURL(createdUrl);
+    };
+  }, [src]);
+
+  if (!src || failed) {
+    return (
+      <div className={`flex ${shapeClass} items-center justify-center rounded-xl bg-[color:var(--bl-hover)] text-xs text-[color:var(--bl-text-muted)]`}>
+        Image unavailable
+      </div>
+    );
+  }
+  if (!objectUrl) {
+    return <div className={`${shapeClass} animate-pulse rounded-xl bg-[color:var(--bl-hover)]`} />;
+  }
+  return (
+    <img
+      src={objectUrl}
+      alt=""
+      className={`${shapeClass} rounded-xl bg-[color:var(--bl-hover)] object-cover`}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function PostCard({ post }: { post: FeedPost }) {
   const queryClient = useQueryClient();
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentBody, setCommentBody] = useState('');
+  const [shareOpen, setShareOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const [topicIds, setTopicIds] = useState<string[]>(post.discovery?.topicIds || []);
   const topicsQuery = useQuery({ queryKey: ['discovery-topics'], queryFn: fetchDiscoveryTopics, enabled: post.canDelete && post.visibility === 'public' });
+  const shareChats = useChats({ archived: false, limit: 50 });
   const commentsQuery = useQuery({
     queryKey: ['post-comments', post.id],
     queryFn: () => fetchPostComments(post.id),
@@ -41,16 +114,7 @@ function PostCard({ post }: { post: FeedPost }) {
   const reaction = useMutation<{ reactionCounts: Record<string, number>; myReaction: string | null }, Error, string>({
     mutationFn: (emoji: string) => (post.myReaction === emoji ? removePostReaction(post.id) : setPostReaction(post.id, emoji)),
     onSuccess: (result) => {
-      queryClient.setQueryData(['feed'], (old: any) =>
-        old
-          ? {
-              ...old,
-              posts: old.posts.map((item: FeedPost) =>
-                item.id === post.id ? { ...item, reactionCounts: result.reactionCounts, myReaction: result.myReaction } : item
-              ),
-            }
-          : old
-      );
+      updateFeedPost(queryClient, post.id, (item) => ({ ...item, reactionCounts: result.reactionCounts, myReaction: result.myReaction }));
     },
   });
 
@@ -61,22 +125,47 @@ function PostCard({ post }: { post: FeedPost }) {
       queryClient.setQueryData(['post-comments', post.id], (old: any) =>
         old ? { ...old, comments: [...old.comments, result.comment] } : old
       );
-      queryClient.setQueryData(['feed'], (old: any) =>
-        old
-          ? {
-              ...old,
-              posts: old.posts.map((item: FeedPost) =>
-                item.id === post.id ? { ...item, commentCount: result.commentCount } : item
-              ),
-            }
-          : old
-      );
+      updateFeedPost(queryClient, post.id, (item) => ({ ...item, commentCount: result.commentCount }));
     },
   });
 
   const remove = useMutation({
     mutationFn: () => deletePost(post.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['feed'] }),
+  });
+  const follow = useMutation({
+    mutationFn: () => post.author.handle ? followProfile(post.author.handle) : Promise.reject(new Error('missing_handle')),
+    onSuccess: (profile) => updateFeedPost(queryClient, post.id, (item) => ({
+      ...item,
+      author: { ...item.author, relationship: profile.relationship },
+    })),
+  });
+  const unfollow = useMutation({
+    mutationFn: () => post.author.handle ? unfollowProfile(post.author.handle) : Promise.reject(new Error('missing_handle')),
+    onSuccess: (profile) => updateFeedPost(queryClient, post.id, (item) => ({
+      ...item,
+      author: { ...item.author, relationship: profile.relationship },
+    })),
+  });
+  const save = useMutation({
+    mutationFn: () => post.saved ? unsavePost(post.id) : savePost(post.id),
+    onSuccess: (result) => updateFeedPost(queryClient, post.id, (item) => ({ ...item, saved: result.saved })),
+  });
+  const repost = useMutation({
+    mutationFn: () => post.reposted ? undoRepostPost(post.id) : repostPost(post.id),
+    onSuccess: (result) => {
+      updateFeedPost(queryClient, post.id, (item) => ({ ...item, reposted: result.reposted }));
+      queryClient.invalidateQueries({ queryKey: ['feed'] });
+    },
+  });
+  const share = useMutation({
+    mutationFn: async (chatId: string) => {
+      await apiClient.post(`/api/messages/${chatId}`, {
+        body: `Shared a Blabber post\n/feed?post=${post.id}`,
+        type: 'text',
+      });
+    },
+    onSuccess: () => setShareOpen(false),
   });
   const discovery = useMutation({
     mutationFn: (discoverable: boolean) => updatePostDiscovery(post.id, { discoverable, discoveryTopicIds: discoverable ? topicIds : topicIds.slice(0, 3) }),
@@ -86,36 +175,66 @@ function PostCard({ post }: { post: FeedPost }) {
     setTopicIds((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length >= 3 ? current : [...current, id]);
   };
 
+  const VisibilityIcon = post.visibility === 'public' ? Globe : Users;
+
   return (
-    <article className="border-b border-slate-200 bg-white px-4 py-5 dark:border-slate-800 dark:bg-slate-950 sm:px-6">
+    <article className="rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4 py-5 shadow-sm transition hover:[box-shadow:var(--bl-glow-sm)] sm:px-6">
+      {post.repost && (
+        <p className="mb-3 inline-flex items-center gap-2 text-xs font-medium text-[color:var(--bl-text-muted)]">
+          <Repeat2 size={14} className="text-teal-600 dark:text-teal-300" /> Reposted by {post.repost.repostedBy.name}
+        </p>
+      )}
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
           <Avatar src={normalizeMediaUrl(post.author.avatarUrl)} alt={post.author.name} size="md" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{post.author.name}</p>
-            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-              {post.author.displayHandle || post.author.handle || 'Profile'} · {formatTime(post.createdAt)}
-              {post.editedAt ? ' · Edited' : ''}
+            <p className="truncate text-sm font-semibold text-[color:var(--bl-text)]">{post.author.name}</p>
+            <p className="flex flex-wrap items-center gap-x-1.5 truncate text-xs text-[color:var(--bl-text-muted)]">
+              <span>{post.repost ? 'Original post by ' : ''}{post.author.displayHandle || post.author.handle || 'Profile'} · {formatTime(post.createdAt)}{post.editedAt ? ' · Edited' : ''}</span>
+              <span className="inline-flex items-center gap-1" title={post.visibility === 'public' ? 'Public' : 'Followers only'}>
+                <span aria-hidden="true">·</span>
+                <VisibilityIcon size={11} />
+                {post.visibility === 'public' ? 'Public' : 'Followers'}
+              </span>
             </p>
           </div>
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+        {!post.canDelete && post.author.handle && post.author.relationship !== 'self' && (
+          <button
+            onClick={() => post.author.relationship === 'following' ? unfollow.mutate() : post.author.relationship === 'none' ? follow.mutate() : undefined}
+            disabled={follow.isPending || unfollow.isPending || post.author.relationship === 'requested_outgoing'}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[color:var(--bl-border)] px-3 text-xs font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-teal-50 hover:text-teal-700 disabled:cursor-default disabled:opacity-70 dark:hover:bg-teal-500/10 dark:hover:text-teal-300"
+          >
+            {(follow.isPending || unfollow.isPending) ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+            {post.author.relationship === 'following' ? 'Following' : post.author.relationship === 'requested_outgoing' ? 'Requested' : post.author.profileVisibility === 'private' ? 'Request to follow' : 'Follow'}
+          </button>
+        )}
         {post.canDelete && (
           <button
             onClick={() => remove.mutate()}
             disabled={remove.isPending}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-slate-900"
+            className="rounded-lg p-2 text-[color:var(--bl-text-muted)] transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:hover:bg-rose-950/30"
             aria-label="Delete post"
           >
             {remove.isPending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
           </button>
         )}
+        </div>
       </div>
 
-      {post.body && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-800 dark:text-slate-100">{post.body}</p>}
+      {post.body && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[color:var(--bl-text)]">{post.body}</p>}
+
+      {post.sourceAttribution && (
+        <p className="mt-2 text-xs text-[color:var(--bl-text-muted)]">
+          {post.sourceAttribution.label}
+          {post.sourceAttribution.creatorName ? ` · ${post.sourceAttribution.creatorName}` : ''}
+        </p>
+      )}
 
       {post.canDelete && post.visibility === 'public' && (
-        <div className="mt-4 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-          <label className="flex items-center justify-between gap-3 text-sm font-medium">
+        <div className="mt-4 rounded-xl border border-[color:var(--bl-border)] p-3">
+          <label className="flex items-center justify-between gap-3 text-sm font-medium text-[color:var(--bl-text)]">
             <span>Include in Discover</span>
             <input
               type="checkbox"
@@ -126,13 +245,13 @@ function PostCard({ post }: { post: FeedPost }) {
               aria-label="Include in Discover"
             />
           </label>
-          <p className="mt-1 text-xs text-slate-500">Discover can show this public post to signed-in Blabber users outside your followers.</p>
+          <p className="mt-1 text-xs text-[color:var(--bl-text-muted)]">Discover can show this public post to signed-in Blabber users outside your followers.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {(topicsQuery.data || []).slice(0, 8).map((topic) => (
               <button
                 key={topic.id}
                 onClick={() => toggleTopic(topic.id)}
-                className={`rounded-md border px-2 py-1 text-xs ${topicIds.includes(topic.id) ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-200' : 'border-slate-200 text-slate-500 dark:border-slate-700'}`}
+                className={`rounded-md border px-2 py-1 text-xs transition ${topicIds.includes(topic.id) ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200' : 'border-[color:var(--bl-border)] text-[color:var(--bl-text-muted)] hover:bg-[color:var(--bl-hover)]'}`}
               >
                 {topic.label}
               </button>
@@ -142,16 +261,12 @@ function PostCard({ post }: { post: FeedPost }) {
       )}
 
       {post.media.length > 0 && (
-        <div className={`mt-4 grid gap-2 ${post.media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
-          {post.media.map((media) => (
-            <img
-              key={media.mediaId}
-              src={normalizeMediaUrl(media.url)}
-              alt=""
-              className="aspect-square w-full rounded-lg bg-slate-100 object-cover dark:bg-slate-900"
-              loading="lazy"
-            />
-          ))}
+        <div className={post.media.length === 1 ? 'mt-4' : 'mt-4 grid grid-cols-2 gap-2'}>
+          {post.media.length === 1 ? (
+            <FeedImage src={normalizeMediaUrl(post.media[0].url)} wide />
+          ) : (
+            post.media.map((media) => <FeedImage key={media.mediaId} src={normalizeMediaUrl(media.url)} />)
+          )}
         </div>
       )}
 
@@ -161,10 +276,10 @@ function PostCard({ post }: { post: FeedPost }) {
             key={emoji}
             onClick={() => reaction.mutate(emoji)}
             disabled={reaction.isPending}
-            className={`inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-sm ${
+            className={`inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-sm transition ${
               post.myReaction === emoji
-                ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-200'
-                : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'
+                ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200'
+                : 'border-[color:var(--bl-border)] text-[color:var(--bl-text-secondary)] hover:bg-[color:var(--bl-hover)]'
             }`}
           >
             <span>{emoji}</span>
@@ -173,21 +288,81 @@ function PostCard({ post }: { post: FeedPost }) {
         ))}
         <button
           onClick={() => setCommentsOpen((value) => !value)}
-          className="ml-auto inline-flex h-8 items-center gap-2 rounded-full border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+          className="inline-flex h-8 items-center gap-2 rounded-full border border-[color:var(--bl-border)] px-3 text-sm text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
         >
           <MessageCircle size={15} />
           {post.commentCount}
         </button>
+        <button
+          onClick={() => save.mutate()}
+          disabled={save.isPending || !post.canSave}
+          className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-sm transition ${post.saved ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200' : 'border-[color:var(--bl-border)] text-[color:var(--bl-text-secondary)] hover:bg-[color:var(--bl-hover)]'}`}
+        >
+          <Bookmark size={15} /> {post.saved ? 'Remove from saved' : 'Save'}
+        </button>
+        {post.canRepost && (
+          <button
+            onClick={() => repost.mutate()}
+            disabled={repost.isPending}
+            className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-sm transition ${post.reposted ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-200' : 'border-[color:var(--bl-border)] text-[color:var(--bl-text-secondary)] hover:bg-[color:var(--bl-hover)]'}`}
+          >
+            <Repeat2 size={15} /> {post.reposted ? 'Undo repost' : 'Repost'}
+          </button>
+        )}
+        {post.visibility === 'public' && (
+          <button
+            onClick={() => setPlanOpen(true)}
+            className="inline-flex h-8 items-center gap-2 rounded-full border border-emerald-200 px-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/30"
+          >
+            <CalendarClock size={15} /> Plan this
+          </button>
+        )}
+        {post.canShare && (
+          <button
+            onClick={() => setShareOpen((value) => !value)}
+            className="ml-auto inline-flex h-8 items-center gap-2 rounded-full border border-[color:var(--bl-border)] px-3 text-sm text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
+          >
+            <Share2 size={15} /> Share
+          </button>
+        )}
       </div>
+
+      <PlanThisDialog source={{ type: 'post', id: post.id }} open={planOpen} onClose={() => setPlanOpen(false)} />
+
+      {shareOpen && (
+        <div className="mt-3 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[color:var(--bl-text)]">Share to conversation</p>
+            <button onClick={() => setShareOpen(false)} className="rounded-md p-1 text-[color:var(--bl-text-muted)] transition hover:bg-[color:var(--bl-panel)]" aria-label="Close share">
+              <X size={15} />
+            </button>
+          </div>
+          <div className="mt-3 grid gap-2">
+            {(shareChats.data || []).slice(0, 8).map((chat: any) => (
+              <button
+                key={chat._id || chat.id}
+                onClick={() => share.mutate(chat._id || chat.id)}
+                disabled={share.isPending}
+                className="flex items-center justify-between gap-3 rounded-lg border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-left text-sm text-[color:var(--bl-text)] transition hover:border-teal-400 disabled:opacity-60"
+              >
+                <span className="truncate">{chat.name || chat.displayName || chat.title || 'Conversation'}</span>
+                {share.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} className="text-teal-600 dark:text-teal-300" />}
+              </button>
+            ))}
+            {!shareChats.isLoading && (shareChats.data || []).length === 0 && <p className="text-sm text-[color:var(--bl-text-muted)]">No conversations available.</p>}
+          </div>
+          {share.isError && <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">Unable to share this post.</p>}
+        </div>
+      )}
 
       {commentsOpen && (
         <div className="mt-4 space-y-3">
           {commentsQuery.data?.comments.map((item) => (
             <div key={item.id} className="flex gap-2">
               <Avatar src={normalizeMediaUrl(item.author.avatarUrl)} alt={item.author.name} size="sm" />
-              <div className="min-w-0 flex-1 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
-                <p className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">{item.author.name}</p>
-                <p className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">{item.body}</p>
+              <div className="min-w-0 flex-1 rounded-xl bg-[color:var(--bl-hover)] px-3 py-2">
+                <p className="truncate text-xs font-semibold text-[color:var(--bl-text-secondary)]">{item.author.name}</p>
+                <p className="whitespace-pre-wrap text-sm text-[color:var(--bl-text)]">{item.body}</p>
               </div>
             </div>
           ))}
@@ -196,13 +371,13 @@ function PostCard({ post }: { post: FeedPost }) {
               value={commentBody}
               onChange={(event) => setCommentBody(event.target.value)}
               maxLength={1000}
-              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-teal-500 dark:border-slate-800 dark:bg-slate-950"
+              className="min-w-0 flex-1 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm text-[color:var(--bl-text)] outline-none focus:border-teal-400"
               placeholder="Write a comment"
             />
             <button
               onClick={() => comment.mutate()}
               disabled={!commentBody.trim() || comment.isPending}
-              className="rounded-lg bg-slate-950 px-3 text-white disabled:bg-slate-300 dark:bg-white dark:text-slate-950"
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
               aria-label="Post comment"
             >
               {comment.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
@@ -218,18 +393,23 @@ export default function FeedPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [body, setBody] = useState('');
   const [visibility, setVisibility] = useState<'public' | 'followers'>('followers');
+  const [feedTab, setFeedTab] = useState<'featured' | 'following'>('featured');
   const [photos, setPhotos] = useState<Array<{ mediaId: string; url?: string }>>([]);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const upload = useFileUpload();
   const profileQuery = useQuery({ queryKey: ['my-profile'], queryFn: fetchMyProfile });
-  const feedQuery = useQuery({ queryKey: ['feed'], queryFn: () => fetchFeed() });
+  const feedQuery = useQuery({ queryKey: ['feed', feedTab], queryFn: () => fetchFeed(null, feedTab) });
   const loadMore = useMutation({
-    mutationFn: () => fetchFeed(feedQuery.data?.nextCursor),
+    mutationFn: () => fetchFeed(feedQuery.data?.nextCursor, feedTab),
     onSuccess: (page) => {
-      queryClient.setQueryData(['feed'], (old: any) =>
-        old ? { posts: [...old.posts, ...page.posts], nextCursor: page.nextCursor } : page
-      );
+      queryClient.setQueryData(['feed', feedTab], (old: any) => {
+        if (!old) return page;
+        const seen = new Set(old.posts.map((post: FeedPost) => post.id));
+        return { ...page, posts: [...old.posts, ...page.posts.filter((post) => !seen.has(post.id))] };
+      });
     },
   });
   const canUsePublic = profileQuery.data?.visibility === 'public';
@@ -247,6 +427,18 @@ export default function FeedPage() {
     },
   });
 
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node) return undefined;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting) && feedQuery.data?.nextCursor && !loadMore.isPending) {
+        loadMore.mutate();
+      }
+    }, { rootMargin: '600px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [feedQuery.data?.nextCursor, loadMore.isPending, feedTab]);
+
   const pickPhotos = async (files: FileList | null) => {
     if (!files?.length) return;
     const selected = Array.from(files).slice(0, 10 - photos.length);
@@ -259,35 +451,73 @@ export default function FeedPage() {
   };
 
   return (
-    <main className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
+    <main className="flex h-screen overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
+      <div
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${sidebarOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
       <div className={`fixed inset-y-0 left-0 z-50 transition-transform md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <Sidebar onNewConversation={() => navigate('/chats')} onChatFilterChange={() => navigate('/chats')} onNavigateMobile={() => setSidebarOpen(false)} />
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed((value) => !value)}
+          onNewConversation={() => navigate('/chats')}
+          onChatFilterChange={() => navigate('/chats')}
+          onNavigateMobile={() => setSidebarOpen(false)}
+        />
       </div>
-      <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
-          <div className="mx-auto flex max-w-3xl items-center gap-3">
-            <button onClick={() => setSidebarOpen(true)} className="rounded-lg border border-slate-200 p-2 text-slate-600 dark:border-slate-800 md:hidden" aria-label="Open navigation">
-              <Menu size={18} />
-            </button>
-            <h1 className="text-xl font-semibold">Feed</h1>
-          </div>
-        </header>
+      <div className="min-w-0 flex-1 overflow-y-auto bg-[color:var(--bl-bg)]">
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-6">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="rounded-lg border border-[color:var(--bl-border)] p-2 text-[color:var(--bl-text-muted)] transition hover:bg-[color:var(--bl-hover)] md:hidden"
+            aria-label="Open navigation"
+          >
+            <Menu size={16} />
+          </button>
 
-        <div className="mx-auto max-w-3xl">
-          <section className="border-b border-slate-200 bg-white px-4 py-5 dark:border-slate-800 dark:bg-slate-950 sm:px-6">
-            <textarea
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              maxLength={2000}
-              rows={4}
-              placeholder="Share an update"
-              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-teal-500 dark:border-slate-800 dark:bg-slate-950"
-            />
+          {/* ── Header ───────────────────────────────────────────────────── */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight text-[color:var(--bl-text)]">Feed</h1>
+              <p className="mt-2 text-[15px] leading-6 text-[color:var(--bl-text-secondary)]">
+                Stay updated with what&apos;s happening in your network.
+              </p>
+            </div>
+            <div className="inline-flex flex-shrink-0 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-1">
+              <button
+                onClick={() => setFeedTab('featured')}
+                className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${feedTab === 'featured' ? 'bg-teal-600 text-white shadow-sm dark:bg-teal-500 dark:text-slate-950' : 'text-[color:var(--bl-text-secondary)] hover:bg-[color:var(--bl-hover)]'}`}
+              >
+                Featured
+              </button>
+              <button
+                onClick={() => setFeedTab('following')}
+                className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${feedTab === 'following' ? 'bg-teal-600 text-white shadow-sm dark:bg-teal-500 dark:text-slate-950' : 'text-[color:var(--bl-text-secondary)] hover:bg-[color:var(--bl-hover)]'}`}
+              >
+                Following
+              </button>
+            </div>
+          </div>
+
+          {/* ── Composer ─────────────────────────────────────────────────── */}
+          <section className="rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-4 shadow-sm sm:p-5">
+            <div className="flex gap-3">
+              <Avatar src={normalizeMediaUrl(profileQuery.data?.avatarUrl)} alt={profileQuery.data?.name || 'You'} size="md" className="flex-shrink-0" />
+              <textarea
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                maxLength={2000}
+                rows={3}
+                placeholder="What's on your mind?"
+                className="min-w-0 flex-1 resize-none rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] px-3 py-2.5 text-sm text-[color:var(--bl-text)] outline-none transition placeholder:text-[color:var(--bl-text-muted)] focus:border-teal-400 focus:bg-[color:var(--bl-panel)] focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-500/20"
+              />
+            </div>
             {photos.length > 0 && (
               <div className="mt-3 grid grid-cols-5 gap-2">
                 {photos.map((photo) => (
                   <div key={photo.mediaId} className="relative">
-                    <img src={normalizeMediaUrl(photo.url)} alt="" className="aspect-square rounded-lg object-cover" />
+                    <img src={normalizeMediaUrl(photo.url)} alt="" className="aspect-square rounded-xl object-cover" />
                     <button
                       onClick={() => setPhotos((current) => current.filter((item) => item.mediaId !== photo.mediaId))}
                       className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white"
@@ -300,46 +530,70 @@ export default function FeedPage() {
               </div>
             )}
             {upload.error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">{upload.error}</p>}
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 dark:border-slate-800 dark:text-slate-300">
-                {upload.isUploading ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
-                Photos
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[color:var(--bl-border)] px-3.5 py-1.5 text-sm font-medium text-teal-700 transition hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-500/10">
+                {upload.isUploading ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
+                Photo
                 <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => void pickPhotos(event.target.files)} />
               </label>
-              <select
-                value={effectiveVisibility}
-                onChange={(event) => setVisibility(event.target.value as 'public' | 'followers')}
-                disabled={!canUsePublic}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-950"
-              >
-                <option value="followers">Followers</option>
-                {canUsePublic && <option value="public">Public</option>}
-              </select>
+              {canUsePublic ? (
+                <label className="relative inline-flex h-9 cursor-pointer items-center rounded-full border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] text-sm font-medium text-[color:var(--bl-text-secondary)]">
+                  <span className="pointer-events-none inline-flex items-center gap-1.5 pl-3.5 pr-8">
+                    {effectiveVisibility === 'public' ? <Globe size={13} aria-hidden="true" /> : <Users size={13} aria-hidden="true" />}
+                    {effectiveVisibility === 'public' ? 'Public' : 'Followers'}
+                  </span>
+                  <ChevronDown size={14} className="pointer-events-none absolute right-2.5 text-[color:var(--bl-text-muted)]" />
+                  <select
+                    value={effectiveVisibility}
+                    onChange={(event) => setVisibility(event.target.value as 'public' | 'followers')}
+                    aria-label="Post audience"
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  >
+                    <option value="followers">Followers</option>
+                    <option value="public">Public</option>
+                  </select>
+                </label>
+              ) : (
+                // Visibility is fixed to followers for private profiles — show a
+                // static, non-interactive pill instead of a dropdown that can't open.
+                <span
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-teal-50 px-3.5 text-sm font-medium text-teal-700 dark:bg-teal-500/15 dark:text-teal-300"
+                  title="Your profile is private, so posts are visible to followers only."
+                >
+                  <Users size={13} aria-hidden="true" />
+                  Visible to followers
+                </span>
+              )}
               <button
                 onClick={() => submit.mutate()}
                 disabled={!canSubmit || submit.isPending || upload.isUploading}
-                className="ml-auto inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300 dark:bg-white dark:text-slate-950"
+                aria-label="Post"
+                title="Post"
+                className="bl-focus-ring ml-auto flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-600 text-white shadow-sm transition hover:bg-teal-700 hover:shadow disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+                style={canSubmit ? { boxShadow: 'var(--bl-mascot-glow)' } : undefined}
               >
                 {submit.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                Post
               </button>
             </div>
           </section>
 
-          {feedQuery.isLoading && <p className="px-6 py-8 text-sm text-slate-500">Loading feed...</p>}
-          {feedQuery.data?.posts.length === 0 && <p className="px-6 py-8 text-sm text-slate-500">Your feed is quiet right now.</p>}
-          {feedQuery.data?.posts.map((post) => <PostCard key={post.id} post={post} />)}
-          {feedQuery.data?.nextCursor && (
-            <div className="px-6 py-5">
-              <button
-                onClick={() => loadMore.mutate()}
-                disabled={loadMore.isPending}
-                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200"
-              >
-                {loadMore.isPending ? 'Loading...' : 'Load more'}
-              </button>
+          {/* ── Posts ────────────────────────────────────────────────────── */}
+          <div className="space-y-4">
+            {feedQuery.isLoading && (
+              <div className="flex items-center justify-center gap-2 rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] py-10 text-sm text-[color:var(--bl-text-muted)]">
+                <Loader2 size={16} className="animate-spin" /> Loading feed&hellip;
+              </div>
+            )}
+            {feedQuery.data?.posts.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-6 py-14 text-center text-sm text-[color:var(--bl-text-muted)]">
+                {feedTab === 'featured' ? 'No featured posts are available right now.' : 'Your Following feed is quiet right now.'}
+              </div>
+            )}
+            {feedQuery.data?.posts.map((post) => <PostCard key={post.id} post={post} />)}
+            <div ref={loadMoreRef} className="py-5 text-center text-sm text-[color:var(--bl-text-muted)]">
+              {loadMore.isPending ? 'Loading more...' : feedQuery.data && !feedQuery.data.nextCursor ? "You're caught up for now." : ''}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </main>

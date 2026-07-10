@@ -43,10 +43,15 @@ export interface ReelDocument {
   hlsSegments?: ReelHlsSegment[];
   validationFailureCategory?: string;
   processingAttempt?: number;
+  processingLeaseId?: string;
   processingKey: string;
   processingStartedAt?: Date;
   processedAt?: Date;
   publishedAt?: Date;
+  importer?: {
+    provider?: string;
+    providerCreatorName?: string;
+  };
   updatedAt: Date;
   createdAt: Date;
   deletedAt?: Date;
@@ -62,6 +67,7 @@ export async function createReelIndexes() {
   const collection = getReelsCollection();
   await collection.createIndex({ authorUserId: 1, createdAt: -1 });
   await collection.createIndex({ processingStatus: 1, updatedAt: 1 });
+  await collection.createIndex({ processingStatus: 1, processingStartedAt: 1, updatedAt: 1 });
   await collection.createIndex({ publishState: 1, visibility: 1, publishedAt: -1 });
   await collection.createIndex({ reelDiscoverable: 1, publishState: 1, visibility: 1, processingStatus: 1, publishedAt: -1, _id: -1 });
   await collection.createIndex({ reelTopicIds: 1, reelDiscoverable: 1, publishedAt: -1 });

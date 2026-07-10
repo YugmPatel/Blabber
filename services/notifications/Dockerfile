@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for Notifications Service
 
 # Stage 1: Base - Install dependencies
-FROM node:20.11.0-alpine AS base
+FROM node:20.19.4-alpine AS base
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
@@ -44,7 +44,7 @@ RUN pnpm --filter @repo/utils build
 RUN pnpm --filter @services/notifications build
 
 # Stage 3: Production - Create minimal runtime image
-FROM node:20.11.0-alpine AS production
+FROM node:20.19.4-alpine AS production
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@8.15.0 --activate

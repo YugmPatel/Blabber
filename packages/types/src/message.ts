@@ -68,6 +68,7 @@ export interface Message {
     cancelledAt?: string;
     cancelledBy?: string;
     reminderEnabled?: boolean;
+    reminderOffsetMinutes?: number;
     currentUserRsvp?: 'going' | 'maybe' | 'declined';
     rsvps?: Array<{
       userId: string;
@@ -75,6 +76,15 @@ export interface Message {
       respondedAt: Date;
       updatedAt: Date;
     }>;
+  };
+  planThis?: {
+    planId: string;
+    kind: 'proposal' | 'finalized' | 'updated' | 'cancelled';
+    planVersion?: number;
+    title?: string;
+    status?: string;
+    createdAt?: string;
+    updatedAt?: string;
   };
   replyTo?: {
     messageId: string;
@@ -174,6 +184,7 @@ export const MessageSchema = z.object({
     cancelledAt: z.string().optional(),
     cancelledBy: z.string().optional(),
     reminderEnabled: z.boolean().optional(),
+    reminderOffsetMinutes: z.number().int().positive().optional(),
     currentUserRsvp: z.enum(['going', 'maybe', 'declined']).optional(),
     rsvps: z.array(z.object({
       userId: z.string(),
@@ -181,6 +192,15 @@ export const MessageSchema = z.object({
       respondedAt: z.date(),
       updatedAt: z.date(),
     })).optional(),
+  }).optional(),
+  planThis: z.object({
+    planId: z.string(),
+    kind: z.enum(['proposal', 'finalized', 'updated', 'cancelled']),
+    planVersion: z.number().int().min(0).optional(),
+    title: z.string().optional(),
+    status: z.string().optional(),
+    createdAt: z.string().optional(),
+    updatedAt: z.string().optional(),
   }).optional(),
   replyTo: z.object({
     messageId: z.string(),
@@ -240,6 +260,7 @@ export const CreateMessageDTOSchema = z.object({
     meetingUrl: z.string().url().optional(),
     description: z.string().max(1000).optional(),
     reminderEnabled: z.boolean().optional(),
+    reminderOffsetMinutes: z.number().int().positive().optional(),
   }).optional(),
   replyToId: z.string().optional(),
   mentions: z.array(z.object({
@@ -305,6 +326,7 @@ export const UpdateEventDTOSchema = z.object({
   meetingUrl: z.string().url().optional().nullable(),
   description: z.string().max(1000).optional(),
   reminderEnabled: z.boolean().optional(),
+  reminderOffsetMinutes: z.number().int().positive().optional(),
 }).refine((value) => Object.keys(value).length > 0, {
   message: 'At least one event field is required',
 });

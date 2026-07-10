@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import type { ReactElement } from 'react';
@@ -27,6 +27,7 @@ vi.mock('@/api/client', () => ({
   },
   searchChatMessages: vi.fn(() => Promise.resolve({ results: [] })),
   normalizeMediaUrl: vi.fn((url?: string) => url),
+  fetchMyProfile: vi.fn(),
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -46,6 +47,7 @@ vi.mock('@/hooks/useUsers', () => ({
   useUser: vi.fn(() => ({ data: undefined })),
   useUserPresence: vi.fn(() => ({ data: undefined })),
   useSearchUsers: vi.fn(() => ({ data: [], isFetching: false })),
+  useUpdateProfile: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }));
 
 vi.mock('@/hooks/useChats', () => ({
@@ -156,7 +158,7 @@ describe('ChatHeader', () => {
     expect(screen.getByText('3 members')).toBeInTheDocument();
   });
 
-  it('opens menu when clicking options button', () => {
+  it('does not render the removed header overflow menu', () => {
     renderHeader(
       <ChatHeader
         chat={mockDirectChat}
@@ -166,32 +168,14 @@ describe('ChatHeader', () => {
       />
     );
 
-    const optionsButton = screen.getByLabelText('More options');
-    fireEvent.click(optionsButton);
-
-    expect(screen.getByText('View profile')).toBeInTheDocument();
-    expect(screen.getByText('Search in chat')).toBeInTheDocument();
-    expect(screen.getByText('Mute notifications')).toBeInTheDocument();
+    expect(screen.queryByLabelText('More options')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByText('Search in chat')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shared')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mute notifications')).not.toBeInTheDocument();
   });
 
-  it('shows group-specific options for group chats', () => {
-    renderHeader(
-      <ChatHeader
-        chat={mockGroupChat}
-        getChatTitle={mockGetChatTitle}
-        getChatAvatar={mockGetChatAvatar}
-        isGroupChat={true}
-      />
-    );
-
-    const optionsButton = screen.getByLabelText('More options');
-    fireEvent.click(optionsButton);
-
-    expect(screen.getByText('View profile')).toBeInTheDocument();
-    expect(screen.getByText('Shared')).toBeInTheDocument();
-  });
-
-  it('closes menu when clicking outside', async () => {
+  it('keeps the approved visible header actions', () => {
     renderHeader(
       <ChatHeader
         chat={mockDirectChat}
@@ -201,16 +185,26 @@ describe('ChatHeader', () => {
       />
     );
 
-    const optionsButton = screen.getByLabelText('More options');
-    fireEvent.click(optionsButton);
+    expect(screen.getByLabelText('Shared content')).toBeInTheDocument();
+    expect(screen.getByLabelText('Search in chat')).toBeInTheDocument();
+    expect(screen.getByLabelText('Video call')).toBeInTheDocument();
+    expect(screen.getByLabelText('Audio call')).toBeInTheDocument();
+  });
 
-    expect(screen.getByText('View profile')).toBeInTheDocument();
+  it('opens profile access from the direct chat identity area', async () => {
+    renderHeader(
+      <ChatHeader
+        chat={mockDirectChat}
+        getChatTitle={mockGetChatTitle}
+        getChatAvatar={mockGetChatAvatar}
+        isGroupChat={false}
+      />
+    );
 
-    fireEvent.mouseDown(document.body);
+    fireEvent.click(screen.getByText('Alice'));
 
-    await waitFor(() => {
-      expect(screen.queryByText('View profile')).not.toBeInTheDocument();
-    });
+    expect(await screen.findByText('Block')).toBeInTheDocument();
+    expect(screen.getByText('Report')).toBeInTheDocument();
   });
 
   it('renders avatar with online indicator', () => {

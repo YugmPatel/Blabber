@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { normalizeMediaUrl } from '@/api/client';
 
 // Deterministic color palette — same name always gets the same color
@@ -55,22 +56,27 @@ interface AvatarProps {
 export default function Avatar({ src, alt, size = 'md', online, className = '' }: AvatarProps) {
   const s = SIZE[size];
   const normalizedSrc = normalizeMediaUrl(src);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  // A new src deserves a fresh attempt (e.g. the user replaced a broken photo)
+  useEffect(() => {
+    setImageFailed(false);
+  }, [normalizedSrc]);
+
+  const showImage = Boolean(normalizedSrc) && !imageFailed;
 
   return (
     <div className={`relative inline-flex flex-shrink-0 ${className}`}>
       <div
         className={`${s.container} overflow-hidden rounded-full flex items-center justify-center select-none`}
-        style={!normalizedSrc ? { background: pickColor(alt || '?') } : undefined}
+        style={!showImage ? { background: pickColor(alt || '?') } : undefined}
       >
-        {normalizedSrc ? (
+        {showImage ? (
           <img
             src={normalizedSrc}
             alt={alt}
             className="h-full w-full object-cover"
-            onError={(e) => {
-              // Hide broken image; the underlying gradient will show
-              (e.currentTarget as HTMLImageElement).style.display = 'none';
-            }}
+            onError={() => setImageFailed(true)}
           />
         ) : (
           <span className={`font-semibold leading-none text-white ${s.text}`}>

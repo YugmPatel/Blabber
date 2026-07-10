@@ -1,8 +1,8 @@
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:20.19.4-alpine AS builder
 
 # Install pnpm
-RUN npm install -g pnpm@8
+RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 
 # Set working directory
 WORKDIR /app
@@ -28,16 +28,18 @@ COPY packages/ ./packages/
 COPY apps/web/ ./apps/web/
 
 # Browser must reach the gateway on the host (baked in at build time for static nginx)
-ARG VITE_API_URL=http://localhost:3000
-ARG VITE_SOCKET_URL=http://localhost:3000
-ARG VITE_LIVEKIT_WS_URL=ws://localhost:7880
+ARG VITE_API_URL
+ARG VITE_SOCKET_URL
+ARG VITE_LIVEKIT_WS_URL
+ARG VITE_ALLOW_LOCAL_API_FALLBACK=false
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_SOCKET_URL=$VITE_SOCKET_URL
 ENV VITE_LIVEKIT_WS_URL=$VITE_LIVEKIT_WS_URL
+ENV VITE_ALLOW_LOCAL_API_FALLBACK=$VITE_ALLOW_LOCAL_API_FALLBACK
 
 WORKDIR /app/apps/web
-# Production bundle (skip tsc -b: project references include tests; vite transpiles for runtime)
-RUN pnpm exec vite build
+# Production bundle uses the same TypeScript build path as the package script.
+RUN pnpm build
 
 # Stage 2: Production with Nginx
 FROM nginx:alpine

@@ -1,7 +1,7 @@
 import express, { Request, Response, Express } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
-import { loadCommonConfig, loadCORSConfig, loadJWTConfig } from '@repo/config';
+import { loadCommonConfig, loadCORSConfig, loadJWTConfig, structuredJsonParserOptions, structuredUrlEncodedParserOptions } from '@repo/config';
 import {
   createAuthMiddleware,
   errorHandler,
@@ -31,13 +31,13 @@ app.use(helmet());
 app.use(
   cors({
     origin: corsConfig.origins,
-    credentials: true,
+    credentials: corsConfig.credentials,
   })
 );
 
 // Body parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json(structuredJsonParserOptions()));
+app.use(express.urlencoded(structuredUrlEncodedParserOptions()));
 
 app.use(requestIdMiddleware);
 app.use(requestLogger('chats'));
@@ -124,11 +124,47 @@ import {
   unrestrictMember,
   updateModerationSettings,
 } from './routes/group-moderation';
+import {
+  createPlanProposal,
+  finalizePlan,
+  generatePlanDraft,
+  getPlan,
+  getPlanThisEligibility,
+  listPlanDestinations,
+  cancelPlan,
+  respondToAssignment,
+  updatePlan,
+  votePlan,
+} from './routes/plan-this';
+import {
+  askVeyra,
+  getVeyraSettings,
+  grantVeyraScope,
+  listVeyraScopeCandidates,
+  revokeVeyraScope,
+  updateVeyraSettings,
+} from './routes/veyra';
 
 app.post('/', authMiddleware, createChat);
 app.get('/', authMiddleware, listChats);
 app.get('/intelligence/availability', authMiddleware, getIntelligenceAvailability);
 app.delete('/intelligence/history/me', authMiddleware, clearMyAiHistory);
+app.get('/plan-this/eligibility', authMiddleware, getPlanThisEligibility);
+app.get('/plan-this/destinations', authMiddleware, listPlanDestinations);
+app.post('/plan-this/draft', authMiddleware, generatePlanDraft);
+app.post('/plan-this/plans', authMiddleware, createPlanProposal);
+app.get('/plan-this/plans/:planId', authMiddleware, getPlan);
+app.patch('/plan-this/plans/:planId', authMiddleware, updatePlan);
+app.post('/plan-this/plans/:planId/vote', authMiddleware, votePlan);
+app.post('/plan-this/plans/:planId/finalize', authMiddleware, finalizePlan);
+app.post('/plan-this/plans/:planId/cancel', authMiddleware, cancelPlan);
+app.post('/plan-this/plans/:planId/assignments/:assignmentId/respond', authMiddleware, respondToAssignment);
+app.get('/veyra/settings', authMiddleware, getVeyraSettings);
+app.patch('/veyra/settings', authMiddleware, updateVeyraSettings);
+app.get('/veyra/scopes/candidates', authMiddleware, listVeyraScopeCandidates);
+app.post('/veyra/scopes', authMiddleware, grantVeyraScope);
+app.delete('/veyra/scopes/:scopeId', authMiddleware, revokeVeyraScope);
+app.post('/veyra/ask', authMiddleware, askVeyra);
 app.post('/intelligence/chats/:chatId/summarize', authMiddleware, requireChatIntelligenceEnabled, summarizeChat);
 app.get('/intelligence/chats/:chatId/summary', authMiddleware, requireChatIntelligenceEnabled, getChatSummary);
 app.post('/intelligence/chats/:chatId/actions/extract', authMiddleware, requireChatIntelligenceEnabled, extractChatActions);

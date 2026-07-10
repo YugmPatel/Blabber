@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import axios from 'axios';
+import { loadCORSConfig, structuredJsonParserOptions } from '@repo/config';
 import { requestIdMiddleware, requestLogger, runReadinessChecks } from '@repo/utils';
 import { serviceUrls } from './config.js';
 import { sensitiveRateLimit } from './rate-limits.js';
@@ -18,11 +19,13 @@ app.use(
 );
 
 // CORS configuration
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'];
+const corsConfig = process.env.ALLOWED_ORIGINS
+  ? loadCORSConfig()
+  : { origins: ['http://localhost:5173'], credentials: true };
 app.use(
   cors({
-    origin: allowedOrigins,
-    credentials: true,
+    origin: corsConfig.origins,
+    credentials: corsConfig.credentials,
   })
 );
 
@@ -36,7 +39,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Body parsing
-app.use(express.json());
+app.use(express.json(structuredJsonParserOptions()));
 app.use(requestIdMiddleware);
 app.use(requestLogger('gateway'));
 app.use(sensitiveRateLimit);

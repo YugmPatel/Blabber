@@ -23,6 +23,7 @@ import {
   LogOut,
   AlertTriangle,
   Compass,
+  Bookmark,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
@@ -58,15 +59,22 @@ import {
   updateDiscoveryPreferences,
   updateProfileHandle,
   updateSocialProfile,
+  fetchVeyraScopeCandidates,
+  fetchVeyraSettings,
+  grantVeyraScope,
+  revokeVeyraScope,
+  updateVeyraSettings,
 } from '@/api/client';
 import type { DiscoveryTopic } from '@/api/client';
+import { SavedContentSection } from './SavedMessagesPage';
 
 // ── Section registry ────────────────────────────────────────────────────────
 
-type SectionKey = 'profile' | 'account' | 'privacy' | 'notifications' | 'appearance' | 'ai' | 'discovery' | 'help';
+type SectionKey = 'profile' | 'saved' | 'account' | 'privacy' | 'notifications' | 'appearance' | 'ai' | 'discovery' | 'help';
 
 const SECTIONS: { key: SectionKey; label: string; icon: typeof User }[] = [
-  { key: 'profile',       label: 'Profile',        icon: User       },
+  { key: 'profile',       label: 'Edit Profile',   icon: User       },
+  { key: 'saved',         label: 'Saved',          icon: Bookmark   },
   { key: 'account',       label: 'Account',        icon: Shield     },
   { key: 'privacy',       label: 'Privacy',         icon: Shield     },
   { key: 'notifications', label: 'Notifications',   icon: Bell       },
@@ -260,6 +268,11 @@ function CloseFriendsSettings() {
 
 function ProfileSection() {
   const { user, refreshUser } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Set when another surface (account menu, /profile) wanted the public
+  // profile but the account has no handle yet.
+  const needsHandleHint = searchParams.get('hint') === 'handle';
   const updateProfile = useUpdateProfile();
   const profileUser =
     user as (typeof user & { about?: string; avatarUrl?: string; role?: string; department?: string }) | null;
@@ -480,14 +493,41 @@ function ProfileSection() {
     await handleAvatarFile(file);
   };
 
+  const publicHandle = socialProfileQuery.data?.handle?.replace(/^@/, '') || '';
+  const profileLoaded = Boolean(socialProfileQuery.data);
+
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Account Profile</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Manage your public identity and account settings.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Edit Profile</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Manage your public identity and private account details.
+          </p>
+        </div>
+        <div className="flex flex-shrink-0 flex-col items-start gap-1 sm:items-end">
+          <button
+            onClick={() => publicHandle && navigate(`/p/${publicHandle}`)}
+            disabled={!publicHandle}
+            className="inline-flex items-center gap-2 rounded-xl border border-teal-500/40 px-3.5 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
+          >
+            <ExternalLink size={14} />
+            View public profile
+          </button>
+          {profileLoaded && !publicHandle && (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Create a profile handle first to view your public profile.
+            </p>
+          )}
+        </div>
       </div>
+
+      {needsHandleHint && !publicHandle && (
+        <div className="rounded-xl border border-teal-500/40 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:bg-teal-500/10 dark:text-teal-200">
+          Your public profile needs a handle. Pick one in the “Social Profile” section below, then use
+          “View public profile”.
+        </div>
+      )}
 
       {/* Avatar + basic info */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
@@ -1880,6 +1920,8 @@ function AppearanceSection() {
 function AISection() {
   const settingsQuery = useUserSettings();
   const updateSettings = useUpdateUserSettings();
+  const queryClient = useQueryClient();
+  const [selectedScope, setSelectedScope] = useState('');
   const clearHistory = useMutation({
     mutationFn: async () => {
       const { data } = await apiClient.delete('/api/intelligence/history/me');
@@ -1897,6 +1939,35 @@ function AISection() {
   });
 
   const enabled = settingsQuery.data?.chatIntelligenceEnabled ?? true;
+  const veyraQuery = useQuery({
+    queryKey: ['veyra-settings'],
+    queryFn: fetchVeyraSettings,
+  });
+  const scopeCandidates = useQuery({
+    queryKey: ['veyra-scope-candidates'],
+    queryFn: fetchVeyraScopeCandidates,
+    enabled: Boolean(veyraQuery.data?.settings.enabled),
+  });
+  const updateVeyra = useMutation({
+    mutationFn: updateVeyraSettings,
+    onSuccess: (settings) => queryClient.setQueryData(['veyra-settings'], (current: any) => current ? { ...current, settings } : current),
+  });
+  const grantScope = useMutation({
+    mutationFn: () => {
+      const candidate = scopeCandidates.data?.find((item) => `${item.type}:${item.targetId || ''}` === selectedScope);
+      if (!candidate) throw new Error('Choose a space.');
+      return grantVeyraScope({ type: candidate.type, targetId: candidate.targetId });
+    },
+    onSuccess: (settings) => {
+      setSelectedScope('');
+      queryClient.setQueryData(['veyra-settings'], (current: any) => current ? { ...current, settings } : current);
+    },
+  });
+  const revokeScope = useMutation({
+    mutationFn: revokeVeyraScope,
+    onSuccess: (settings) => queryClient.setQueryData(['veyra-settings'], (current: any) => current ? { ...current, settings } : current),
+  });
+  const veyra = veyraQuery.data?.settings;
   const availabilityLabel =
     availabilityQuery.data === 'available'
       ? 'Available'
@@ -1955,8 +2026,84 @@ function AISection() {
           </button>
         </div>
       </section>
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+          <div>
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Veyra</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Veyra only uses spaces you approve. It never reads every Conversation by default. You can remove access at any time.
+            </p>
+          </div>
+          <Toggle
+            checked={Boolean(veyra?.enabled)}
+            onChange={() => {
+              if (!veyra?.enabled && !enabled) {
+                window.alert('Turn on AI features in Privacy settings to use Veyra.');
+                return;
+              }
+              if (!veyra?.enabled && !window.confirm('Enable Veyra for your account? You will choose exactly which spaces it can use.')) return;
+              updateVeyra.mutate({ enabled: !veyra?.enabled });
+            }}
+            label="Enable Veyra"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+          <div>
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Voice replies</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Use browser text-to-speech for final Veyra responses.</p>
+          </div>
+          <Toggle
+            checked={veyra?.voiceRepliesEnabled ?? true}
+            onChange={() => updateVeyra.mutate({ voiceRepliesEnabled: !(veyra?.voiceRepliesEnabled ?? true) })}
+            label="Veyra voice replies"
+          />
+        </div>
+        <div className="space-y-3 px-5 py-4">
+          <div>
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Approved spaces</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Allow Veyra to use approved summaries, decisions, actions, and shared-item metadata from a space.</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              value={selectedScope}
+              onChange={(event) => setSelectedScope(event.target.value)}
+              disabled={!veyra?.enabled}
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="">Choose a space</option>
+              {(scopeCandidates.data || []).map((candidate) => (
+                <option key={`${candidate.type}:${candidate.targetId || ''}`} value={`${candidate.type}:${candidate.targetId || ''}`}>
+                  {candidate.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => grantScope.mutate()}
+              disabled={!selectedScope || grantScope.isPending || !veyra?.enabled}
+              className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:bg-slate-300"
+            >
+              Allow
+            </button>
+          </div>
+          <div className="space-y-2">
+            {(veyra?.scopes || []).length === 0 ? (
+              <p className="text-sm text-slate-500 dark:text-slate-400">No spaces approved.</p>
+            ) : (
+              veyra!.scopes.map((scope) => (
+                <div key={scope.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 px-3 py-2 dark:border-slate-700">
+                  <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{scope.label || scope.type}</span>
+                  <button type="button" onClick={() => revokeScope.mutate(scope.id)} className="text-sm font-semibold text-rose-600 transition hover:text-rose-700">
+                    Revoke
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
       <p className="text-xs text-slate-400 dark:text-slate-500">
-        AI analysis runs only when you manually request it from a chat.
+        AI analysis runs only when you manually request it from a chat or open Veyra. Veyra is read-only in this version.
       </p>
     </div>
   );
@@ -2209,6 +2356,7 @@ export default function SettingsPage() {
 
   const sectionContent: Record<SectionKey, React.ReactNode> = {
     profile:       <ProfileSection />,
+    saved:         <SavedContentSection embedded />,
     account:       <AccountSection />,
     privacy:       <PrivacySection />,
     notifications: <NotificationsSection />,

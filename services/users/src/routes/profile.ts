@@ -30,7 +30,9 @@ export async function getUserProfile(
       return;
     }
 
-    // Return user details without sensitive information
+    // Return user details without sensitive information. profileHandle is
+    // public identity (it names the public profile page, and the profiles API
+    // returns it even for locked profiles).
     res.status(200).json({
       user: {
         _id: user._id,
@@ -38,6 +40,7 @@ export async function getUserProfile(
         name: user.name,
         avatarUrl: user.avatarUrl,
         about: user.about,
+        profileHandle: user.profileHandle,
         role: user.role,
         department: user.department,
         lastSeen: user.lastSeen,

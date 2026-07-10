@@ -13,6 +13,8 @@ import { createCallHistoryIndexes } from './models/call-history';
 import { createActionReminderDeliveryIndexes } from './models/action-reminder-delivery';
 import { createGroupInviteLinkIndexes } from './models/group-invite-link';
 import { createGroupModerationActivityIndexes } from './models/group-moderation-activity';
+import { createPlanThisIndexes } from './models/plan-this';
+import { createVeyraIndexes } from './models/veyra';
 import { initPubSub, closePubSub } from './pubsub';
 import { startActionReminderProcessor, stopActionReminderProcessor } from './action-reminders';
 
@@ -35,6 +37,8 @@ async function startServer() {
     await createActionReminderDeliveryIndexes();
     await createGroupInviteLinkIndexes();
     await createGroupModerationActivityIndexes();
+    await createPlanThisIndexes();
+    await createVeyraIndexes();
     initPubSub();
     startActionReminderProcessor();
     logger.info('Database indexes created');

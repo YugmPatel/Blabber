@@ -6,6 +6,7 @@ import { Loader2, Menu, MessageCircle, Send, Trash2, UsersRound } from 'lucide-r
 import Sidebar from '@/components/Sidebar';
 import Avatar from '@/components/Avatar';
 import {
+  apiClient,
   createCommunityInvite,
   createCommunityPost,
   createCommunityPostComment,
@@ -27,6 +28,7 @@ import {
   updateCommunityMemberRestriction,
 } from '@/api/client';
 import type { CommunityPost } from '@/api/client';
+import { useChats } from '@/hooks/useChats';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🙌'];
 
@@ -118,16 +120,28 @@ export default function CommunityPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [body, setBody] = useState('');
   const [inviteToken, setInviteToken] = useState('');
+  const [shareChatId, setShareChatId] = useState('');
   const [communityTopicIds, setCommunityTopicIds] = useState<string[]>([]);
   const community = useQuery({ queryKey: ['community', handle], queryFn: () => fetchCommunity(handle), retry: false });
   const topics = useQuery({ queryKey: ['discovery-topics'], queryFn: fetchDiscoveryTopics, enabled: Boolean(community.data?.discovery) });
   const posts = useQuery({ queryKey: ['community-posts', handle], queryFn: () => fetchCommunityPosts(handle), enabled: Boolean(community.data?.membership) });
   const members = useQuery({ queryKey: ['community-members', handle], queryFn: () => fetchCommunityMembers(handle), enabled: Boolean(community.data?.membership) });
   const requests = useQuery({ queryKey: ['community-requests', handle], queryFn: () => fetchCommunityRequests(handle), enabled: Boolean(community.data?.canManage) });
+  const shareChats = useChats({ archived: false, limit: 50 });
   const createPost = useMutation({ mutationFn: () => createCommunityPost(handle, { body }), onSuccess: () => { setBody(''); queryClient.invalidateQueries({ queryKey: ['community-posts', handle] }); } });
   const join = useMutation({ mutationFn: () => joinCommunity(handle), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['community', handle] }); queryClient.invalidateQueries({ queryKey: ['community-posts', handle] }); } });
   const requestJoin = useMutation({ mutationFn: () => requestCommunityJoin(handle), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['community', handle] }) });
   const invite = useMutation({ mutationFn: () => createCommunityInvite(handle, { expiresIn: '7d', maxUses: 10 }), onSuccess: (result) => setInviteToken(result.token) });
+  const inviteUrl = inviteToken ? `${window.location.origin}/communities/join/${encodeURIComponent(inviteToken)}` : '';
+  const shareInvite = useMutation({
+    mutationFn: async () => {
+      if (!shareChatId || !inviteUrl || !community.data) return;
+      await apiClient.post(`/api/messages/${shareChatId}`, {
+        type: 'text',
+        body: `Join ${community.data.name} on Blabber: ${inviteUrl}`,
+      });
+    },
+  });
   const listing = useMutation({
     mutationFn: (enabled: boolean) => updateCommunityDiscovery(handle, { communityDiscoverable: enabled, communityTopicIds: enabled ? communityTopicIds : communityTopicIds.slice(0, 3) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['community', handle] }),
@@ -226,7 +240,20 @@ export default function CommunityPage() {
                     </div>
                   )}
                   <button onClick={() => invite.mutate()} className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700">Create invite</button>
-                  {inviteToken && <p className="break-all rounded-lg bg-slate-100 p-2 text-xs dark:bg-slate-900">/communities/join/{inviteToken}</p>}
+                  {inviteUrl && (
+                    <div className="space-y-2 rounded-lg bg-slate-100 p-2 text-xs dark:bg-slate-900">
+                      <a href={inviteUrl} className="break-all font-medium text-teal-700 underline underline-offset-2 dark:text-teal-300">{inviteUrl}</a>
+                      <select value={shareChatId} onChange={(event) => setShareChatId(event.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950">
+                        <option value="">Share to Conversation</option>
+                        {(shareChats.data || []).map((chat) => <option key={chat._id} value={chat._id}>{chat.title || (chat.type === 'direct' ? 'Direct conversation' : 'Group conversation')}</option>)}
+                      </select>
+                      <button onClick={() => shareInvite.mutate()} disabled={!shareChatId || shareInvite.isPending} className="inline-flex items-center gap-2 rounded-md bg-slate-950 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950">
+                        {shareInvite.isPending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                        Send invite
+                      </button>
+                      {shareInvite.isSuccess && <p className="text-teal-700 dark:text-teal-300">Invite sent.</p>}
+                    </div>
+                  )}
                   {(requests.data?.requests || []).map((request) => <p key={request.id} className="text-sm text-slate-500">{request.requester.name} requested access</p>)}
                 </div>
               )}
