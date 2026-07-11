@@ -1226,28 +1226,35 @@ function ChatIntelligenceDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
       <aside
         className="flex h-full w-full max-w-md flex-col bg-slate-50 shadow-2xl dark:bg-slate-950"
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center gap-2">
-            <Sparkles size={18} className="text-teal-600" />
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Chat Intelligence</h2>
+        <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+              <Sparkles size={17} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Chat Intelligence</h2>
+              <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+                Summaries, actions, and answers from this chat
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
             aria-label="Close intelligence drawer"
           >
             <X size={18} />
           </button>
         </header>
 
-        <div className="border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <div className={`grid gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-950 ${isGroupChat ? 'grid-cols-3' : 'grid-cols-1'}`}>
+        <div className="border-b border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900">
+          <div className={`grid gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-950 ${isGroupChat ? 'grid-cols-3' : 'grid-cols-1'}`}>
             {(isGroupChat
               ? ([
                   ['catch-up', 'Catch Me Up'],
@@ -1260,9 +1267,10 @@ function ChatIntelligenceDrawer({
                 key={value}
                 type="button"
                 onClick={() => setActiveIntelligenceTab(value)}
-                className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${
+                aria-pressed={activeIntelligenceTab === value}
+                className={`rounded-lg px-2 py-2 text-xs font-semibold transition ${
                   activeIntelligenceTab === value
-                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                    ? 'bg-white text-teal-700 shadow-sm ring-1 ring-teal-500/20 dark:bg-slate-800 dark:text-teal-300 dark:ring-teal-400/20'
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
@@ -1272,7 +1280,7 @@ function ChatIntelligenceDrawer({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3">
+        <div className="flex-1 overflow-y-auto p-4">
           {activeIntelligenceTab === 'catch-up' && (
             <IntelligencePanelBoundary title="Summary" panel="Summary" chatId={chatId} chatType={chat.type}>
               <CatchMeUpCard

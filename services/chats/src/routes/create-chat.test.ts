@@ -85,6 +85,112 @@ describe('POST / - Create Chat', () => {
     });
   });
 
+  describe('Contact privacy enforcement', () => {
+    it('blocks a new direct chat when the recipient allows messages from no one', async () => {
+      const targetId = new ObjectId();
+      await seedChatUsers([targetId]);
+      await getDatabase().collection('userSettings').insertOne({
+        userId: targetId,
+        messagePrivacy: 'no_one',
+      } as any);
+
+      const response = await request(app)
+        .post('/')
+        .send({ type: 'direct', participantIds: [mockUserId.toString(), targetId.toString()] });
+
+      expect(response.status).toBe(403);
+      expect(response.body.message).toBe('This user is not accepting messages from everyone.');
+    });
+
+    it('allows a followers-only recipient to be messaged by an approved follower', async () => {
+      const targetId = new ObjectId();
+      await seedChatUsers([targetId]);
+      await getDatabase().collection('userSettings').insertOne({
+        userId: targetId,
+        messagePrivacy: 'followers',
+      } as any);
+      await getDatabase().collection('profile_relationships').insertOne({
+        followerUserId: mockUserId,
+        targetUserId: targetId,
+        state: 'following',
+      } as any);
+
+      const response = await request(app)
+        .post('/')
+        .send({ type: 'direct', participantIds: [mockUserId.toString(), targetId.toString()] });
+
+      expect(response.status).toBe(201);
+    });
+
+    it('still allows a direct chat when one already exists between the users', async () => {
+      const targetId = new ObjectId();
+      await seedChatUsers([targetId]);
+      await getDatabase().collection('userSettings').insertOne({
+        userId: targetId,
+        messagePrivacy: 'no_one',
+      } as any);
+      await getDatabase().collection('chats').insertOne({
+        type: 'direct',
+        participants: [mockUserId, targetId],
+        admins: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const response = await request(app)
+        .post('/')
+        .send({ type: 'direct', participantIds: [mockUserId.toString(), targetId.toString()] });
+
+      expect(response.status).toBe(201);
+    });
+
+    it('blocks group creation when a member does not allow group invites', async () => {
+      const inviteeId = new ObjectId();
+      await seedChatUsers([inviteeId]);
+      await getDatabase().collection('userSettings').insertOne({
+        userId: inviteeId,
+        groupInvitePrivacy: 'no_one',
+      } as any);
+
+      const response = await request(app)
+        .post('/')
+        .send({
+          type: 'group',
+          title: 'Privacy test group',
+          participantIds: [mockUserId.toString(), inviteeId.toString()],
+        });
+
+      expect(response.status).toBe(403);
+      expect(response.body.message).toContain('not allow group invites');
+    });
+
+    it('allows a contacts-only member to be added at group creation when they share a direct chat', async () => {
+      const inviteeId = new ObjectId();
+      await seedChatUsers([inviteeId]);
+      await getDatabase().collection('userSettings').insertOne({
+        userId: inviteeId,
+        groupInvitePrivacy: 'contacts',
+      } as any);
+      await getDatabase().collection('chats').insertOne({
+        type: 'direct',
+        participants: [mockUserId, inviteeId],
+        admins: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const response = await request(app)
+        .post('/')
+        .send({
+          type: 'group',
+          title: 'Privacy test group',
+          participantIds: [mockUserId.toString(), inviteeId.toString()],
+        });
+
+      expect(response.status).toBe(201);
+    });
+  });
+
   describe('Group Chat Creation', () => {
     it('should create a group chat with title and set creator as admin', async () => {
       const userId1 = new ObjectId();

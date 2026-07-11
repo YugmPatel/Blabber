@@ -4,6 +4,7 @@ import { CreateChatDTOSchema } from '@repo/types';
 import { asyncHandler } from '@repo/utils';
 import { getChatsCollection } from '../models/chat';
 import { getDatabase } from '../db';
+import { canAddToGroup, canStartDirectChat, sharesDirectChat } from '../contact-privacy';
 import { serializeChat } from '../serialize-chat';
 
 export const createChat = asyncHandler(async (req: Request, res: Response) => {
@@ -94,6 +95,37 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
       return res.status(403).json({
         error: 'Forbidden',
         message: 'Direct chat is unavailable',
+      });
+    }
+
+    // Message privacy applies to NEW conversations only — an existing direct
+    // chat between the two users means replies stay possible regardless.
+    if (otherParticipantId && !(await sharesDirectChat(creatorObjectId, otherParticipantId))) {
+      if (!(await canStartDirectChat(creatorObjectId, otherParticipantId))) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'This user is not accepting messages from everyone.',
+        });
+      }
+    }
+  }
+
+  if (type === 'group') {
+    const invitees = participantObjectIds.filter((id) => !id.equals(creatorObjectId));
+    const blockedIds: ObjectId[] = [];
+    for (const inviteeId of invitees) {
+      if (!(await canAddToGroup(creatorObjectId, inviteeId))) blockedIds.push(inviteeId);
+    }
+    if (blockedIds.length > 0) {
+      const blockedUsers = await getDatabase()
+        .collection('users')
+        .find({ _id: { $in: blockedIds } })
+        .project({ name: 1, username: 1 })
+        .toArray();
+      const names = blockedUsers.map((user) => user.name || user.username || 'A selected user').join(', ');
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: `${names} ${blockedIds.length === 1 ? 'does' : 'do'} not allow group invites from everyone.`,
       });
     }
   }

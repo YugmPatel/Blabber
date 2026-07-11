@@ -4,6 +4,7 @@ import { createReport, getAccessToken, normalizeMediaUrl } from '@/api/client';
 import Avatar from './Avatar';
 import ReadReceipts from './ReadReceipts';
 import PlanThisMessageCard from './PlanThisMessageCard';
+import SharedItemMessageCard from './SharedItemMessageCard';
 import { Bookmark, Flag, Image as ImageIcon, Loader2, Pin, X } from 'lucide-react';
 
 interface MessageBubbleProps {
@@ -589,6 +590,11 @@ export default function MessageBubble({
     return <PlanThisMessageCard planId={planId} />;
   };
 
+  const renderSharedItem = () => {
+    if (!message.sharedItem) return null;
+    return <SharedItemMessageCard sharedItem={message.sharedItem} />;
+  };
+
   const renderReplyPreview = () => {
     if (!message.replyTo) return null;
 
@@ -878,7 +884,8 @@ export default function MessageBubble({
             {renderSticker()}
             {renderEvent()}
             {renderPlanThis()}
-            {message.body && !message.poll && !message.sticker && !message.event && !message.planThis && (
+            {renderSharedItem()}
+            {message.body && !message.poll && !message.sticker && !message.event && !message.planThis && !message.sharedItem && (
               <MentionedText message={message} isSentByMe={isSentByMe} />
             )}
 

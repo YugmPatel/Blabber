@@ -265,7 +265,8 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
         {createChatMutation.isError && (
           <div className="border-t border-slate-200 p-4 dark:border-slate-700">
             <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
-              Failed to start chat. Please try again.
+              {(createChatMutation.error as { response?: { data?: { message?: string } } })?.response?.data
+                ?.message || 'Failed to start chat. Please try again.'}
             </p>
           </div>
         )}

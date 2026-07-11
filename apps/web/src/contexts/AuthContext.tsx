@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import { apiClient, setAccessToken } from '@/api/client';
+import { apiClient, refreshAccessToken, setAccessToken } from '@/api/client';
 
 interface User {
   _id: string;
@@ -63,8 +63,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
       try {
         // Try to refresh token on app load
-        const response = await apiClient.post('/api/auth/refresh');
-        const { accessToken: newAccessToken } = response.data;
+        const newAccessToken = await refreshAccessToken();
 
         setAccessToken(newAccessToken);
         setAccessTokenState(newAccessToken);
@@ -72,7 +71,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         // Fetch current user
         const userResponse = await apiClient.get('/api/auth/me');
         setUser(userResponse.data.user);
-      } catch (error) {
+      } catch {
         // No valid session, user needs to login
         setAccessToken(null);
         setAccessTokenState(null);

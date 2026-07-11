@@ -20,6 +20,10 @@ export interface NotificationPreferences {
   momentActivityEnabled: boolean;
   postActivityEnabled: boolean;
   reelActivityEnabled: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string; // "HH:MM" in the user's saved timezone
+  quietHoursEnd: string; // "HH:MM" in the user's saved timezone
+  quietHoursTimezone: string; // IANA timezone captured from the client; '' falls back to UTC
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +47,10 @@ export type NotificationPreferencePatch = Partial<
     | 'momentActivityEnabled'
     | 'postActivityEnabled'
     | 'reelActivityEnabled'
+    | 'quietHoursEnabled'
+    | 'quietHoursStart'
+    | 'quietHoursEnd'
+    | 'quietHoursTimezone'
   >
 >;
 
@@ -63,6 +71,10 @@ const DEFAULT_PREFERENCES = {
   momentActivityEnabled: true,
   postActivityEnabled: true,
   reelActivityEnabled: true,
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
+  quietHoursTimezone: '',
 };
 
 export async function createNotificationPreferenceIndexes() {
@@ -149,6 +161,52 @@ export function serializeNotificationPreferences(preferences: NotificationPrefer
       preferences.postActivityEnabled ?? DEFAULT_PREFERENCES.postActivityEnabled,
     reelActivityEnabled:
       preferences.reelActivityEnabled ?? DEFAULT_PREFERENCES.reelActivityEnabled,
+    quietHoursEnabled: preferences.quietHoursEnabled ?? DEFAULT_PREFERENCES.quietHoursEnabled,
+    quietHoursStart: preferences.quietHoursStart ?? DEFAULT_PREFERENCES.quietHoursStart,
+    quietHoursEnd: preferences.quietHoursEnd ?? DEFAULT_PREFERENCES.quietHoursEnd,
+    quietHoursTimezone: preferences.quietHoursTimezone ?? DEFAULT_PREFERENCES.quietHoursTimezone,
     updatedAt: preferences.updatedAt,
   };
+}
+
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function minutesOfDay(time: string) {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+/**
+ * True when `now` falls inside the user's quiet-hours window. Supports
+ * overnight windows (e.g. 22:00–07:00). Equal start/end means no window.
+ * Falls back to UTC when no timezone was saved or the saved one is invalid.
+ */
+export function isWithinQuietHours(preferences: NotificationPreferences, now: Date = new Date()): boolean {
+  if (!preferences.quietHoursEnabled) return false;
+  const start = preferences.quietHoursStart ?? DEFAULT_PREFERENCES.quietHoursStart;
+  const end = preferences.quietHoursEnd ?? DEFAULT_PREFERENCES.quietHoursEnd;
+  if (!TIME_PATTERN.test(start) || !TIME_PATTERN.test(end) || start === end) return false;
+
+  let localTime: string;
+  try {
+    localTime = new Intl.DateTimeFormat('en-GB', {
+      timeZone: preferences.quietHoursTimezone || 'UTC',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(now);
+  } catch {
+    localTime = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'UTC',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(now);
+  }
+  const current = minutesOfDay(localTime);
+  const startMinutes = minutesOfDay(start);
+  const endMinutes = minutesOfDay(end);
+  return startMinutes < endMinutes
+    ? current >= startMinutes && current < endMinutes
+    : current >= startMinutes || current < endMinutes;
 }

@@ -3,6 +3,13 @@ import { getDatabase } from '../db';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 
+/**
+ * Who is allowed to start a direct chat / add the user to a group.
+ * 'followers' = approved followers (profile_relationships, state 'following');
+ * 'contacts'  = people the user already shares a direct chat with.
+ */
+export type ContactPrivacy = 'everyone' | 'followers' | 'contacts' | 'no_one';
+
 export interface UserSettings {
   _id?: ObjectId;
   userId: ObjectId;
@@ -13,6 +20,8 @@ export interface UserSettings {
   themePreference: ThemePreference;
   chatIntelligenceEnabled: boolean;
   momentArchiveEnabled: boolean;
+  messagePrivacy: ContactPrivacy;
+  groupInvitePrivacy: ContactPrivacy;
   timezone?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -26,6 +35,8 @@ export const DEFAULT_USER_SETTINGS = {
   themePreference: 'system' as ThemePreference,
   chatIntelligenceEnabled: true,
   momentArchiveEnabled: true,
+  messagePrivacy: 'everyone' as ContactPrivacy,
+  groupInvitePrivacy: 'everyone' as ContactPrivacy,
   timezone: 'UTC',
 };
 

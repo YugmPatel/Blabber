@@ -5,6 +5,7 @@ import { Bookmark, CalendarClock, ChevronDown, EyeOff, Film, HelpCircle, Menu, M
 import Avatar from '@/components/Avatar';
 import Sidebar from '@/components/Sidebar';
 import PlanThisDialog from '@/components/PlanThisDialog';
+import { ShareToChatPanel } from '@/components/ShareToChat';
 import {
   fetchDiscoveryCommunities,
   fetchDiscoveryCreators,
@@ -443,6 +444,7 @@ function ReelGridCard({ reel, onOpen }: { reel: ReelItem; onOpen: () => void }) 
 function PostDetailDialog({ postId, onClose }: { postId: string; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [planOpen, setPlanOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const post = useQuery({ queryKey: ['post-detail', postId], queryFn: () => fetchPost(postId) });
   const item = post.data as FeedPost | undefined;
   const react = useMutation<{ reactionCounts: Record<string, number>; myReaction: string | null }, Error, string>({
@@ -489,8 +491,23 @@ function PostDetailDialog({ postId, onClose }: { postId: string; onClose: () => 
               <button onClick={() => save.mutate()} className="inline-flex items-center gap-1 rounded-full border border-[color:var(--bl-border)] px-3 py-1.5 text-sm text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"><Bookmark size={15} /> {item.saved ? 'Remove from saved' : 'Save'}</button>
               {item.canRepost && <button onClick={() => repost.mutate()} className="inline-flex items-center gap-1 rounded-full border border-[color:var(--bl-border)] px-3 py-1.5 text-sm text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"><Repeat2 size={15} /> {item.reposted ? 'Undo repost' : 'Repost'}</button>}
               <button onClick={() => setPlanOpen(true)} className="inline-flex items-center gap-1 rounded-full border border-emerald-200 px-3 py-1.5 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/30"><CalendarClock size={15} /> Plan this</button>
-              {item.canShare && <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--bl-border)] px-3 py-1.5 text-sm text-[color:var(--bl-text-muted)]"><Share2 size={15} /> Share from Feed</span>}
+              {item.canShare && (
+                <button
+                  onClick={() => setShareOpen((value) => !value)}
+                  className="inline-flex items-center gap-1 rounded-full border border-[color:var(--bl-border)] px-3 py-1.5 text-sm text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
+                >
+                  <Share2 size={15} /> Share
+                </button>
+              )}
             </div>
+            {shareOpen && item.canShare && (
+              <div className="mt-3">
+                <ShareToChatPanel
+                  item={{ type: 'post', id: item.id }}
+                  onClose={() => setShareOpen(false)}
+                />
+              </div>
+            )}
             <PlanThisDialog source={{ type: 'post', id: item.id }} open={planOpen} onClose={() => setPlanOpen(false)} />
           </div>
         )}

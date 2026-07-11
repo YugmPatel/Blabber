@@ -92,6 +92,13 @@ export function serializeMessage(message: MessageDocument, tempId?: string, view
           updatedAt: dateToIso(message.planThis.updatedAt),
         }
       : undefined,
+    sharedItem: message.sharedItem
+      ? {
+          ...message.sharedItem,
+          id: objectIdToString(message.sharedItem.id),
+          createdAt: dateToIso(message.sharedItem.createdAt),
+        }
+      : undefined,
     replyTo: message.replyTo
       ? {
           messageId: objectIdToString(message.replyTo.messageId),

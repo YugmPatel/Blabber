@@ -12,24 +12,52 @@ import {
   Camera,
   Loader2,
   Check,
-  Image,
   Trash2,
   ArrowLeft,
   Sun,
   ExternalLink,
   Mail,
   Laptop,
+  Smartphone,
+  MonitorSmartphone,
   Download,
   LogOut,
-  AlertTriangle,
   Compass,
   Bookmark,
+  LayoutGrid,
+  ArrowRight,
+  Globe,
+  Pencil,
+  MessageSquare,
+  Clapperboard,
+  Newspaper,
+  Users,
+  ChevronDown,
+  Activity,
+  Clock,
+  ShieldCheck,
+  Lock,
+  Plus,
+  History,
+  AtSign,
+  Phone,
+  CircleDashed,
+  CalendarDays,
+  ListChecks,
+  Eye,
+  EyeOff,
+  Heart,
+  UserPlus,
+  Monitor,
+  Rocket,
+  Bug,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
 import { useTheme } from '@/hooks/useTheme';
 import Avatar from '@/components/Avatar';
 import CameraModal from '@/components/CameraModal';
+import VeyraMark from '@/components/brand/VeyraMark';
 import {
   apiClient,
   approveFollowRequest,
@@ -43,6 +71,9 @@ import {
   fetchIncomingFollowRequests,
   fetchMyProfile,
   fetchMyReports,
+  fetchProfilePosts,
+  fetchProfileReels,
+  fetchSavedPosts,
   fetchDiscoveryPreferences,
   fetchDiscoveryTopics,
   getAccessToken,
@@ -51,6 +82,7 @@ import {
   requestAccountDeletion,
   requestDataExport,
   requestEmailChange,
+  requestPasswordReset,
   resendEmailVerification,
   revokeDeviceSession,
   unblockUser,
@@ -66,13 +98,16 @@ import {
   updateVeyraSettings,
 } from '@/api/client';
 import type { DiscoveryTopic } from '@/api/client';
+import { useSavedMessages } from '@/hooks/useMessages';
+import { groupActiveDeviceSessions } from '@/utils/device-sessions';
 import { SavedContentSection } from './SavedMessagesPage';
 
 // ── Section registry ────────────────────────────────────────────────────────
 
-type SectionKey = 'profile' | 'saved' | 'account' | 'privacy' | 'notifications' | 'appearance' | 'ai' | 'discovery' | 'help';
+type SectionKey = 'control-center' | 'profile' | 'saved' | 'account' | 'privacy' | 'notifications' | 'appearance' | 'ai' | 'discovery' | 'help';
 
 const SECTIONS: { key: SectionKey; label: string; icon: typeof User }[] = [
+  { key: 'control-center', label: 'Control Center', icon: LayoutGrid },
   { key: 'profile',       label: 'Edit Profile',   icon: User       },
   { key: 'saved',         label: 'Saved',          icon: Bookmark   },
   { key: 'account',       label: 'Account',        icon: Shield     },
@@ -83,6 +118,8 @@ const SECTIONS: { key: SectionKey; label: string; icon: typeof User }[] = [
   { key: 'discovery',     label: 'Discovery',       icon: Compass    },
   { key: 'help',          label: 'Help',            icon: HelpCircle },
 ];
+
+const SECTION_KEYS = new Set<string>(SECTIONS.map((section) => section.key));
 
 // ── Shared input style ───────────────────────────────────────────────────────
 
@@ -107,6 +144,16 @@ interface AvatarPresignResponse {
 
 type ThemePreference = 'light' | 'dark' | 'system';
 
+type MessagePrivacy = 'everyone' | 'followers' | 'no_one';
+type GroupInvitePrivacy = 'everyone' | 'followers' | 'contacts' | 'no_one';
+
+const CONTACT_PRIVACY_LABEL: Record<GroupInvitePrivacy, string> = {
+  everyone: 'Everyone',
+  followers: 'Followers',
+  contacts: 'My contacts',
+  no_one: 'No one',
+};
+
 interface UserSettings {
   readReceiptsEnabled: boolean;
   presenceVisible: boolean;
@@ -115,6 +162,8 @@ interface UserSettings {
   themePreference: ThemePreference;
   chatIntelligenceEnabled: boolean;
   momentArchiveEnabled: boolean;
+  messagePrivacy: MessagePrivacy;
+  groupInvitePrivacy: GroupInvitePrivacy;
   timezone?: string;
   updatedAt?: string;
 }
@@ -288,9 +337,9 @@ function ProfileSection() {
   const [localPreview, setLocalPreview] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
-  const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const [showCameraCapture, setShowCameraCapture] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [isSavingAll, setIsSavingAll] = useState(false);
   const [profileHandle, setProfileHandle] = useState('');
   const [profileBio, setProfileBio] = useState('');
   const [profileWebsite, setProfileWebsite] = useState('');
@@ -307,6 +356,10 @@ function ProfileSection() {
   const followRequestsQuery = useQuery({
     queryKey: ['profiles', 'requests', 'incoming'],
     queryFn: fetchIncomingFollowRequests,
+  });
+  const accountStatusQuery = useQuery({
+    queryKey: ['account-status'],
+    queryFn: fetchAccountStatus,
   });
   const saveSocialProfile = useMutation({
     mutationFn: updateSocialProfile,
@@ -413,18 +466,6 @@ function ProfileSection() {
     }
   };
 
-  const handleSave = async () => {
-    try {
-      // Only send the real server URL (string), never a base64 blob
-      await updateProfile.mutateAsync({ name, about, role, department, avatarUrl: savedAvatarUrl });
-      if (refreshUser) refreshUser();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (err) {
-      console.error('Failed to update profile:', err);
-    }
-  };
-
   const handleCancel = () => {
     setName(user?.name || '');
     setAbout(profileUser?.about || '');
@@ -433,19 +474,47 @@ function ProfileSection() {
     setSavedAvatarUrl(persistedAvatarUrl);
     setLocalPreview('');
     setUploadError('');
+    const profile = socialProfileQuery.data;
+    setProfileHandle(profile?.handle || '');
+    setProfileBio(profile?.bio || '');
+    setProfileWebsite(profile?.website || '');
+    setProfileVisibility(profile?.visibility || 'private');
+    setProfileNotice('');
+    setProfileError('');
   };
 
-  const handleSocialSave = async () => {
-    await saveSocialProfile.mutateAsync({
-      name,
-      bio: profileBio,
-      website: profileWebsite,
-      visibility: profileVisibility,
-    });
-  };
-
-  const handleHandleSave = async () => {
-    await saveHandle.mutateAsync(profileHandle);
+  // One Save changes button persists every supported field: account profile
+  // (name/about/role/department/avatar), social profile (bio/website/visibility),
+  // and the handle only when it actually changed (handle changes are rate-limited).
+  const handleSaveAll = async () => {
+    setIsSavingAll(true);
+    setProfileError('');
+    setProfileNotice('');
+    try {
+      await updateProfile.mutateAsync({ name, about, role, department, avatarUrl: savedAvatarUrl });
+      await saveSocialProfile.mutateAsync({
+        name,
+        bio: profileBio,
+        website: profileWebsite,
+        visibility: profileVisibility,
+      });
+      const currentHandle = (socialProfileQuery.data?.handle || '').replace(/^@/, '');
+      const nextHandle = profileHandle.trim().replace(/^@/, '');
+      if (nextHandle && nextHandle !== currentHandle) {
+        await saveHandle.mutateAsync(nextHandle);
+      }
+      if (refreshUser) refreshUser();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message || 'Unable to save your profile.'
+        : 'Unable to save your profile.';
+      setProfileError(message);
+      setProfileNotice('');
+    } finally {
+      setIsSavingAll(false);
+    }
   };
 
   const handleAvatarFile = async (file: File) => {
@@ -483,7 +552,6 @@ function ProfileSection() {
       );
     }
 
-    setShowAvatarMenu(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -502,7 +570,7 @@ function ProfileSection() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Edit Profile</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Manage your public identity and private account details.
+            Update your profile details and how others see you.
           </p>
         </div>
         <div className="flex flex-shrink-0 flex-col items-start gap-1 sm:items-end">
@@ -511,12 +579,12 @@ function ProfileSection() {
             disabled={!publicHandle}
             className="inline-flex items-center gap-2 rounded-xl border border-teal-500/40 px-3.5 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
           >
-            <ExternalLink size={14} />
-            View public profile
+            <Eye size={14} />
+            Preview your profile
           </button>
           {profileLoaded && !publicHandle && (
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Create a profile handle first to view your public profile.
+              Create a username first to preview your public profile.
             </p>
           )}
         </div>
@@ -524,16 +592,29 @@ function ProfileSection() {
 
       {needsHandleHint && !publicHandle && (
         <div className="rounded-xl border border-teal-500/40 bg-teal-50 px-4 py-3 text-sm text-teal-800 dark:bg-teal-500/10 dark:text-teal-200">
-          Your public profile needs a handle. Pick one in the “Social Profile” section below, then use
-          “View public profile”.
+          Your public profile needs a username. Pick one in “Basic info” below, then use “Preview your
+          profile”.
         </div>
       )}
 
-      {/* Avatar + basic info */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <div className="grid gap-6 md:grid-cols-[160px_1fr]">
-          {/* Avatar column */}
-          <div className="flex flex-col items-center gap-2">
+      {(profileNotice || profileError) && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            profileError
+              ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
+          }`}
+        >
+          {profileError || profileNotice}
+        </div>
+      )}
+
+      {/* Profile photo */}
+      <SecurityCard>
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Profile photo</h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">This is how others see you on Blabber.</p>
+          <div className="mt-4 flex flex-wrap items-center gap-5">
             <div className="relative">
               {displayedAvatar ? (
                 <img
@@ -545,204 +626,209 @@ function ProfileSection() {
                 <Avatar alt={user?.name || 'User'} size="xl" />
               )}
               <button
-                onClick={() => setShowAvatarMenu(!showAvatarMenu)}
+                onClick={() => fileInputRef.current?.click()}
                 disabled={isUploadingAvatar}
-                className="absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-white shadow transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900"
+                className="absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full bg-teal-600 text-white shadow transition hover:bg-teal-700 disabled:opacity-50"
                 aria-label="Change profile photo"
               >
                 {isUploadingAvatar ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
               </button>
-
-              {/* Avatar menu */}
-              {showAvatarMenu && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowAvatarMenu(false)} />
-                  <div className="absolute bottom-10 left-1/2 z-20 w-48 -translate-x-1/2 rounded-xl border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-800">
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-                    >
-                      <Image size={15} /> Choose from gallery
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowAvatarMenu(false);
-                        setShowCameraCapture(true);
-                      }}
-                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700/60"
-                    >
-                      <Camera size={15} /> Take photo
-                    </button>
-                    {(savedAvatarUrl || localPreview) && (
-                      <button
-                        onClick={() => { setSavedAvatarUrl(''); setLocalPreview(''); setUploadError(''); setShowAvatarMenu(false); }}
-                        className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20"
-                      >
-                        <Trash2 size={15} /> Remove photo
-                      </button>
-                    )}
-                  </div>
-                </>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadingAvatar}
+                className="rounded-xl border border-teal-500/50 px-3.5 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-50 disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
+              >
+                Change photo
+              </button>
+              <button
+                onClick={() => setShowCameraCapture(true)}
+                disabled={isUploadingAvatar}
+                className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700/60"
+              >
+                Take photo
+              </button>
+              {(savedAvatarUrl || localPreview) && (
+                <button
+                  onClick={() => {
+                    setSavedAvatarUrl('');
+                    setLocalPreview('');
+                    setUploadError('');
+                  }}
+                  className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-600 dark:border-slate-600 dark:text-slate-200 dark:hover:border-rose-500/50 dark:hover:text-rose-300"
+                >
+                  Remove
+                </button>
               )}
             </div>
-            <span className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              Online
-            </span>
-            {uploadError && (
-              <p className="mt-1 max-w-[160px] text-center text-[10px] leading-tight text-rose-500">
-                {uploadError}
-              </p>
-            )}
           </div>
-
-          {/* Fields */}
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-                  Display Name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className={INPUT}
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-                  Handle
-                </label>
-                <input
-                  type="text"
-                  value={`@${user?.username || ''}`}
-                  disabled
-                  className={DISABLED_INPUT}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-                Email Address
-              </label>
-              <input
-                type="email"
-                value={user?.email || ''}
-                disabled
-                className={DISABLED_INPUT}
-              />
-            </div>
-          </div>
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+            JPG, PNG or GIF. Max size 5MB. Removing your photo takes effect when you save changes.
+          </p>
+          {uploadError && <p className="mt-2 text-xs text-rose-500">{uploadError}</p>}
         </div>
-      </section>
+      </SecurityCard>
 
-      {/* About */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-white">About You</h2>
-        <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
-          Tell your team a bit about your role.
-        </p>
-        <div className="mt-4 space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+      {/* Basic info */}
+      <SecurityCard>
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Basic info</h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+            This information will be visible on your public profile.
+          </p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div>
-              <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-                Role
-              </label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="block text-[13px] font-medium text-slate-700 dark:text-slate-300">
+                  Display name
+                </label>
+                <span className="text-xs text-slate-400 dark:text-slate-500">{name.length} / 100</span>
+              </div>
               <input
                 type="text"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                placeholder="Senior Product Designer"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={100}
                 className={INPUT}
-                maxLength={120}
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-                Department
-              </label>
-              <input
-                type="text"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                placeholder="Design"
-                className={INPUT}
-                maxLength={120}
-              />
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="block text-[13px] font-medium text-slate-700 dark:text-slate-300">Username</label>
+                <span className="text-xs text-slate-400 dark:text-slate-500">
+                  {profileHandle.replace(/^@/, '').length} / 30
+                </span>
+              </div>
+              <div className="flex rounded-xl border border-slate-200 bg-slate-50 focus-within:border-teal-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:focus:border-teal-500">
+                <span className="px-3.5 py-2.5 text-sm text-slate-400">@</span>
+                <input
+                  type="text"
+                  value={profileHandle}
+                  onChange={(e) => setProfileHandle(e.target.value.replace(/^@/, '').toLowerCase())}
+                  placeholder="your_username"
+                  className="min-w-0 flex-1 bg-transparent py-2.5 pr-3.5 text-sm text-slate-900 outline-none dark:text-white"
+                  maxLength={30}
+                />
+              </div>
             </div>
           </div>
-          <div>
-            <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-              Profile note
-            </label>
+          {profileHandle && (
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              blabber.com/{profileHandle.replace(/^@/, '')}
+            </p>
+          )}
+          <div className="mt-4">
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="block text-[13px] font-medium text-slate-700 dark:text-slate-300">Bio</label>
+              <span className="text-xs text-slate-400 dark:text-slate-500">{profileBio.length} / 160</span>
+            </div>
             <textarea
-              value={about}
-              onChange={(e) => setAbout(e.target.value)}
-              placeholder="Focusing on Blabber V2 launch 🚀"
+              value={profileBio}
+              onChange={(e) => setProfileBio(e.target.value)}
               className={`${INPUT} resize-none`}
               rows={3}
-              maxLength={140}
+              maxLength={160}
             />
-            <p className="mt-1 text-right text-xs text-slate-400">{about.length}/140</p>
           </div>
         </div>
-      </section>
+      </SecurityCard>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-white">Social Profile</h2>
-            <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
-              Control your handle, profile details, and follow requests.
-            </p>
-          </div>
-          <div className="flex gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span>{socialProfileQuery.data?.counts?.followers ?? 0} followers</span>
-            <span>{socialProfileQuery.data?.counts?.following ?? 0} following</span>
-          </div>
-        </div>
-
-        {(profileNotice || profileError) && (
-          <div
-            className={`mt-4 rounded-xl border px-3 py-2 text-sm ${
-              profileError
-                ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
-            }`}
-          >
-            {profileError || profileNotice}
-          </div>
-        )}
-
-        <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
-          <div>
-            <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
-              Profile handle
-            </label>
-            <div className="flex rounded-xl border border-slate-200 bg-slate-50 focus-within:border-teal-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-teal-100 dark:border-slate-700 dark:bg-slate-800 dark:focus:border-teal-500">
-              <span className="px-3.5 py-2.5 text-sm text-slate-400">@</span>
-              <input
-                type="text"
-                value={profileHandle}
-                onChange={(e) => setProfileHandle(e.target.value.replace(/^@/, '').toLowerCase())}
-                placeholder="your_handle"
-                className="min-w-0 flex-1 bg-transparent py-2.5 pr-3.5 text-sm text-slate-900 outline-none dark:text-white"
-                maxLength={30}
+      {/* Work & status (kept from the previous design — shown in chat profile cards) */}
+      <SecurityCard>
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Work & status</h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+            Your role, team, and a short status note, shown on your profile card in chats.
+          </p>
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">Role</label>
+                <input
+                  type="text"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  placeholder="Senior Product Designer"
+                  className={INPUT}
+                  maxLength={120}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">
+                  Department
+                </label>
+                <input
+                  type="text"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  placeholder="Design"
+                  className={INPUT}
+                  maxLength={120}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="block text-[13px] font-medium text-slate-700 dark:text-slate-300">
+                  Profile note
+                </label>
+                <span className="text-xs text-slate-400 dark:text-slate-500">{about.length} / 140</span>
+              </div>
+              <textarea
+                value={about}
+                onChange={(e) => setAbout(e.target.value)}
+                placeholder="Focusing on Blabber V2 launch 🚀"
+                className={`${INPUT} resize-none`}
+                rows={3}
+                maxLength={140}
               />
             </div>
           </div>
-          <button
-            onClick={handleHandleSave}
-            disabled={saveHandle.isPending || !profileHandle}
-            className="self-end rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 dark:bg-white dark:text-slate-950"
-          >
-            {saveHandle.isPending ? 'Saving...' : 'Save handle'}
-          </button>
         </div>
+      </SecurityCard>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <div>
+      {/* Contact info */}
+      <SecurityCard>
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Contact info</h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+            This information is private and will not be shown on your profile.
+          </p>
+          <div className="mt-4">
+            <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">Email</label>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <input type="email" value={user?.email || ''} disabled className={`${DISABLED_INPUT} max-w-sm`} />
+              {accountStatusQuery.data && (
+                <span
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    accountStatusQuery.data.user.emailVerified
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+                  }`}
+                >
+                  {accountStatusQuery.data.user.emailVerified ? 'Verified' : 'Unverified'}
+                </span>
+              )}
+              <button onClick={() => navigate('/settings?s=account')} className={CHANGE_BTN}>
+                Manage
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              Email changes are handled in Account & Security.
+            </p>
+          </div>
+        </div>
+      </SecurityCard>
+
+      {/* Links */}
+      <SecurityCard>
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Links</h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+            Add a link to your website or portfolio.
+          </p>
+          <div className="mt-4">
             <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">Website</label>
             <input
               type="url"
@@ -752,64 +838,66 @@ function ProfileSection() {
               className={INPUT}
             />
           </div>
-          <div>
-            <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">Visibility</label>
-            <div className="grid grid-cols-2 gap-2">
-              {(['private', 'public'] as const).map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setProfileVisibility(value)}
-                  className={`rounded-xl border px-3 py-2.5 text-sm font-semibold capitalize ${
-                    profileVisibility === value
-                      ? 'border-teal-400 bg-teal-50 text-teal-700 dark:border-teal-500 dark:bg-teal-950/40 dark:text-teal-200'
-                      : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60'
-                  }`}
-                >
-                  {value}
-                </button>
-              ))}
+        </div>
+      </SecurityCard>
+
+      {/* Profile visibility */}
+      <SecurityCard>
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Profile visibility</h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+            Choose who can see your profile and posts.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[14px] font-medium text-slate-900 dark:text-white">Public profile</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {profileVisibility === 'public'
+                  ? 'Anyone on Blabber can see your profile and public posts.'
+                  : 'Only approved followers can see your posts.'}
+              </p>
             </div>
+            <PrivacySelect
+              value={profileVisibility}
+              options={[
+                { value: 'public', label: 'Public' },
+                { value: 'private', label: 'Private' },
+              ]}
+              onChange={(value) => setProfileVisibility(value as 'private' | 'public')}
+              label="Public profile visibility"
+            />
           </div>
+          <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">
+            {socialProfileQuery.data?.counts?.followers ?? 0} followers ·{' '}
+            {socialProfileQuery.data?.counts?.following ?? 0} following · Also editable in Privacy & Visibility.
+          </p>
         </div>
+      </SecurityCard>
 
-        <div className="mt-4">
-          <label className="mb-1.5 block text-[13px] font-medium text-slate-700 dark:text-slate-300">Bio</label>
-          <textarea
-            value={profileBio}
-            onChange={(e) => setProfileBio(e.target.value)}
-            className={`${INPUT} resize-none`}
-            rows={3}
-            maxLength={160}
-          />
-          <p className="mt-1 text-right text-xs text-slate-400">{profileBio.length}/160</p>
-        </div>
-
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={handleSocialSave}
-            disabled={saveSocialProfile.isPending}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 dark:bg-white dark:text-slate-950"
-          >
-            {saveSocialProfile.isPending && <Loader2 size={15} className="animate-spin" />}
-            Save social profile
-          </button>
-        </div>
-
-        <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+      {/* Follow requests */}
+      <SecurityCard>
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">
             Follow requests ({followRequestsQuery.data?.requests.length ?? 0})
-          </h3>
+          </h2>
           <div className="mt-3 space-y-2">
             {(followRequestsQuery.data?.requests || []).map((request) => (
-              <div key={request.requester.handle || request.requestedAt} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900/50">
+              <div
+                key={request.requester.handle || request.requestedAt}
+                className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900/50"
+              >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{request.requester.name}</p>
-                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">{request.requester.displayHandle}</p>
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                    {request.requester.name}
+                  </p>
+                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                    {request.requester.displayHandle}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => request.requester.handle && approveRequest.mutate(request.requester.handle)}
-                    className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white dark:bg-white dark:text-slate-950"
+                    className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-teal-700"
                   >
                     Approve
                   </button>
@@ -827,7 +915,7 @@ function ProfileSection() {
             )}
           </div>
         </div>
-      </section>
+      </SecurityCard>
 
       {/* Save / Cancel */}
       <div className="flex justify-end gap-3">
@@ -838,19 +926,26 @@ function ProfileSection() {
           Cancel
         </button>
         <button
-          onClick={handleSave}
-          disabled={updateProfile.isPending}
-          className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100"
+          onClick={handleSaveAll}
+          disabled={isSavingAll}
+          className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60"
         >
-          {updateProfile.isPending ? (
-            <Loader2 size={15} className="animate-spin" />
-          ) : saved ? (
-            <Check size={15} />
-          ) : (
-            <Check size={15} />
-          )}
-          {saved ? 'Saved!' : 'Save Changes'}
+          {isSavingAll ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+          {saved ? 'Saved!' : 'Save changes'}
         </button>
+      </div>
+
+      {/* Safety note */}
+      <div className="flex items-center gap-3 rounded-2xl border border-teal-500/30 bg-teal-50/60 px-5 py-4 dark:border-teal-500/25 dark:bg-teal-500/10">
+        <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300">
+          <ShieldCheck size={16} />
+        </span>
+        <div>
+          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Keep your profile safe</p>
+          <p className="text-[13px] text-slate-600 dark:text-slate-300">
+            Never share personal info like passwords or phone numbers in your bio.
+          </p>
+        </div>
       </div>
 
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
@@ -871,11 +966,96 @@ function formatDateTime(value?: string) {
   return new Date(value).toLocaleString();
 }
 
+const CHANGE_BTN =
+  'rounded-lg border border-slate-200 bg-white px-3.5 py-1.5 text-[13px] font-semibold text-slate-700 transition hover:border-teal-300 hover:text-teal-700 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-teal-500/50 dark:hover:text-teal-300';
+
+function SecurityCard({ children }: { children: React.ReactNode }) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      {children}
+    </section>
+  );
+}
+
+function SecurityHeading({ children }: { children: React.ReactNode }) {
+  return <h2 className="mb-2 mt-2 text-[15px] font-semibold text-slate-900 dark:text-white">{children}</h2>;
+}
+
+function AccountRow({
+  icon: Icon,
+  label,
+  value,
+  destructive = false,
+  action,
+  expanded = false,
+  panel,
+  last = false,
+}: {
+  icon: typeof Mail;
+  label: string;
+  value?: React.ReactNode;
+  destructive?: boolean;
+  action?: React.ReactNode;
+  expanded?: boolean;
+  panel?: React.ReactNode;
+  last?: boolean;
+}) {
+  return (
+    <div className={last ? '' : 'border-b border-slate-100 dark:border-slate-700'}>
+      <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+        <span
+          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${
+            destructive
+              ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300'
+              : 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300'
+          }`}
+        >
+          <Icon size={17} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p
+            className={`text-[14px] font-semibold ${
+              destructive ? 'text-rose-600 dark:text-rose-300' : 'text-slate-900 dark:text-white'
+            }`}
+          >
+            {label}
+          </p>
+          {value && <div className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">{value}</div>}
+        </div>
+        {action && <div className="flex-shrink-0">{action}</div>}
+      </div>
+      {expanded && panel && <div className="px-5 pb-5">{panel}</div>}
+    </div>
+  );
+}
+
+function ExpandButton({ open, onClick, label }: { open: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-expanded={open}
+      aria-label={label}
+      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700/60 dark:hover:text-slate-200"
+    >
+      <ChevronDown size={16} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
+  );
+}
+
+function sessionDeviceIcon(label: string) {
+  const normalized = label.toLowerCase();
+  return normalized.includes('ios') || normalized.includes('android') ? Smartphone : Laptop;
+}
+
+const VISIBLE_SESSION_LIMIT = 5;
+
 function AccountSection() {
   const { user, refreshUser, logout } = useAuth();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [expanded, setExpanded] = useState<null | 'email' | 'password' | 'export' | 'delete'>(null);
+  const [showAllSessions, setShowAllSessions] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [emailPassword, setEmailPassword] = useState('');
   const [exportPassword, setExportPassword] = useState('');
@@ -902,6 +1082,23 @@ function AccountSection() {
     setError(message);
     setMessage('');
   };
+
+  const accountUser = statusQuery.data?.user || user;
+  const isGoogleOnly = statusQuery.data?.user?.authProvider === 'google';
+  const emailVerified = Boolean(accountUser?.emailVerified);
+
+  const toggleExpanded = (key: 'email' | 'password' | 'export' | 'delete') =>
+    setExpanded((prev) => (prev === key ? null : key));
+
+  const passwordReset = useMutation({
+    mutationFn: () => requestPasswordReset(accountUser?.email || ''),
+    onSuccess: () => {
+      setMessage('Password reset link sent. Check your email to set a new password.');
+      setError('');
+      setExpanded(null);
+    },
+    onError: (err) => showError(err, 'Unable to send the password reset link.'),
+  });
 
   const verification = useMutation({
     mutationFn: resendEmailVerification,
@@ -968,15 +1165,28 @@ function AccountSection() {
     onError: (err) => showError(err, 'Unable to schedule account deletion.'),
   });
 
-  const accountUser = statusQuery.data?.user || user;
   const latestExport = exportsQuery.data?.exports[0] || statusQuery.data?.export;
+  const sessions = sessionsQuery.data?.sessions || [];
+  const { activeSessions, groups: deviceGroups } = groupActiveDeviceSessions(sessions);
+  const visibleDeviceGroups = deviceGroups.slice(0, VISIBLE_SESSION_LIMIT);
+  const displayedDeviceGroups = showAllSessions
+    ? activeSessions.map((session) => ({
+        key: session.id,
+        label: session.label || 'Unknown device',
+        current: session.current,
+        lastActiveAt: session.lastActiveAt || session.createdAt,
+        sessions: [session],
+      }))
+    : visibleDeviceGroups;
+  const hasSessionDetails = activeSessions.length > deviceGroups.length || deviceGroups.length > VISIBLE_SESSION_LIMIT;
+  const otherSessionCount = activeSessions.filter((session) => !session.current).length;
 
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Account</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Account & Security</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Manage sign-in, devices, exports, and account deletion.
+          Manage your account, security settings and connected devices.
         </p>
       </div>
 
@@ -992,182 +1202,431 @@ function AccountSection() {
         </div>
       )}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white">
-              <Mail size={17} />
-              Email
-            </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{accountUser?.email}</p>
-          </div>
-          <span
-            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-              accountUser?.emailVerified
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
-            }`}
-          >
-            {accountUser?.emailVerified ? 'Verified' : 'Unverified'}
-          </span>
-        </div>
-        {!accountUser?.emailVerified && (
-          <button
-            onClick={() => verification.mutate()}
-            disabled={verification.isPending}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 dark:bg-white dark:text-slate-950"
-          >
-            {verification.isPending && <Loader2 size={15} className="animate-spin" />}
-            Resend verification
-          </button>
-        )}
-        <div className="mt-5 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-          <input
-            type="email"
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            placeholder="New email address"
-            className={INPUT}
-          />
-          <input
-            type="password"
-            value={emailPassword}
-            onChange={(e) => setEmailPassword(e.target.value)}
-            placeholder="Current password"
-            className={INPUT}
-          />
-          <button
-            onClick={() => emailChange.mutate({ newEmail, currentPassword: emailPassword })}
-            disabled={emailChange.isPending || !newEmail || !emailPassword || !accountUser?.emailVerified}
-            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700/60"
-          >
-            Change email
-          </button>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white">
-              <Laptop size={17} />
-              Devices
-            </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Active browser sessions on your account.</p>
-          </div>
-          <button
-            onClick={() => logoutOthers.mutate()}
-            disabled={logoutOthers.isPending}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-          >
-            <LogOut size={15} />
-            Logout others
-          </button>
-        </div>
-        <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-700">
-          {sessionsQuery.isLoading ? (
-            <p className="py-3 text-sm text-slate-500">Loading devices...</p>
-          ) : (
-            (sessionsQuery.data?.sessions || []).map((session) => (
-              <div key={session.id} className="flex items-center justify-between gap-3 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
-                    {session.label}
-                    {session.current && <span className="ml-2 text-xs text-teal-600 dark:text-teal-300">Current</span>}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Last active {formatDateTime(session.lastActiveAt || session.createdAt)}
-                  </p>
-                </div>
-                <button
-                  onClick={() => revokeSession.mutate(session.id)}
-                  disabled={revokeSession.isPending}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+      <div>
+        <SecurityHeading>Account</SecurityHeading>
+        <SecurityCard>
+          <AccountRow
+            icon={Mail}
+            label="Email address"
+            value={
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="truncate">{accountUser?.email}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    emailVerified
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+                  }`}
                 >
-                  Revoke
+                  {emailVerified ? 'Verified' : 'Unverified'}
+                </span>
+              </span>
+            }
+            action={
+              <button onClick={() => toggleExpanded('email')} className={CHANGE_BTN} aria-expanded={expanded === 'email'}>
+                Change
+              </button>
+            }
+            expanded={expanded === 'email'}
+            panel={
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                {!emailVerified ? (
+                  <div className="space-y-3">
+                    <p className="text-[13px] text-slate-600 dark:text-slate-300">
+                      Verify your current email before changing it.
+                    </p>
+                    <button
+                      onClick={() => verification.mutate()}
+                      disabled={verification.isPending}
+                      className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60"
+                    >
+                      {verification.isPending && <Loader2 size={15} className="animate-spin" />}
+                      Resend verification email
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                      <input
+                        type="email"
+                        value={newEmail}
+                        onChange={(e) => setNewEmail(e.target.value)}
+                        placeholder="New email address"
+                        className={INPUT}
+                      />
+                      <input
+                        type="password"
+                        value={emailPassword}
+                        onChange={(e) => setEmailPassword(e.target.value)}
+                        placeholder="Current password"
+                        className={INPUT}
+                      />
+                      <button
+                        onClick={() => emailChange.mutate({ newEmail, currentPassword: emailPassword })}
+                        disabled={emailChange.isPending || !newEmail || !emailPassword}
+                        className="rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-50"
+                      >
+                        {emailChange.isPending ? 'Sending…' : 'Send confirmation'}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      We'll email the new address a confirmation link before anything changes.
+                    </p>
+                  </>
+                )}
+              </div>
+            }
+          />
+          <AccountRow
+            icon={Lock}
+            label="Password"
+            value={
+              isGoogleOnly
+                ? "You sign in with Google — password sign-in isn't set up for this account."
+                : 'Manage your password'
+            }
+            action={
+              !isGoogleOnly ? (
+                <button
+                  onClick={() => toggleExpanded('password')}
+                  className={CHANGE_BTN}
+                  aria-expanded={expanded === 'password'}
+                >
+                  Change
+                </button>
+              ) : undefined
+            }
+            expanded={expanded === 'password' && !isGoogleOnly}
+            panel={
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                <p className="text-[13px] text-slate-600 dark:text-slate-300">
+                  We'll email {accountUser?.email} a secure link to set a new password.
+                </p>
+                <button
+                  onClick={() => passwordReset.mutate()}
+                  disabled={passwordReset.isPending || !accountUser?.email}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60"
+                >
+                  {passwordReset.isPending && <Loader2 size={15} className="animate-spin" />}
+                  Email me a reset link
                 </button>
               </div>
-            ))
+            }
+            last
+          />
+        </SecurityCard>
+      </div>
+
+      <div>
+        <SecurityHeading>Your devices & sessions</SecurityHeading>
+        <SecurityCard>
+          <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+            <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+              <MonitorSmartphone size={17} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-semibold text-slate-900 dark:text-white">
+                {sessionsQuery.data
+                  ? `You're currently signed in on ${deviceGroups.length} recognized device${deviceGroups.length === 1 ? '' : 's'}`
+                  : 'Checking your active sessions…'}
+              </p>
+              <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">
+                Review your active sessions and manage access.
+              </p>
+            </div>
+          </div>
+
+          {sessionsQuery.isLoading ? (
+            <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading devices…</p>
+          ) : sessionsQuery.isError ? (
+            <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">
+              Unable to load your devices right now.
+            </p>
+          ) : displayedDeviceGroups.length === 0 ? (
+            <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">
+              No active device sessions found.
+            </p>
+          ) : (
+            displayedDeviceGroups.map((group) => {
+              const session = group.sessions[0];
+              const DeviceIcon = sessionDeviceIcon(group.label);
+              const groupedSessionCount = group.sessions.length;
+              return (
+                <div
+                  key={group.key}
+                  className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-3.5 dark:border-slate-700"
+                >
+                  <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-slate-700/60 dark:text-slate-300">
+                    <DeviceIcon size={17} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-[14px] font-medium text-slate-900 dark:text-white">
+                      <span className="truncate">{group.label}</span>
+                      {group.current && (
+                        <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
+                          This device
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {groupedSessionCount > 1 && `${groupedSessionCount} session records · `}
+                      Last active {formatDateTime(group.lastActiveAt)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (groupedSessionCount > 1) {
+                        setShowAllSessions(true);
+                        return;
+                      }
+                      if (
+                        session.current &&
+                        !window.confirm('This is your current device. Revoking it will sign you out here. Continue?')
+                      ) {
+                        return;
+                      }
+                      revokeSession.mutate(session.id);
+                    }}
+                    disabled={revokeSession.isPending}
+                    className={CHANGE_BTN}
+                  >
+                    {groupedSessionCount > 1 ? 'Review' : session.current ? 'Sign out' : 'Revoke'}
+                  </button>
+                </div>
+              );
+            })
           )}
-        </div>
-      </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white">
-          <Download size={17} />
-          Data Export
-        </h2>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Export your profile, settings, messages authored by you, saved references, and eligible actions.
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto]">
-          <input
-            type="password"
-            value={exportPassword}
-            onChange={(e) => setExportPassword(e.target.value)}
-            placeholder="Current password"
-            className={INPUT}
-          />
-          <button
-            onClick={() => dataExport.mutate(exportPassword)}
-            disabled={dataExport.isPending || !exportPassword || !accountUser?.emailVerified}
-            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-          >
-            Request export
-          </button>
-          <button
-            onClick={() => latestExport?.id && downloadDataExport(latestExport.id)}
-            disabled={latestExport?.status !== 'ready'}
-            className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950"
-          >
-            Download
-          </button>
-        </div>
-        {latestExport && (
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            Latest export: {latestExport.status}
-            {latestExport.expiresAt ? `, expires ${formatDateTime(latestExport.expiresAt)}` : ''}
-          </p>
-        )}
-      </section>
+          {hasSessionDetails && (
+            <button
+              onClick={() => setShowAllSessions((value) => !value)}
+              className="w-full border-b border-slate-100 px-5 py-3 text-center text-[13px] font-semibold text-teal-700 transition hover:bg-teal-50/60 dark:border-slate-700 dark:text-teal-300 dark:hover:bg-teal-500/10"
+            >
+              {showAllSessions ? 'Back to device overview' : 'Review all session records'}
+            </button>
+          )}
 
-      <section className="rounded-2xl border border-rose-200 bg-white p-5 dark:border-rose-900/60 dark:bg-slate-800">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-rose-700 dark:text-rose-300">
-          <AlertTriangle size={17} />
-          Delete Account
-        </h2>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Deletion disables sign-in immediately and can be cancelled from the email link before final removal.
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-          <input
-            type="password"
-            value={deletePassword}
-            onChange={(e) => setDeletePassword(e.target.value)}
-            placeholder="Current password"
-            className={INPUT}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 px-5 py-3.5 dark:bg-slate-900/30">
+            <p className="text-[13px] text-slate-500 dark:text-slate-400">Signed out from unknown device?</p>
+            <button
+              onClick={() => logoutOthers.mutate()}
+              disabled={logoutOthers.isPending || otherSessionCount === 0}
+              className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-rose-600 transition hover:text-rose-700 disabled:opacity-50 dark:text-rose-400 dark:hover:text-rose-300"
+            >
+              Sign out all other devices
+              <LogOut size={14} />
+            </button>
+          </div>
+        </SecurityCard>
+      </div>
+
+      <div>
+        <SecurityHeading>Data & account</SecurityHeading>
+        <SecurityCard>
+          <AccountRow
+            icon={Download}
+            label="Download your data"
+            value="Get a copy of your data from Blabber."
+            action={
+              <ExpandButton
+                open={expanded === 'export'}
+                onClick={() => toggleExpanded('export')}
+                label="Toggle data export options"
+              />
+            }
+            expanded={expanded === 'export'}
+            panel={
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                {emailVerified ? (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                      <input
+                        type="password"
+                        value={exportPassword}
+                        onChange={(e) => setExportPassword(e.target.value)}
+                        placeholder="Confirm current password"
+                        className={INPUT}
+                      />
+                      <button
+                        onClick={() => dataExport.mutate(exportPassword)}
+                        disabled={dataExport.isPending || !exportPassword}
+                        className="rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-50"
+                      >
+                        {dataExport.isPending ? 'Requesting…' : 'Request export'}
+                      </button>
+                    </div>
+                    {latestExport && (
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Latest export: {latestExport.status}
+                          {latestExport.expiresAt ? `, expires ${formatDateTime(latestExport.expiresAt)}` : ''}
+                        </p>
+                        <button
+                          onClick={() => latestExport.id && downloadDataExport(latestExport.id)}
+                          disabled={latestExport.status !== 'ready'}
+                          className={CHANGE_BTN}
+                        >
+                          Download
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[13px] text-slate-600 dark:text-slate-300">
+                    Verify your email to request a data export.
+                  </p>
+                )}
+              </div>
+            }
           />
-          <input
-            type="text"
-            value={deleteConfirmation}
-            onChange={(e) => setDeleteConfirmation(e.target.value)}
-            placeholder="Type DELETE"
-            className={INPUT}
+          <AccountRow
+            icon={Trash2}
+            label="Delete account"
+            value="Permanently delete your account and all your data."
+            destructive
+            action={
+              <ExpandButton
+                open={expanded === 'delete'}
+                onClick={() => toggleExpanded('delete')}
+                label="Toggle account deletion options"
+              />
+            }
+            expanded={expanded === 'delete'}
+            panel={
+              <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-4 dark:border-rose-900/40 dark:bg-rose-950/20">
+                <p className="text-[13px] text-rose-700 dark:text-rose-300">
+                  Deletion disables sign-in immediately. We'll email you a link to cancel within 7 days, after which
+                  your data is permanently removed.
+                </p>
+                {emailVerified ? (
+                  <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                    <input
+                      type="password"
+                      value={deletePassword}
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      placeholder="Current password"
+                      className={INPUT}
+                    />
+                    <input
+                      type="text"
+                      value={deleteConfirmation}
+                      onChange={(e) => setDeleteConfirmation(e.target.value)}
+                      placeholder="Type DELETE"
+                      className={INPUT}
+                    />
+                    <button
+                      onClick={() => deletion.mutate({ currentPassword: deletePassword, confirmation: 'DELETE' })}
+                      disabled={deletion.isPending || deleteConfirmation !== 'DELETE' || !deletePassword}
+                      className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+                    >
+                      {deletion.isPending ? 'Deleting…' : 'Delete account'}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">
+                    Verify your email before deleting your account.
+                  </p>
+                )}
+              </div>
+            }
+            last
           />
-          <button
-            onClick={() => deletion.mutate({ currentPassword: deletePassword, confirmation: 'DELETE' })}
-            disabled={deletion.isPending || deleteConfirmation !== 'DELETE' || !deletePassword || !accountUser?.emailVerified}
-            className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
-          >
-            Delete account
-          </button>
-        </div>
-      </section>
+        </SecurityCard>
+      </div>
     </div>
   );
 }
 
 // ── Section: Privacy ─────────────────────────────────────────────────────────
+
+function PrivacyCard({
+  icon: Icon,
+  title,
+  subtitle,
+  right,
+  children,
+}: {
+  icon: typeof Shield;
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+            <Icon size={16} />
+          </span>
+          <div>
+            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>}
+          </div>
+        </div>
+        {right}
+      </div>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+function PrivacyRow({
+  label,
+  desc,
+  control,
+  last = false,
+}: {
+  label: string;
+  desc?: string;
+  control: React.ReactNode;
+  last?: boolean;
+}) {
+  return (
+    <div
+      className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3 ${
+        last ? '' : 'border-b border-slate-100 dark:border-slate-700'
+      }`}
+    >
+      <div className="min-w-0">
+        <p className="text-[14px] font-medium text-slate-900 dark:text-white">{label}</p>
+        {desc && <p className="text-xs text-slate-500 dark:text-slate-400">{desc}</p>}
+      </div>
+      <div className="flex-shrink-0">{control}</div>
+    </div>
+  );
+}
+
+/** Styled native select — custom chevron, teal focus ring. */
+function PrivacySelect({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  label: string;
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.value)}
+        className="appearance-none rounded-xl border border-slate-200 bg-slate-50 py-2 pl-3.5 pr-8 text-[13px] font-medium text-slate-800 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:focus:border-teal-500"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+    </div>
+  );
+}
 
 function PrivacySection() {
   const settingsQuery = useUserSettings();
@@ -1175,6 +1634,8 @@ function PrivacySection() {
   const queryClient = useQueryClient();
   const [blockUserId, setBlockUserId] = useState('');
   const [blockNotice, setBlockNotice] = useState('');
+  const [visibilityNotice, setVisibilityNotice] = useState('');
+  const socialProfileQuery = useQuery({ queryKey: ['profiles', 'me'], queryFn: fetchMyProfile });
   const blockedUsers = useQuery({
     queryKey: ['blocked-users'],
     queryFn: fetchBlockedUsers,
@@ -1182,6 +1643,18 @@ function PrivacySection() {
   const myReports = useQuery({
     queryKey: ['my-reports'],
     queryFn: fetchMyReports,
+  });
+  const saveVisibility = useMutation({
+    mutationFn: (visibility: 'private' | 'public') => updateSocialProfile({ visibility }),
+    onSuccess: (profile) => {
+      queryClient.setQueryData(['profiles', 'me'], profile);
+      queryClient.invalidateQueries({ queryKey: ['my-profile'] });
+      setVisibilityNotice('Profile visibility updated.');
+    },
+    onError: (error) => {
+      const err = error as { response?: { data?: { message?: string } } };
+      setVisibilityNotice(err?.response?.data?.message || 'Unable to update profile visibility.');
+    },
   });
   const blockMutation = useMutation({
     mutationFn: blockUser,
@@ -1201,143 +1674,271 @@ function PrivacySection() {
     onError: (error: any) => setBlockNotice(error?.response?.data?.message || 'Unable to unblock user.'),
   });
   const settings = settingsQuery.data;
-  const rows = settings
-    ? [
-        {
-          key: 'readReceiptsEnabled' as const,
-          label: 'Read receipts',
-          desc: 'Let others know when you have read their messages.',
-          value: settings.readReceiptsEnabled,
-        },
-        {
-          key: 'presenceVisible' as const,
-          label: 'Online presence',
-          desc: 'Allow others to see when you are online.',
-          value: settings.presenceVisible,
-        },
-        {
-          key: 'lastSeenVisible' as const,
-          label: 'Last seen',
-          desc: 'Allow others to see your last active time.',
-          value: settings.lastSeenVisible,
-        },
-        {
-          key: 'incomingCallsEnabled' as const,
-          label: 'Incoming calls',
-          desc: 'Allow direct voice and video call invites to reach you.',
-          value: settings.incomingCallsEnabled,
-        },
-        {
-          key: 'momentArchiveEnabled' as const,
-          label: 'Moment archive',
-          desc: 'Save your expired Moments in your private archive.',
-          value: settings.momentArchiveEnabled,
-        },
-      ]
-    : [];
+  const visibility = socialProfileQuery.data?.visibility;
+
+  // The backend supports two tiers: 'public' (anyone) and 'private' (only
+  // approved followers see the full profile/content). There is no fully
+  // hidden "only me" tier, so exactly these two are offered.
+  const visibilityOptions: Array<{ value: 'public' | 'private'; label: string; desc: string }> = [
+    { value: 'public', label: 'Public', desc: 'Anyone on Blabber can see your profile and content.' },
+    { value: 'private', label: 'Followers', desc: 'Only followers you approve can see your profile and content.' },
+  ];
+
+  const toggleFor = (key: 'readReceiptsEnabled' | 'presenceVisible' | 'lastSeenVisible' | 'momentArchiveEnabled', label: string) =>
+    settings ? (
+      <Toggle checked={settings[key]} onChange={() => updateSettings.mutate({ [key]: !settings[key] })} label={label} />
+    ) : (
+      <span className="text-xs text-slate-400">…</span>
+    );
 
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Privacy</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Privacy &amp; Visibility</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Control who can see your information.
+          Control who can reach you and what others can see.
         </p>
       </div>
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        {settingsQuery.isLoading ? (
-          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading privacy settings...</p>
-        ) : settingsQuery.isError ? (
-          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
-            Unable to load privacy settings.
-          </p>
+
+      {/* ── Profile visibility ── */}
+      <PrivacyCard
+        icon={Globe}
+        title="Profile visibility"
+        subtitle="Choose who can see your profile and content."
+      >
+        {socialProfileQuery.isLoading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading profile visibility…</p>
+        ) : socialProfileQuery.isError ? (
+          <p className="text-sm text-rose-600 dark:text-rose-300">Unable to load profile visibility.</p>
         ) : (
-          rows.map((row, i) => (
-            <div
-              key={row.key}
-              className={`flex items-center justify-between gap-4 px-5 py-3.5 ${
-                i < rows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-              }`}
-            >
-              <div>
-                <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
-              </div>
-              <Toggle
-                checked={row.value}
-                onChange={() => updateSettings.mutate({ [row.key]: !row.value })}
-                label={row.label}
-              />
-            </div>
-          ))
-        )}
-      </section>
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Turning off read receipts does not affect message delivery or unread counts.
-      </p>
-      <CloseFriendsSettings />
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Blocked Users</h2>
-        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-          <input
-            value={blockUserId}
-            onChange={(event) => setBlockUserId(event.target.value)}
-            placeholder="User ID"
-            className={INPUT}
-          />
-          <button
-            onClick={() => blockMutation.mutate(blockUserId.trim())}
-            disabled={!blockUserId.trim() || blockMutation.isPending}
-            className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-950"
-          >
-            Block
-          </button>
-        </div>
-        {blockNotice && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{blockNotice}</p>}
-        <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-700">
-          {blockedUsers.data?.blockedUsers?.length ? (
-            blockedUsers.data.blockedUsers.map((item) => (
-              <div key={item.userId} className="flex items-center justify-between gap-3 py-3">
-                <div>
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">
-                    {item.user?.name || item.user?.username || item.userId}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Blocked {new Date(item.blockedAt).toLocaleDateString()}
-                  </p>
-                </div>
+          <div className="space-y-2" role="radiogroup" aria-label="Profile visibility">
+            {visibilityOptions.map((option) => {
+              const selected = visibility === option.value;
+              return (
                 <button
-                  onClick={() => unblockMutation.mutate(item.userId)}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700/60"
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={saveVisibility.isPending}
+                  onClick={() => !selected && saveVisibility.mutate(option.value)}
+                  className={`flex w-full items-center justify-between gap-4 rounded-xl border px-4 py-3 text-left transition disabled:opacity-60 ${
+                    selected
+                      ? 'border-teal-500/60 bg-teal-50/60 shadow-[0_0_10px_rgba(45,212,191,0.15)] dark:border-teal-400/50 dark:bg-teal-500/10'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-700/40'
+                  }`}
                 >
-                  Unblock
+                  <span className="min-w-0">
+                    <span className={`block text-sm font-semibold ${selected ? 'text-teal-800 dark:text-teal-200' : 'text-slate-900 dark:text-white'}`}>
+                      {option.label}
+                    </span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">{option.desc}</span>
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full border-2 ${
+                      selected ? 'border-teal-500' : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                  >
+                    {selected && <span className="h-2 w-2 rounded-full bg-teal-500" />}
+                  </span>
                 </button>
-              </div>
-            ))
-          ) : (
-            <p className="py-3 text-sm text-slate-500 dark:text-slate-400">No blocked users.</p>
-          )}
-        </div>
-      </section>
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Report History</h2>
-        <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-700">
-          {myReports.data?.reports?.length ? (
-            myReports.data.reports.map((report) => (
-              <div key={report.id} className="py-3">
-                <p className="text-sm font-medium text-slate-900 dark:text-white">
-                  {report.targetType} report · {report.status}
+              );
+            })}
+          </div>
+        )}
+        {visibilityNotice && (
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400" role="status">{visibilityNotice}</p>
+        )}
+      </PrivacyCard>
+
+      {/* ── How people can reach you ── */}
+      <PrivacyCard icon={Users} title="How people can reach you">
+        <PrivacyRow
+          label="Who can message you"
+          desc="Controls who can start a new conversation with you. Existing conversations can always continue."
+          control={
+            settings ? (
+              <PrivacySelect
+                label="Who can message you"
+                value={settings.messagePrivacy}
+                options={[
+                  { value: 'everyone', label: 'Everyone' },
+                  { value: 'followers', label: 'Followers' },
+                  { value: 'no_one', label: 'No one' },
+                ]}
+                onChange={(value) => updateSettings.mutate({ messagePrivacy: value as MessagePrivacy })}
+              />
+            ) : (
+              <span className="text-xs text-slate-400">…</span>
+            )
+          }
+        />
+        <PrivacyRow
+          label="Who can call you"
+          control={
+            settings ? (
+              <PrivacySelect
+                label="Who can call you"
+                value={settings.incomingCallsEnabled ? 'everyone' : 'no_one'}
+                options={[
+                  { value: 'everyone', label: 'Everyone' },
+                  { value: 'no_one', label: 'No one' },
+                ]}
+                onChange={(value) => updateSettings.mutate({ incomingCallsEnabled: value === 'everyone' })}
+              />
+            ) : (
+              <span className="text-xs text-slate-400">…</span>
+            )
+          }
+        />
+        <PrivacyRow
+          label="Who can add you to groups"
+          desc="My contacts means people you already have a conversation with."
+          control={
+            settings ? (
+              <PrivacySelect
+                label="Who can add you to groups"
+                value={settings.groupInvitePrivacy}
+                options={[
+                  { value: 'everyone', label: 'Everyone' },
+                  { value: 'followers', label: 'Followers' },
+                  { value: 'contacts', label: 'My contacts' },
+                  { value: 'no_one', label: 'No one' },
+                ]}
+                onChange={(value) => updateSettings.mutate({ groupInvitePrivacy: value as GroupInvitePrivacy })}
+              />
+            ) : (
+              <span className="text-xs text-slate-400">…</span>
+            )
+          }
+          last
+        />
+        {updateSettings.isError && (
+          <p className="mt-2 text-xs text-rose-600 dark:text-rose-300" role="status">
+            Could not save your privacy change. Try again.
+          </p>
+        )}
+      </PrivacyCard>
+
+      {/* ── Activity & presence ── */}
+      <PrivacyCard icon={Activity} title="Activity & presence">
+        <PrivacyRow
+          label="Show online status"
+          desc="Let others see when you're online."
+          control={toggleFor('presenceVisible', 'Show online status')}
+        />
+        <PrivacyRow
+          label="Last seen"
+          desc="Let others see your last active time."
+          control={toggleFor('lastSeenVisible', 'Last seen')}
+        />
+        <PrivacyRow
+          label="Read receipts"
+          desc="Let others know when you've read their messages."
+          control={toggleFor('readReceiptsEnabled', 'Read receipts')}
+          last
+        />
+        <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+          Turning off read receipts does not affect message delivery or unread counts.
+        </p>
+      </PrivacyCard>
+
+      {/* ── Moments & stories ── */}
+      <PrivacyCard icon={Clock} title="Moments & stories">
+        <PrivacyRow
+          label="Save moments to archive"
+          desc="Automatically save moments after 24 hours."
+          control={toggleFor('momentArchiveEnabled', 'Save moments to archive')}
+          last
+        />
+        <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+          Who can see each Moment is chosen when you post it — including a Close Friends audience, managed below.
+        </p>
+      </PrivacyCard>
+
+      <CloseFriendsSettings />
+      {/* ── Safety ── */}
+      <PrivacyCard
+        icon={Shield}
+        title="Safety"
+        subtitle="Manage who is blocked and review reports you've submitted."
+      >
+        <div className="space-y-5">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Blocked users</h3>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={blockUserId}
+                onChange={(event) => setBlockUserId(event.target.value)}
+                placeholder="User ID"
+                className={INPUT}
+              />
+              <button
+                onClick={() => blockMutation.mutate(blockUserId.trim())}
+                disabled={!blockUserId.trim() || blockMutation.isPending}
+                className="rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+              >
+                Block
+              </button>
+            </div>
+            {blockNotice && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400" role="status">{blockNotice}</p>}
+            <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-700">
+              {blockedUsers.data?.blockedUsers?.length ? (
+                blockedUsers.data.blockedUsers.map((item) => (
+                  <div key={item.userId} className="flex items-center justify-between gap-3 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">
+                        {item.user?.name || item.user?.username || item.userId}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Blocked {new Date(item.blockedAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => unblockMutation.mutate(item.userId)}
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700/60"
+                    >
+                      Unblock
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p className="py-3 text-sm text-slate-500 dark:text-slate-400">
+                  No blocked users. People you block can't message, call, or see your profile.
                 </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {report.reason} · {new Date(report.createdAt).toLocaleDateString()}
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-4 dark:border-slate-700">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Report history</h3>
+            <div className="mt-1 divide-y divide-slate-100 dark:divide-slate-700">
+              {myReports.data?.reports?.length ? (
+                myReports.data.reports.map((report) => (
+                  <div key={report.id} className="py-3">
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">
+                      {report.targetType} report · {report.status}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {report.reason} · {new Date(report.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="py-3 text-sm text-slate-500 dark:text-slate-400">
+                  No reports submitted. Reports you file about users or content will appear here.
                 </p>
-              </div>
-            ))
-          ) : (
-            <p className="py-3 text-sm text-slate-500 dark:text-slate-400">No reports submitted.</p>
-          )}
+              )}
+            </div>
+          </div>
         </div>
-      </section>
+      </PrivacyCard>
+
+      <p className="text-xs text-slate-400 dark:text-slate-500">
+        Privacy changes may affect what appears on your public profile, in Discover, and in Moments.
+        Private conversations remain separate from public profile visibility.
+      </p>
     </div>
   );
 }
@@ -1361,6 +1962,10 @@ interface NotificationPreferences {
   momentUpdatesEnabled: boolean;
   momentActivityEnabled: boolean;
   postActivityEnabled: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  quietHoursTimezone: string;
   updatedAt: string;
 }
 
@@ -1523,40 +2128,15 @@ function NotificationsSection() {
     }
   };
 
-  const rows: {
-    label: string;
-    desc: string;
-    value: boolean;
-    disabled?: boolean;
-    toggle: () => void;
-  }[] = preferences
-    ? [
-        {
-          label: 'Message alerts',
-          desc: 'Browser alerts for new messages when you are not focused on that chat',
-          value: preferences.messageNotificationsEnabled,
-          toggle: () => void togglePreference('messageNotificationsEnabled'),
-        },
-        {
-          label: 'Mention alerts',
-          desc: 'Browser alerts when someone mentions you in a group',
-          value: preferences.mentionNotificationsEnabled,
-          toggle: () => void togglePreference('mentionNotificationsEnabled'),
-        },
-        {
-          label: 'Call alerts',
-          desc: 'Browser alerts for incoming calls',
-          value: preferences.callNotificationsEnabled,
-          toggle: () => void togglePreference('callNotificationsEnabled'),
-        },
-        {
-          label: 'Show message previews',
-          desc: 'Include message text in browser alerts',
-          value: preferences.notificationPreviewsEnabled,
-          toggle: () => void togglePreference('notificationPreviewsEnabled'),
-        },
-      ]
-    : [];
+  const [expandedGroup, setExpandedGroup] = useState<null | 'events' | 'actions'>(null);
+  const requestBrowserPermission = async () => {
+    if (!('Notification' in window)) return;
+    try {
+      await Notification.requestPermission();
+    } finally {
+      setBrowserPermission(getBrowserPermission());
+    }
+  };
   const reminderRows: {
     label: string;
     desc: string;
@@ -1611,240 +2191,309 @@ function NotificationsSection() {
   const browserNotificationsUnavailable =
     browserPermission === 'unsupported' || browserPermission === 'denied';
 
+  const categoryRow = (options: {
+    icon: typeof Bell;
+    label: string;
+    desc: string;
+    value: boolean;
+    onToggle: () => void;
+    group?: 'events' | 'actions';
+    last?: boolean;
+  }) => {
+    const { icon: Icon, label, desc, value, onToggle, group, last } = options;
+    const isExpanded = group !== undefined && expandedGroup === group;
+    const subRows = group === 'events' ? eventReminderRows : group === 'actions' ? reminderRows : [];
+    return (
+      <div key={label} className={last && !isExpanded ? '' : 'border-b border-slate-100 dark:border-slate-700'}>
+        <div className="flex items-center gap-3 px-5 py-3.5">
+          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+            <Icon size={15} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">{label}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{desc}</p>
+          </div>
+          <span className={`text-xs font-semibold ${value ? 'text-teal-600 dark:text-teal-300' : 'text-slate-400 dark:text-slate-500'}`}>
+            {value ? 'On' : 'Off'}
+          </span>
+          <Toggle checked={value} onChange={updatePreferences.isPending ? noop : onToggle} label={label} />
+          {group !== undefined && (
+            <button
+              type="button"
+              onClick={() => setExpandedGroup(isExpanded ? null : group)}
+              aria-expanded={isExpanded}
+              aria-label={`${isExpanded ? 'Hide' : 'Show'} ${label} reminder options`}
+              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+            >
+              <ChevronDown size={15} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+        </div>
+        {isExpanded && preferences && (
+          <div className="space-y-1 px-5 pb-3 pl-[68px]">
+            {value ? (
+              subRows.map((row) => (
+                <div key={row.key} className="flex items-center justify-between gap-3 py-1.5">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-slate-800 dark:text-slate-200">{row.label}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">{row.desc}</p>
+                  </div>
+                  <Toggle
+                    checked={Boolean(preferences[row.key])}
+                    onChange={updatePreferences.isPending ? noop : () => void togglePreference(row.key)}
+                    label={row.label}
+                  />
+                </div>
+              ))
+            ) : (
+              <p className="py-1.5 text-xs text-slate-500 dark:text-slate-400">Turn this on to configure reminder types.</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Notifications</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Control how and when you receive notifications.
+          Choose what you want to be notified about and how.
         </p>
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Browser permission</p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Browser permission controls whether this browser may show desktop alerts.
-            </p>
+      {/* ── Browser permission status ── */}
+      <section
+        className={`rounded-2xl border p-4 ${
+          browserPermission === 'granted'
+            ? 'border-teal-500/30 bg-teal-50/50 dark:bg-teal-500/5'
+            : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'
+        }`}
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+            <ShieldCheck size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Browser notifications</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Get notified on this browser for important activity.</p>
           </div>
-          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              browserPermission === 'granted'
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300'
+                : browserPermission === 'denied'
+                  ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-300'
+                  : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+            }`}
+          >
             {permissionLabel(browserPermission)}
           </span>
-        </div>
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Posts</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Choose how Blabber notifies you about post interactions.
-          </p>
-        </div>
-        {preferencesQuery.isLoading ? (
-          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading post notification settings...</p>
-        ) : preferencesQuery.isError || !preferences ? (
-          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
-            Unable to load post notification settings.
-          </p>
-        ) : (
-          <div className="flex items-center justify-between gap-4 px-5 py-3.5">
-            <div>
-              <p className="text-[14px] font-medium text-slate-900 dark:text-white">Post activity</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Get notified when someone comments on or reacts to your posts.</p>
-            </div>
-            <Toggle
-              checked={preferences.postActivityEnabled}
-              onChange={updatePreferences.isPending ? noop : () => void togglePreference('postActivityEnabled')}
-              label="Post activity"
-            />
-          </div>
-        )}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        {preferencesQuery.isLoading ? (
-          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading notification settings...</p>
-        ) : preferencesQuery.isError ? (
-          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
-            Unable to load notification settings.
-          </p>
-        ) : (
-          <>
-            {rows.map((row, i) => (
-              <div
-                key={row.label}
-                className={`flex items-center justify-between gap-4 px-5 py-3.5 ${
-                  i < rows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-                } ${row.disabled ? 'opacity-60' : ''}`}
-              >
-                <div>
-                  <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
-                </div>
-                <Toggle
-                  checked={row.value}
-                  onChange={row.disabled || updatePreferences.isPending ? noop : row.toggle}
-                  label={row.label}
-                />
-              </div>
-            ))}
-          </>
-        )}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Moments</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Choose how Blabber notifies you about Moment updates and activity.
-          </p>
-        </div>
-        {preferencesQuery.isLoading ? (
-          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading Moment notification settings...</p>
-        ) : preferencesQuery.isError || !preferences ? (
-          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
-            Unable to load Moment notification settings.
-          </p>
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 dark:border-slate-700">
-              <div>
-                <p className="text-[14px] font-medium text-slate-900 dark:text-white">New Moment updates</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Browser alerts when contacts share new Moments.</p>
-              </div>
-              <Toggle
-                checked={preferences.momentUpdatesEnabled}
-                onChange={updatePreferences.isPending ? noop : () => void togglePreference('momentUpdatesEnabled')}
-                label="New Moment updates"
-              />
-            </div>
-            <div className="flex items-center justify-between gap-4 px-5 py-3.5">
-              <div>
-                <p className="text-[14px] font-medium text-slate-900 dark:text-white">Activity on my Moments</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Browser alerts when someone reacts to your Moment.</p>
-              </div>
-              <Toggle
-                checked={preferences.momentActivityEnabled}
-                onChange={updatePreferences.isPending ? noop : () => void togglePreference('momentActivityEnabled')}
-                label="Activity on my Moments"
-              />
-            </div>
-          </>
-        )}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Event Reminders</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Choose which reminders Blabber can send for chat events you RSVP to.
-          </p>
-        </div>
-        {preferencesQuery.isLoading ? (
-          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading event reminder settings...</p>
-        ) : preferencesQuery.isError || !preferences ? (
-          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
-            Unable to load event reminder settings.
-          </p>
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 dark:border-slate-700">
-              <div>
-                <p className="text-[14px] font-medium text-slate-900 dark:text-white">Event reminders</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Allow Blabber to remind you about chat events.</p>
-              </div>
-              <Toggle
-                checked={preferences.eventRemindersEnabled}
-                onChange={updatePreferences.isPending ? noop : () => void togglePreference('eventRemindersEnabled')}
-                label="Event reminders"
-              />
-            </div>
-            {preferences.eventRemindersEnabled && eventReminderRows.map((row, index) => (
-              <div
-                key={row.key}
-                className={`flex items-center justify-between gap-4 px-5 py-3.5 ${
-                  index < eventReminderRows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-                }`}
-              >
-                <div>
-                  <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
-                </div>
-                <Toggle
-                  checked={Boolean(preferences[row.key])}
-                  onChange={updatePreferences.isPending ? noop : () => void togglePreference(row.key)}
-                  label={row.label}
-                />
-              </div>
-            ))}
-          </>
-        )}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-          <p className="text-[14px] font-semibold text-slate-900 dark:text-white">Action Reminders</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Choose which reminders Blabber can send for Actions assigned to you.
-          </p>
-          {browserNotificationsUnavailable && (
-            <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-              Browser notifications are currently unavailable. Enable notifications for Blabber in your browser settings to receive reminders.
-            </p>
+          {browserPermission === 'default' && (
+            <button
+              type="button"
+              onClick={() => void requestBrowserPermission()}
+              className="rounded-xl bg-teal-600 px-3.5 py-1.5 text-[13px] font-semibold text-white transition hover:bg-teal-700 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+            >
+              Enable
+            </button>
           )}
         </div>
-        {preferencesQuery.isLoading ? (
-          <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading Action reminder settings...</p>
-        ) : preferencesQuery.isError || !preferences ? (
-          <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">
-            Unable to load Action reminder settings.
+        {browserPermission === 'denied' && (
+          <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+            Notifications are blocked for Blabber. Allow them in your browser&apos;s site settings to receive alerts.
           </p>
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 dark:border-slate-700">
-              <div>
-                <p className="text-[14px] font-medium text-slate-900 dark:text-white">Action reminders</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Allow Blabber to remind you about assigned Actions.</p>
-              </div>
-              <Toggle
-                checked={preferences.actionRemindersEnabled}
-                onChange={updatePreferences.isPending ? noop : () => void togglePreference('actionRemindersEnabled')}
-                label="Action reminders"
-              />
-            </div>
-            {preferences.actionRemindersEnabled && reminderRows.map((row, index) => (
-              <div
-                key={row.key}
-                className={`flex items-center justify-between gap-4 px-5 py-3.5 ${
-                  index < reminderRows.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-                }`}
-              >
-                <div>
-                  <p className="text-[14px] font-medium text-slate-900 dark:text-white">{row.label}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{row.desc}</p>
-                </div>
-                <Toggle
-                  checked={Boolean(preferences[row.key])}
-                  onChange={updatePreferences.isPending ? noop : () => void togglePreference(row.key)}
-                  label={row.label}
-                />
-              </div>
-            ))}
-          </>
+        )}
+        {browserPermission === 'unsupported' && (
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">This browser does not support notifications.</p>
         )}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
-        <p className="text-sm text-slate-600 dark:text-slate-300">
+      {/* ── Notification categories ── */}
+      <div>
+        <h2 className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">Notification categories</h2>
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+          {preferencesQuery.isLoading ? (
+            <p className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400">Loading notification settings...</p>
+          ) : preferencesQuery.isError || !preferences ? (
+            <p className="px-5 py-4 text-sm text-rose-600 dark:text-rose-300">Unable to load notification settings.</p>
+          ) : (
+            <>
+              {categoryRow({
+                icon: MessageSquare,
+                label: 'Messages',
+                desc: 'New messages when you are not in that chat.',
+                value: preferences.messageNotificationsEnabled,
+                onToggle: () => void togglePreference('messageNotificationsEnabled'),
+              })}
+              {categoryRow({
+                icon: AtSign,
+                label: 'Mentions',
+                desc: 'When someone mentions you in a group.',
+                value: preferences.mentionNotificationsEnabled,
+                onToggle: () => void togglePreference('mentionNotificationsEnabled'),
+              })}
+              {categoryRow({
+                icon: Phone,
+                label: 'Calls',
+                desc: 'Incoming voice and video calls.',
+                value: preferences.callNotificationsEnabled,
+                onToggle: () => void togglePreference('callNotificationsEnabled'),
+              })}
+              {categoryRow({
+                icon: CircleDashed,
+                label: 'New Moments',
+                desc: 'When contacts share new Moments.',
+                value: preferences.momentUpdatesEnabled,
+                onToggle: () => void togglePreference('momentUpdatesEnabled'),
+              })}
+              {categoryRow({
+                icon: Heart,
+                label: 'Moment activity',
+                desc: 'Reactions on your Moments.',
+                value: preferences.momentActivityEnabled,
+                onToggle: () => void togglePreference('momentActivityEnabled'),
+              })}
+              {categoryRow({
+                icon: Newspaper,
+                label: 'Posts',
+                desc: 'Comments and reactions on your posts.',
+                value: preferences.postActivityEnabled,
+                onToggle: () => void togglePreference('postActivityEnabled'),
+              })}
+              {categoryRow({
+                icon: CalendarDays,
+                label: 'Events & Reminders',
+                desc: 'Reminders for chat events you RSVP to.',
+                value: preferences.eventRemindersEnabled,
+                onToggle: () => void togglePreference('eventRemindersEnabled'),
+                group: 'events',
+              })}
+              {categoryRow({
+                icon: ListChecks,
+                label: 'Actions & Tasks',
+                desc: 'Reminders for Actions assigned to you.',
+                value: preferences.actionRemindersEnabled,
+                onToggle: () => void togglePreference('actionRemindersEnabled'),
+                group: 'actions',
+                last: true,
+              })}
+            </>
+          )}
+        </section>
+      </div>
+
+      {/* ── Delivery preferences ── */}
+      <div>
+        <h2 className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">Delivery preferences</h2>
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+          <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-3.5 dark:border-slate-700">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+              <Eye size={15} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-medium text-slate-900 dark:text-white">Show preview on notifications</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Show message content in push notifications.</p>
+            </div>
+            {preferences ? (
+              <>
+                <span className={`text-xs font-semibold ${preferences.notificationPreviewsEnabled ? 'text-teal-600 dark:text-teal-300' : 'text-slate-400 dark:text-slate-500'}`}>
+                  {preferences.notificationPreviewsEnabled ? 'On' : 'Off'}
+                </span>
+                <Toggle
+                  checked={preferences.notificationPreviewsEnabled}
+                  onChange={updatePreferences.isPending ? noop : () => void togglePreference('notificationPreviewsEnabled')}
+                  label="Show preview on notifications"
+                />
+              </>
+            ) : (
+              <span className="text-xs text-slate-400">…</span>
+            )}
+          </div>
+          <div className="flex items-center gap-3 px-5 py-3.5">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+              <Moon size={15} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-medium text-slate-900 dark:text-white">Quiet hours</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Pause non-urgent notifications during selected hours. Calls always come through.
+              </p>
+            </div>
+            <span className="flex items-center gap-2.5">
+              <span
+                className={`text-xs font-semibold ${
+                  preferences?.quietHoursEnabled
+                    ? 'text-teal-600 dark:text-teal-300'
+                    : 'text-slate-400 dark:text-slate-500'
+                }`}
+              >
+                {preferences?.quietHoursEnabled ? 'On' : 'Off'}
+              </span>
+              <Toggle
+                checked={Boolean(preferences?.quietHoursEnabled)}
+                onChange={() => {
+                  if (!preferences || updatePreferences.isPending) return;
+                  updatePreferences.mutate({
+                    quietHoursEnabled: !preferences.quietHoursEnabled,
+                    quietHoursTimezone: getBrowserTimezone() || '',
+                  });
+                }}
+                label="Quiet hours"
+              />
+            </span>
+          </div>
+          {preferences?.quietHoursEnabled && (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 pb-4 pl-[68px]">
+              {(
+                [
+                  ['quietHoursStart', 'From', preferences.quietHoursStart || '22:00'],
+                  ['quietHoursEnd', 'To', preferences.quietHoursEnd || '07:00'],
+                ] as const
+              ).map(([key, label, value]) => (
+                <label key={key} className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+                  {label}
+                  <input
+                    type="time"
+                    value={value}
+                    disabled={updatePreferences.isPending}
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      updatePreferences.mutate({
+                        [key]: e.target.value,
+                        quietHoursTimezone: getBrowserTimezone() || '',
+                      });
+                    }}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-100 dark:[color-scheme:dark]"
+                  />
+                </label>
+              ))}
+              <span className="text-xs text-slate-400 dark:text-slate-500">
+                Uses your device's timezone.
+              </span>
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* ── Footer note ── */}
+      <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
+        <Lock size={13} className="flex-shrink-0 text-teal-600 dark:text-teal-300" />
+        <p className="text-[13px] text-slate-600 dark:text-slate-300">
           Turning off alerts does not stop you from receiving messages in Blabber.
         </p>
-        {errorMessage && (
-          <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
-            {errorMessage}
-          </p>
-        )}
-      </section>
+      </div>
+      {browserNotificationsUnavailable && (
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Reminders and alerts require browser notifications to be enabled for Blabber.
+        </p>
+      )}
+      {errorMessage && (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300" role="status">
+          {errorMessage}
+        </p>
+      )}
     </div>
   );
 }
@@ -1854,7 +2503,7 @@ function noop() {}
 // ── Section: Appearance ──────────────────────────────────────────────────────
 
 function AppearanceSection() {
-  const { theme, resolvedTheme, setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const settingsQuery = useUserSettings();
   const updateSettings = useUpdateUserSettings();
 
@@ -1864,10 +2513,10 @@ function AppearanceSection() {
     }
   }, [setTheme, settingsQuery.data?.themePreference, theme]);
 
-  const options: Array<{ value: ThemePreference; label: string; desc: string }> = [
-    { value: 'system', label: 'System', desc: 'Match this device automatically' },
-    { value: 'light', label: 'Light', desc: 'Use Blabber in light mode' },
-    { value: 'dark', label: 'Dark', desc: 'Use Blabber in dark mode' },
+  const options: Array<{ value: ThemePreference; label: string; desc: string; icon: typeof Sun }> = [
+    { value: 'system', label: 'System', desc: 'Match this device automatically.', icon: Monitor },
+    { value: 'light', label: 'Light', desc: 'Use Blabber in light mode.', icon: Sun },
+    { value: 'dark', label: 'Dark', desc: 'Use Blabber in dark mode.', icon: Moon },
   ];
 
   const chooseTheme = (value: ThemePreference) => {
@@ -1880,36 +2529,56 @@ function AppearanceSection() {
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Appearance</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Customize how Blabber looks for you.
+          Customize how Blabber looks and feels.
         </p>
       </div>
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        {options.map((option, i) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => chooseTheme(option.value)}
-            className={`flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-700/40 ${
-              i < options.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              {option.value === 'dark' ? (
-                <Moon size={18} className="text-slate-500 dark:text-slate-400" />
-              ) : (
-                <Sun size={18} className="text-slate-500 dark:text-slate-400" />
-              )}
-              <div>
-                <p className="text-[14px] font-medium text-slate-900 dark:text-white">{option.label}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{option.desc}</p>
-              </div>
-            </div>
-            {theme === option.value && <Check size={18} className="text-teal-600 dark:text-teal-300" />}
-          </button>
-        ))}
-      </section>
+
+      <div>
+        <SecurityHeading>Theme</SecurityHeading>
+        <SecurityCard>
+          <div role="radiogroup" aria-label="Theme">
+            {options.map((option, i) => {
+              const selected = theme === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => chooseTheme(option.value)}
+                  className={`flex w-full items-center gap-3 px-5 py-4 text-left transition ${
+                    i < options.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
+                  } ${selected ? 'bg-teal-50/60 dark:bg-teal-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
+                >
+                  <span
+                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${
+                      selected
+                        ? 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300'
+                        : 'bg-slate-100 text-slate-500 dark:bg-slate-700/60 dark:text-slate-300'
+                    }`}
+                  >
+                    <option.icon size={17} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] font-semibold text-slate-900 dark:text-white">{option.label}</p>
+                    <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">{option.desc}</p>
+                  </div>
+                  <span
+                    className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 ${
+                      selected ? 'border-teal-500' : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                  >
+                    {selected && <span className="h-2.5 w-2.5 rounded-full bg-teal-500" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </SecurityCard>
+      </div>
+
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Current resolved theme: {resolvedTheme}.
+        Your theme choice is saved to your account and applies wherever you sign in.
       </p>
     </div>
   );
@@ -1918,10 +2587,12 @@ function AppearanceSection() {
 // ── Section: AI privacy ──────────────────────────────────────────────────────
 
 function AISection() {
+  const navigate = useNavigate();
   const settingsQuery = useUserSettings();
   const updateSettings = useUpdateUserSettings();
   const queryClient = useQueryClient();
   const [selectedScope, setSelectedScope] = useState('');
+  const [showAddSpace, setShowAddSpace] = useState(false);
   const clearHistory = useMutation({
     mutationFn: async () => {
       const { data } = await apiClient.delete('/api/intelligence/history/me');
@@ -1977,98 +2648,142 @@ function AISection() {
           ? 'Temporarily unavailable'
           : 'Checking...';
 
+  const scopeTypeMeta: Record<string, { label: string; icon: typeof Users }> = {
+    chat: { label: 'Chat', icon: MessageSquare },
+    community: { label: 'Community', icon: Users },
+    my_actions: { label: 'My Actions', icon: Check },
+    general: { label: 'General', icon: Globe },
+  };
+
+  const toggleStatus = (on: boolean) => (
+    <span className="flex items-center gap-2">
+      <span className={`text-xs font-semibold ${on ? 'text-teal-600 dark:text-teal-300' : 'text-slate-400 dark:text-slate-500'}`}>
+        {on ? 'On' : 'Off'}
+      </span>
+    </span>
+  );
+
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">AI privacy</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">AI Privacy / Veyra</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Control whether your account can request AI intelligence features.
+          Manage how Veyra uses your data and the spaces you approve.
         </p>
       </div>
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-          <div>
-            <p className="text-[14px] font-medium text-slate-900 dark:text-white">AI availability</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Server-side provider status for Chat Intelligence.
-            </p>
-          </div>
-          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-            {availabilityLabel}
+
+      {/* ── Trust banner ── */}
+      <section
+        className="relative overflow-hidden rounded-2xl border border-teal-500/30 p-5"
+        style={{ boxShadow: 'var(--bl-glow-sm)' }}
+      >
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 dark:hidden"
+          style={{ background: 'linear-gradient(120deg, #effffb 0%, #dcfcf2 55%, #e9fcff 100%)' }}
+        />
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 hidden dark:block"
+          style={{ background: 'linear-gradient(120deg, #06251f 0%, #0a3a34 55%, #07293b 100%)' }}
+        />
+        <div className="relative flex items-center gap-4">
+          <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-teal-500/15 text-teal-600 dark:text-teal-300">
+            <ShieldCheck size={22} />
           </span>
-        </div>
-        <div className="flex items-center justify-between gap-4 px-5 py-4">
-          <div>
-            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Allow AI requests</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Show the intelligence drawer and allow your AI requests.
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Your privacy is our priority</h2>
+            <p className="mt-0.5 text-[13px] leading-5 text-slate-600 dark:text-slate-300">
+              Veyra only accesses the spaces you approve. It does not read your other conversations or private content.
             </p>
           </div>
-          <Toggle
-            checked={enabled}
-            onChange={() => updateSettings.mutate({ chatIntelligenceEnabled: !enabled })}
-            label="Chat Intelligence"
-          />
-        </div>
-        <div className="flex items-center justify-between gap-4 border-t border-slate-100 px-5 py-4 dark:border-slate-700">
-          <div>
-            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Clear my AI history</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Remove private generated AI artifacts tied to your account.
-            </p>
+          <div className="hidden flex-shrink-0 sm:block">
+            <VeyraMark size={52} alive />
           </div>
-          <button
-            onClick={() => clearHistory.mutate()}
-            disabled={clearHistory.isPending}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700"
-          >
-            {clearHistory.isPending ? 'Clearing...' : 'Clear'}
-          </button>
         </div>
       </section>
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-          <div>
-            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Veyra</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Veyra only uses spaces you approve. It never reads every Conversation by default. You can remove access at any time.
-            </p>
-          </div>
-          <Toggle
-            checked={Boolean(veyra?.enabled)}
-            onChange={() => {
-              if (!veyra?.enabled && !enabled) {
-                window.alert('Turn on AI features in Privacy settings to use Veyra.');
-                return;
-              }
-              if (!veyra?.enabled && !window.confirm('Enable Veyra for your account? You will choose exactly which spaces it can use.')) return;
-              updateVeyra.mutate({ enabled: !veyra?.enabled });
-            }}
-            label="Enable Veyra"
-          />
-        </div>
-        <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-700">
-          <div>
-            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Voice replies</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Use browser text-to-speech for final Veyra responses.</p>
-          </div>
-          <Toggle
-            checked={veyra?.voiceRepliesEnabled ?? true}
-            onChange={() => updateVeyra.mutate({ voiceRepliesEnabled: !(veyra?.voiceRepliesEnabled ?? true) })}
-            label="Veyra voice replies"
-          />
-        </div>
-        <div className="space-y-3 px-5 py-4">
-          <div>
-            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Approved spaces</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Allow Veyra to use approved summaries, decisions, actions, and shared-item metadata from a space.</p>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
+
+      {/* ── AI request controls ── */}
+      <PrivacyCard icon={Sparkles} title="AI controls" right={
+        <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200" title="Server-side provider status">
+          {availabilityLabel}
+        </span>
+      }>
+        <PrivacyRow
+          label="AI requests"
+          desc="Allow AI features and let Veyra answer your questions inside approved spaces."
+          control={
+            <span className="flex items-center gap-2.5">
+              {toggleStatus(enabled)}
+              <Toggle
+                checked={enabled}
+                onChange={() => updateSettings.mutate({ chatIntelligenceEnabled: !enabled })}
+                label="AI requests"
+              />
+            </span>
+          }
+        />
+        <PrivacyRow
+          label="Veyra assistant"
+          desc="Enable the Veyra assistant for your account. You choose exactly which spaces it can use."
+          control={
+            <span className="flex items-center gap-2.5">
+              {toggleStatus(Boolean(veyra?.enabled))}
+              <Toggle
+                checked={Boolean(veyra?.enabled)}
+                onChange={() => {
+                  if (!veyra?.enabled && !enabled) {
+                    window.alert('Turn on AI requests above to use Veyra.');
+                    return;
+                  }
+                  if (!veyra?.enabled && !window.confirm('Enable Veyra for your account? You will choose exactly which spaces it can use.')) return;
+                  updateVeyra.mutate({ enabled: !veyra?.enabled });
+                }}
+                label="Enable Veyra"
+              />
+            </span>
+          }
+        />
+        <PrivacyRow
+          label="Voice replies"
+          desc="Let Veyra respond with voice when supported."
+          control={
+            <span className="flex items-center gap-2.5">
+              {toggleStatus(veyra?.voiceRepliesEnabled ?? true)}
+              <Toggle
+                checked={veyra?.voiceRepliesEnabled ?? true}
+                onChange={() => updateVeyra.mutate({ voiceRepliesEnabled: !(veyra?.voiceRepliesEnabled ?? true) })}
+                label="Veyra voice replies"
+              />
+            </span>
+          }
+          last
+        />
+      </PrivacyCard>
+
+      {/* ── Approved spaces ── */}
+      <PrivacyCard
+        icon={Lock}
+        title="Approved spaces"
+        subtitle="Veyra can read messages and files only in the spaces listed below."
+        right={
+          <button
+            type="button"
+            onClick={() => setShowAddSpace((value) => !value)}
+            disabled={!veyra?.enabled}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-teal-500/40 px-3 py-1.5 text-[13px] font-semibold text-teal-700 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
+          >
+            <Plus size={13} />
+            Add space
+          </button>
+        }
+      >
+        {showAddSpace && veyra?.enabled && (
+          <div className="mb-3 flex flex-col gap-2 rounded-xl border border-teal-500/30 bg-teal-50/50 p-3 dark:bg-teal-500/5 sm:flex-row">
             <select
               value={selectedScope}
               onChange={(event) => setSelectedScope(event.target.value)}
-              disabled={!veyra?.enabled}
-              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
             >
               <option value="">Choose a space</option>
               {(scopeCandidates.data || []).map((candidate) => (
@@ -2080,31 +2795,110 @@ function AISection() {
             <button
               type="button"
               onClick={() => grantScope.mutate()}
-              disabled={!selectedScope || grantScope.isPending || !veyra?.enabled}
-              className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:bg-slate-300"
+              disabled={!selectedScope || grantScope.isPending}
+              className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
             >
-              Allow
+              {grantScope.isPending ? 'Approving…' : 'Approve'}
             </button>
           </div>
-          <div className="space-y-2">
-            {(veyra?.scopes || []).length === 0 ? (
-              <p className="text-sm text-slate-500 dark:text-slate-400">No spaces approved.</p>
-            ) : (
-              veyra!.scopes.map((scope) => (
-                <div key={scope.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 px-3 py-2 dark:border-slate-700">
-                  <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{scope.label || scope.type}</span>
-                  <button type="button" onClick={() => revokeScope.mutate(scope.id)} className="text-sm font-semibold text-rose-600 transition hover:text-rose-700">
+        )}
+
+        {(veyra?.scopes || []).length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center dark:border-slate-700">
+            <p className="text-sm font-semibold text-slate-900 dark:text-white">No spaces approved yet.</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Approve a chat or group when you want Veyra to help there.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-700">
+            {veyra!.scopes.map((scope) => {
+              const meta = scopeTypeMeta[scope.type] || { label: scope.type, icon: Globe };
+              return (
+                <div key={scope.id} className="flex items-center gap-3 py-3">
+                  <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+                    <meta.icon size={15} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{scope.label || meta.label}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{meta.label}</p>
+                  </div>
+                  <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-[11px] font-semibold text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
+                    Approved
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => revokeScope.mutate(scope.id)}
+                    disabled={revokeScope.isPending}
+                    className="rounded-lg px-2 py-1 text-[13px] font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
+                  >
                     Revoke
                   </button>
                 </div>
-              ))
-            )}
+              );
+            })}
           </div>
+        )}
+        <p className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <span>Review and remove any space to stop Veyra from accessing it.</span>
+          <button
+            type="button"
+            onClick={() => navigate('/settings?s=help')}
+            className="inline-flex items-center gap-1 font-semibold text-teal-700 hover:underline dark:text-teal-300"
+          >
+            Learn more <ExternalLink size={11} />
+          </button>
+        </p>
+      </PrivacyCard>
+
+      {/* ── AI activity & history ── */}
+      <PrivacyCard icon={History} title="AI activity & history" subtitle="Manage what Veyra has stored for you.">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[14px] font-medium text-slate-900 dark:text-white">Clear AI history</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Delete your past AI interactions and context.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              if (!window.confirm('Delete your past AI interactions and context? This cannot be undone.')) return;
+              clearHistory.mutate();
+            }}
+            disabled={clearHistory.isPending}
+            className="rounded-xl border border-rose-300/70 px-3.5 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-60 dark:border-rose-500/40 dark:text-rose-400 dark:hover:bg-rose-500/10"
+          >
+            {clearHistory.isPending ? 'Clearing…' : 'Clear history'}
+          </button>
         </div>
-      </section>
-      <p className="text-xs text-slate-400 dark:text-slate-500">
-        AI analysis runs only when you manually request it from a chat or open Veyra. Veyra is read-only in this version.
-      </p>
+        {clearHistory.isSuccess && (
+          <p className="mt-2 text-xs text-teal-700 dark:text-teal-300" role="status">AI history cleared.</p>
+        )}
+        {clearHistory.isError && (
+          <p className="mt-2 text-xs text-rose-600 dark:text-rose-300" role="status">Unable to clear AI history. Try again.</p>
+        )}
+        <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">
+          AI analysis runs only when you manually request it from a chat or open Veyra. Veyra is read-only in this version.
+        </p>
+      </PrivacyCard>
+
+      {/* ── Privacy note ── */}
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
+        <p className="flex min-w-0 items-center gap-2 text-[13px] text-slate-600 dark:text-slate-300">
+          <Lock size={13} className="flex-shrink-0 text-teal-600 dark:text-teal-300" />
+          <span>
+            AI never shares your data with anyone.{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/settings?s=help')}
+              className="font-semibold text-teal-700 hover:underline dark:text-teal-300"
+            >
+              Learn more
+            </button>{' '}
+            about Blabber&apos;s AI privacy.
+          </span>
+        </p>
+      </div>
     </div>
   );
 }
@@ -2112,36 +2906,64 @@ function AISection() {
 // ── Section: Help ────────────────────────────────────────────────────────────
 
 function HelpSection() {
-  const topics = [
+  const navigate = useNavigate();
+  const [openTopic, setOpenTopic] = useState<string | null>(null);
+
+  const topics: Array<{
+    key: string;
+    icon: typeof Rocket;
+    title: string;
+    desc: string;
+    body: string;
+    link?: { label: string; to: string };
+  }> = [
     {
-      label: 'Direct and group chats',
-      desc: 'Use New Chat for one-to-one conversations, or create a group and add workspace members.',
+      key: 'getting-started',
+      icon: Rocket,
+      title: 'Getting started',
+      desc: 'Learn the basics of Blabber.',
+      body: 'Use New Chat to start one-to-one conversations, browse Discover to find people and content, and share updates from the Feed, Reels, and Moments tabs. Your profile, privacy, and notifications are all managed from this Settings area.',
     },
     {
-      label: 'Chat Intelligence',
-      desc: 'Open Intelligence from a chat when you want summaries, actions, decisions, waiting-on items, or group memory.',
+      key: 'chats-groups',
+      icon: MessageSquare,
+      title: 'Chats & groups',
+      desc: 'Everything about messaging and group chats.',
+      body: 'Use New Chat for one-to-one conversations, or create a group and add members. Start voice and video calls from a direct chat — if someone disabled incoming calls, Blabber will tell you cleanly. Open Intelligence from a chat for summaries, actions, decisions, and group memory.',
     },
     {
-      label: 'Moments',
-      desc: 'Share short-lived text or photo updates from the Moments item in the main navigation.',
+      key: 'content',
+      icon: Clapperboard,
+      title: 'Posts, Reels & Moments',
+      desc: 'Share content and express yourself.',
+      body: 'Share posts to your feed, publish short reels, and post short-lived Moments from the main navigation. Only content you choose to make discoverable can appear in Discover, and Moments always expire on their own.',
     },
     {
-      label: 'Voice and video calls',
-      desc: 'Start calls from a direct chat. If someone disabled incoming calls, Blabber will tell you cleanly.',
+      key: 'privacy',
+      icon: Shield,
+      title: 'Privacy & Visibility',
+      desc: 'Control who sees what you share.',
+      body: 'Control read receipts, presence, last-seen visibility, incoming calls, who can message you, and who can add you to groups. Profile visibility decides whether people can see your posts without following you.',
+      link: { label: 'Open Privacy settings', to: '/settings?s=privacy' },
     },
     {
-      label: 'Notifications',
-      desc: 'Browser alerts are controlled in Notifications. Turning them off never stops messages or unread counts.',
+      key: 'ai',
+      icon: Sparkles,
+      title: 'AI Privacy / Veyra',
+      desc: 'Manage your AI interactions and data.',
+      body: 'Veyra and Chat Intelligence only read the spaces you approve. You can review approved spaces, turn off AI requests, and clear your AI history at any time.',
+      link: { label: 'Open AI Privacy settings', to: '/settings?s=ai' },
     },
     {
-      label: 'Password reset',
-      desc: 'Use Forgot Password on the sign-in page to request a reset email when SMTP is configured.',
-    },
-    {
-      label: 'Privacy controls',
-      desc: 'Use Privacy settings to control read receipts, presence, last-seen visibility, and incoming calls.',
+      key: 'account',
+      icon: Lock,
+      title: 'Account & Security',
+      desc: 'Keep your account safe and secure.',
+      body: 'Manage your email, review signed-in devices, and sign out sessions you don’t recognize. Use Forgot Password on the sign-in page if you ever get locked out.',
+      link: { label: 'Open Account & Security', to: '/settings?s=account' },
     },
   ];
+
   return (
     <div className="space-y-5">
       <div>
@@ -2150,27 +2972,66 @@ function HelpSection() {
           Resources and support for using Blabber.
         </p>
       </div>
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        {topics.map((topic, i) => (
-          <div
-            key={topic.label}
-            className={`px-5 py-3.5 ${
-              i < topics.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''
-            }`}
-          >
-            <div>
-              <p className="text-[14px] font-medium text-slate-900 dark:text-white">{topic.label}</p>
-              <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">{topic.desc}</p>
+
+      <SecurityCard>
+        {topics.map((topic, i) => {
+          const open = openTopic === topic.key;
+          return (
+            <div key={topic.key} className={i < topics.length - 1 ? 'border-b border-slate-100 dark:border-slate-700' : ''}>
+              <button
+                type="button"
+                onClick={() => setOpenTopic(open ? null : topic.key)}
+                aria-expanded={open}
+                className="flex w-full items-center gap-3 px-5 py-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-700/40"
+              >
+                <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+                  <topic.icon size={17} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-semibold text-slate-900 dark:text-white">{topic.title}</p>
+                  <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">{topic.desc}</p>
+                </div>
+                <ChevronDown
+                  size={16}
+                  className={`flex-shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {open && (
+                <div className="px-5 pb-5">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                    <p className="text-[13px] leading-5 text-slate-600 dark:text-slate-300">{topic.body}</p>
+                    {topic.link && (
+                      <button
+                        type="button"
+                        onClick={() => navigate(topic.link!.to)}
+                        className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-teal-700 transition hover:text-teal-800 dark:text-teal-300 dark:hover:text-teal-200"
+                      >
+                        {topic.link.label}
+                        <ArrowRight size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
-      </section>
+          );
+        })}
+      </SecurityCard>
+
       <a
         href="mailto:support@example.com?subject=Blabber%20support"
-        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/60"
+        className="flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50/70 px-5 py-4 transition hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
       >
-        <ExternalLink size={15} />
-        Report an issue
+        <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300">
+          <Bug size={17} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14px] font-semibold text-slate-900 dark:text-white">Report an issue</span>
+          <span className="mt-0.5 block text-[13px] text-slate-500 dark:text-slate-400">
+            Found a bug or need help? Let us know.
+          </span>
+        </span>
+        <ExternalLink size={15} className="flex-shrink-0 text-slate-400" />
       </a>
     </div>
   );
@@ -2181,21 +3042,19 @@ function DiscoverySection() {
   const profile = useQuery({ queryKey: ['my-profile'], queryFn: fetchMyProfile });
   const topics = useQuery({ queryKey: ['discovery-topics'], queryFn: fetchDiscoveryTopics });
   const prefs = useQuery({ queryKey: ['discovery-preferences'], queryFn: fetchDiscoveryPreferences });
-  const [creatorEnabled, setCreatorEnabled] = useState(false);
-  const [creatorTopicIds, setCreatorTopicIds] = useState<string[]>([]);
-  const [personalizedEnabled, setPersonalizedEnabled] = useState(true);
   const [notice, setNotice] = useState('');
+  const [noticeIsError, setNoticeIsError] = useState(false);
 
-  useEffect(() => {
-    if (profile.data?.creatorDiscovery) {
-      setCreatorEnabled(profile.data.creatorDiscovery.enabled);
-      setCreatorTopicIds(profile.data.creatorDiscovery.topicIds || []);
-    }
-  }, [profile.data?.creatorDiscovery]);
-
-  useEffect(() => {
-    if (prefs.data) setPersonalizedEnabled(prefs.data.personalizedDiscoveryEnabled);
-  }, [prefs.data]);
+  const discovery = profile.data?.creatorDiscovery;
+  const profileEnabled = Boolean(discovery?.enabled);
+  const topicIds = discovery?.topicIds || [];
+  const showPosts = discovery?.showPostsInDiscover !== false;
+  const showReels = discovery?.showReelsInDiscover !== false;
+  const suggestEnabled = discovery?.suggestMeToOthers !== false;
+  const usernameFindability = discovery?.usernameFindability || 'everyone';
+  const hideBlocked = discovery?.hideBlockedUsers !== false;
+  const personalizedEnabled = prefs.data?.personalizedDiscoveryEnabled !== false;
+  const loaded = Boolean(profile.data);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['my-profile'] });
@@ -2203,140 +3062,734 @@ function DiscoverySection() {
     queryClient.invalidateQueries({ queryKey: ['discovery'] });
   };
 
-  const saveCreator = useMutation({
-    mutationFn: () => updateCreatorDiscovery({ creatorDiscoveryEnabled: creatorEnabled, creatorTopicIds }),
+  const showOk = (text: string) => {
+    setNotice(text);
+    setNoticeIsError(false);
+  };
+  const showErr = (text: string) => {
+    setNotice(text);
+    setNoticeIsError(true);
+  };
+
+  const saveDiscovery = useMutation({
+    mutationFn: updateCreatorDiscovery,
     onSuccess: () => {
-      setNotice('Creator discovery settings saved.');
+      showOk('Discovery settings saved.');
       refresh();
     },
-    onError: (error: any) => setNotice(error?.response?.data?.message || 'Complete your public profile details to enable Creator discovery.'),
+    onError: (error) => {
+      const err = error as { response?: { data?: { message?: string } } };
+      showErr(err.response?.data?.message || 'Unable to save discovery settings.');
+    },
   });
 
   const savePersonalization = useMutation({
-    mutationFn: () => updateDiscoveryPreferences({ personalizedDiscoveryEnabled: personalizedEnabled }),
+    mutationFn: (enabled: boolean) => updateDiscoveryPreferences({ personalizedDiscoveryEnabled: enabled }),
     onSuccess: () => {
-      setNotice('Discovery personalization settings saved.');
+      showOk('Discovery settings saved.');
       refresh();
     },
-    onError: () => setNotice('Unable to save personalization settings.'),
+    onError: () => showErr('Unable to save personalization settings.'),
   });
 
   const clearPersonalization = useMutation({
     mutationFn: clearDiscoveryPersonalization,
     onSuccess: () => {
-      setNotice('Personalized discovery activity cleared.');
+      showOk('Personalized discovery activity cleared.');
       refresh();
     },
-    onError: () => setNotice('Unable to clear personalization data.'),
+    onError: () => showErr('Unable to clear personalization data.'),
   });
 
-  const toggleTopic = (topic: DiscoveryTopic) => {
-    setCreatorTopicIds((current) =>
-      current.includes(topic.id)
-        ? current.filter((id) => id !== topic.id)
-        : current.length >= 5
-          ? current
-          : [...current, topic.id]
-    );
+  const toggleProfile = () => {
+    if (!loaded || saveDiscovery.isPending) return;
+    if (!profileEnabled && topicIds.length === 0) {
+      showErr('Choose at least one creator topic below before turning this on.');
+      return;
+    }
+    saveDiscovery.mutate({ creatorDiscoveryEnabled: !profileEnabled, creatorTopicIds: topicIds });
   };
 
-  const canEnable = profile.data?.visibility === 'public' && Boolean(profile.data?.handle) && creatorTopicIds.length > 0;
+  const toggleTopic = (topic: DiscoveryTopic) => {
+    if (!loaded || saveDiscovery.isPending) return;
+    const next = topicIds.includes(topic.id)
+      ? topicIds.filter((id) => id !== topic.id)
+      : topicIds.length >= 5
+        ? topicIds
+        : [...topicIds, topic.id];
+    if (next.length === topicIds.length && !topicIds.includes(topic.id)) {
+      showErr('You can choose up to five creator topics.');
+      return;
+    }
+    if (profileEnabled && next.length === 0) {
+      showErr('Keep at least one topic while your profile is shown in Discover.');
+      return;
+    }
+    saveDiscovery.mutate({ creatorDiscoveryEnabled: profileEnabled, creatorTopicIds: next });
+  };
+
+  const toggleContent = (
+    field: 'showPostsInDiscover' | 'showReelsInDiscover' | 'suggestMeToOthers' | 'hideBlockedUsers',
+    current: boolean
+  ) => {
+    if (!loaded || saveDiscovery.isPending) return;
+    saveDiscovery.mutate({
+      creatorDiscoveryEnabled: profileEnabled,
+      creatorTopicIds: topicIds,
+      [field]: !current,
+    });
+  };
+
+  const changeFindability = (value: string) => {
+    if (!loaded || saveDiscovery.isPending) return;
+    saveDiscovery.mutate({
+      creatorDiscoveryEnabled: profileEnabled,
+      creatorTopicIds: topicIds,
+      usernameFindability: value as 'everyone' | 'followers' | 'contacts' | 'no_one',
+    });
+  };
+
+  const toggleControl = (on: boolean, onToggle: () => void, label: string) => (
+    <span className="flex items-center gap-2.5">
+      <span
+        className={`text-xs font-semibold ${on ? 'text-teal-600 dark:text-teal-300' : 'text-slate-400 dark:text-slate-500'}`}
+      >
+        {on ? 'On' : 'Off'}
+      </span>
+      <Toggle checked={on} onChange={onToggle} label={label} />
+    </span>
+  );
+
+  const profileHint = !profile.data?.handle
+    ? 'Choose a profile handle before showing your profile in Discover.'
+    : profile.data?.visibility !== 'public'
+      ? 'Make your profile public before showing it in Discover.'
+      : topicIds.length === 0
+        ? 'Choose at least one topic for your creator profile.'
+        : 'Your public profile and eligible public content may appear in Discover.';
 
   return (
-    <div className="space-y-6">
-      <section>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Creator discovery</h2>
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Discovery</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Choose whether your public profile and selected public posts can appear in Discover.
+          Control how you appear in Discover and who can find you.
         </p>
-        <div className="mt-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
-          <label className="flex items-center justify-between gap-4">
-            <span>
-              <span className="block text-sm font-medium text-slate-900 dark:text-white">Creator discovery</span>
-              <span className="block text-xs text-slate-500">Your Moments, chats, followers-only posts, and private Communities are not included in Discover.</span>
-            </span>
-            <input
-              type="checkbox"
-              checked={creatorEnabled}
-              onChange={(event) => setCreatorEnabled(event.target.checked)}
-              className="h-5 w-5 accent-teal-600"
-              aria-label="Creator discovery"
-            />
-          </label>
-          <div className="mt-4">
-            <p className="mb-2 text-xs font-medium text-slate-500">Creator topics</p>
-            <div className="flex flex-wrap gap-2">
-              {(topics.data || []).map((topic) => (
-                <button
-                  key={topic.id}
-                  onClick={() => toggleTopic(topic)}
-                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${creatorTopicIds.includes(topic.id) ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-200' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}
-                >
-                  {topic.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-900">
-            {!profile.data?.handle ? 'Choose a profile handle before enabling Creator discovery.' : profile.data?.visibility !== 'public' ? 'Make your profile public before enabling Creator discovery.' : creatorTopicIds.length === 0 ? 'Choose at least one topic for your creator profile.' : 'Your public profile and eligible public posts may appear in Discover.'}
-          </div>
+      </div>
+
+      {notice && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            noticeIsError
+              ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
+          }`}
+        >
+          {notice}
+        </div>
+      )}
+
+      <div>
+        <SecurityHeading>Profile visibility</SecurityHeading>
+        <SecurityCard>
+          <AccountRow
+            icon={Globe}
+            label="Show my profile in Discover"
+            value="Allow others to find your profile in Blabber Discover."
+            action={toggleControl(profileEnabled, toggleProfile, 'Show my profile in Discover')}
+            expanded
+            panel={
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Creator topics (choose 1–5)</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(topics.data || []).map((topic) => (
+                    <button
+                      key={topic.id}
+                      onClick={() => toggleTopic(topic)}
+                      disabled={saveDiscovery.isPending}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-60 ${
+                        topicIds.includes(topic.id)
+                          ? 'border-teal-500 bg-teal-50 text-teal-700 dark:border-teal-500/60 dark:bg-teal-500/15 dark:text-teal-300'
+                          : 'border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-600 dark:text-slate-300 dark:hover:border-slate-500'
+                      }`}
+                    >
+                      {topic.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{profileHint}</p>
+              </div>
+            }
+          />
+          <AccountRow
+            icon={UserPlus}
+            label="Suggest me to others"
+            value="Allow Blabber to suggest your profile in the Discover creators list."
+            action={toggleControl(suggestEnabled, () => toggleContent('suggestMeToOthers', suggestEnabled), 'Suggest me to others')}
+            last
+          />
+        </SecurityCard>
+      </div>
+
+      <div>
+        <SecurityHeading>Content visibility</SecurityHeading>
+        <SecurityCard>
+          <AccountRow
+            icon={Newspaper}
+            label="Show my posts in Discover"
+            value={
+              <>
+                Allow my public posts to appear in Blabber Discover.
+                <span className="mt-0.5 block text-xs text-slate-400 dark:text-slate-500">
+                  Applies to posts you've marked discoverable — private posts never appear.
+                </span>
+              </>
+            }
+            action={toggleControl(showPosts, () => toggleContent('showPostsInDiscover', showPosts), 'Show my posts in Discover')}
+          />
+          <AccountRow
+            icon={Clapperboard}
+            label="Show my reels in Discover"
+            value={
+              <>
+                Allow my public reels to appear in Blabber Discover.
+                <span className="mt-0.5 block text-xs text-slate-400 dark:text-slate-500">
+                  Applies to reels you've marked discoverable — private reels never appear.
+                </span>
+              </>
+            }
+            action={toggleControl(showReels, () => toggleContent('showReelsInDiscover', showReels), 'Show my reels in Discover')}
+            last
+          />
+        </SecurityCard>
+      </div>
+
+      <div>
+        <SecurityHeading>Who can find you</SecurityHeading>
+        <SecurityCard>
+          <AccountRow
+            icon={AtSign}
+            label="Who can find me by username"
+            value="Choose who can find you in search using your @username."
+            action={
+              <PrivacySelect
+                value={usernameFindability}
+                options={[
+                  { value: 'everyone', label: 'Everyone' },
+                  { value: 'followers', label: 'Followers' },
+                  { value: 'contacts', label: 'Contacts' },
+                  { value: 'no_one', label: 'No one' },
+                ]}
+                onChange={changeFindability}
+                label="Who can find me by username"
+              />
+            }
+            last
+          />
+        </SecurityCard>
+      </div>
+
+      <div>
+        <SecurityHeading>Safe discovery</SecurityHeading>
+        <SecurityCard>
+          <AccountRow
+            icon={EyeOff}
+            label="Hide blocked users"
+            value={
+              <>
+                Hide people you've blocked from your Discover and search results.
+                <span className="mt-0.5 block text-xs text-slate-400 dark:text-slate-500">
+                  People who blocked you never appear, and blocked users can never see your content.
+                </span>
+              </>
+            }
+            action={toggleControl(hideBlocked, () => toggleContent('hideBlockedUsers', hideBlocked), 'Hide blocked users')}
+            last
+          />
+        </SecurityCard>
+      </div>
+
+      <div>
+        <SecurityHeading>Personalization</SecurityHeading>
+        <SecurityCard>
+          <AccountRow
+            icon={Activity}
+            label="Personalized discovery"
+            value="Let your Discover activity improve future recommendations."
+            action={toggleControl(
+              personalizedEnabled,
+              () => {
+                if (prefs.data && !savePersonalization.isPending) savePersonalization.mutate(!personalizedEnabled);
+              },
+              'Personalized discovery'
+            )}
+            expanded
+            panel={
+              <div className="grid gap-3 text-sm sm:grid-cols-3">
+                <div className="rounded-xl bg-slate-50 p-3 text-slate-600 dark:bg-slate-900/40 dark:text-slate-300">
+                  {prefs.data?.followedTopics.length || 0} followed topics
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3 text-slate-600 dark:bg-slate-900/40 dark:text-slate-300">
+                  {prefs.data?.mutedTopics.length || 0} muted topics
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3 text-slate-600 dark:bg-slate-900/40 dark:text-slate-300">
+                  {prefs.data?.hiddenPostCount || 0} hidden posts
+                </div>
+              </div>
+            }
+          />
+          <AccountRow
+            icon={History}
+            label="Clear personalization data"
+            value="Remove the activity Blabber uses to personalize Discover. Your follows, posts, and messages are not deleted."
+            action={
+              <button
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Clear the activity Blabber uses for personalized discovery? Your follows, posts, Communities, and messages will not be deleted.'
+                    )
+                  ) {
+                    clearPersonalization.mutate();
+                  }
+                }}
+                disabled={clearPersonalization.isPending}
+                className={CHANGE_BTN}
+              >
+                {clearPersonalization.isPending ? 'Clearing…' : 'Clear'}
+              </button>
+            }
+            last
+          />
+        </SecurityCard>
+      </div>
+
+      <div className="flex items-center gap-2.5 rounded-2xl border border-slate-200 bg-white px-5 py-3.5 dark:border-slate-700 dark:bg-slate-800">
+        <Lock size={14} className="flex-shrink-0 text-slate-400" />
+        <p className="text-[13px] text-slate-500 dark:text-slate-400">
+          Changes you make here help control your visibility across Blabber.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Control Center (settings home dashboard) ────────────────────────────────
+
+function StatusPill({ on, label }: { on?: boolean; label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+        on
+          ? 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300'
+          : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function ControlRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <span className="text-[13px] text-slate-600 dark:text-slate-400">{label}</span>
+      {value}
+    </div>
+  );
+}
+
+function ControlMetric({ icon: Icon, value, label }: { icon: typeof Users; value: string; label: string }) {
+  return (
+    <div className="flex min-w-0 flex-col items-center gap-0.5 text-center">
+      <Icon size={14} className="text-teal-600 dark:text-teal-300" />
+      <span className="text-base font-bold leading-tight text-slate-900 dark:text-white">{value}</span>
+      <span className="text-[11px] text-slate-500 dark:text-slate-400">{label}</span>
+    </div>
+  );
+}
+
+function ControlCard({
+  icon: Icon,
+  title,
+  cta,
+  onCta,
+  className = '',
+  children,
+}: {
+  icon: typeof Users;
+  title: string;
+  cta?: string;
+  onCta?: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={`flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-[0_0_16px_rgba(45,212,191,0.12)] dark:border-slate-800 dark:bg-slate-900/70 dark:hover:shadow-[0_0_18px_rgba(45,212,191,0.14)] ${className}`}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+          <Icon size={16} />
+        </span>
+        <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">{title}</h2>
+      </div>
+      <div className="mt-3 flex-1">{children}</div>
+      {cta && (
+        <button
+          onClick={onCta}
+          className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-[13px] font-semibold text-slate-700 transition hover:border-teal-500/40 hover:bg-teal-50 hover:text-teal-800 dark:border-slate-700 dark:text-slate-200 dark:hover:border-teal-400/40 dark:hover:bg-teal-500/10 dark:hover:text-teal-200"
+        >
+          {cta}
+          <ArrowRight size={13} />
+        </button>
+      )}
+    </section>
+  );
+}
+
+function CompletionRing({ percent }: { percent: number }) {
+  const radius = 26;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <div className="relative h-[76px] w-[76px] flex-shrink-0">
+      <svg viewBox="0 0 64 64" className="h-full w-full -rotate-90">
+        <circle cx="32" cy="32" r={radius} fill="none" strokeWidth="5" className="stroke-slate-200 dark:stroke-slate-700" />
+        <circle
+          cx="32"
+          cy="32"
+          r={radius}
+          fill="none"
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - percent / 100)}
+          className="stroke-teal-500 transition-[stroke-dashoffset] duration-500"
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-[13px] font-bold text-slate-900 dark:text-white">{percent}%</span>
+      </div>
+    </div>
+  );
+}
+
+function ControlCenterSection({ onOpenSection }: { onOpenSection: (key: SectionKey) => void }) {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const profileUser = user as (typeof user & { avatarUrl?: string; avatar?: string; role?: string }) | null;
+  const avatarUrl = profileUser?.avatarUrl || profileUser?.avatar;
+
+  const settingsQuery = useUserSettings();
+  const myProfileQuery = useQuery({ queryKey: ['profiles', 'me'], queryFn: fetchMyProfile });
+  const profile = myProfileQuery.data;
+  const handle = profile?.handle?.replace(/^@/, '') || '';
+
+  const postsQuery = useQuery({
+    queryKey: ['profile-posts', handle],
+    queryFn: () => fetchProfilePosts(handle),
+    enabled: Boolean(handle),
+  });
+  const reelsQuery = useQuery({
+    queryKey: ['profile-reels', handle],
+    queryFn: () => fetchProfileReels(handle),
+    enabled: Boolean(handle),
+  });
+  const sessionsQuery = useQuery({ queryKey: ['account-sessions'], queryFn: fetchDeviceSessions });
+  const veyraQuery = useQuery({ queryKey: ['veyra-settings'], queryFn: fetchVeyraSettings });
+  const discoveryPrefsQuery = useQuery({ queryKey: ['discovery-preferences'], queryFn: fetchDiscoveryPreferences });
+  const savedMessagesQuery = useSavedMessages();
+  const savedPostsQuery = useQuery({ queryKey: ['saved-posts'], queryFn: () => fetchSavedPosts() });
+  const preferencesQuery = useQuery({
+    queryKey: ['notification-preferences', user?._id],
+    enabled: Boolean(user?._id),
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ preferences: NotificationPreferences }>(
+        `/api/notifications/preferences/${user!._id}`
+      );
+      return data.preferences;
+    },
+  });
+  const [browserPermission] = useState(() => getBrowserPermission());
+
+  const settings = settingsQuery.data;
+  const preferences = preferencesQuery.data;
+  const sessions = sessionsQuery.data?.sessions || [];
+  const { activeSessions, groups: deviceGroups } = groupActiveDeviceSessions(sessions);
+  const currentSession = activeSessions.find((session) => session.current);
+  const veyra = veyraQuery.data;
+
+  // Client-side completion over the fields the product actually stores.
+  const completionChecks = [
+    Boolean(avatarUrl),
+    Boolean(user?.name),
+    Boolean(handle),
+    Boolean(profile?.bio),
+    Boolean(profile?.website),
+    Boolean(profileUser?.role),
+  ];
+  const completion = Math.round((completionChecks.filter(Boolean).length / completionChecks.length) * 100);
+
+  const openPublicProfile = () => {
+    if (handle) navigate(`/p/${handle}`);
+    else onOpenSection('profile');
+  };
+
+  const countWithMore = (loaded: number | undefined, hasMore: boolean) =>
+    loaded === undefined ? '…' : hasMore ? `${loaded}+` : String(loaded);
+
+  const lastLoginAt = currentSession?.lastActiveAt || currentSession?.createdAt;
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Control Center</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Quickly review your account, privacy, activity, and creator presence.
+          </p>
+        </div>
+        <div className="flex flex-shrink-0 flex-wrap gap-2">
           <button
-            onClick={() => saveCreator.mutate()}
-            disabled={saveCreator.isPending || (creatorEnabled && !canEnable)}
-            className="mt-4 rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950"
+            onClick={openPublicProfile}
+            className="inline-flex items-center gap-2 rounded-xl border border-teal-500/40 px-3.5 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
           >
-            {saveCreator.isPending ? 'Saving...' : 'Save creator discovery'}
+            <ExternalLink size={14} />
+            View public profile
+          </button>
+          <button
+            onClick={() => onOpenSection('profile')}
+            className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+          >
+            <Pencil size={14} />
+            Edit profile
           </button>
         </div>
-      </section>
+      </div>
 
-      <section>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Discovery and personalization</h2>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Control how Blabber uses your Discover activity to improve future recommendations.
-        </p>
-        <div className="mt-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
-          <label className="flex items-center justify-between gap-4">
-            <span>
-              <span className="block text-sm font-medium text-slate-900 dark:text-white">Personalized discovery</span>
-              <span className="block text-xs text-slate-500">When enabled, your activity in Discover can help Blabber show more relevant content in future personalized feeds.</span>
-            </span>
-            <input
-              type="checkbox"
-              checked={personalizedEnabled}
-              onChange={(event) => setPersonalizedEnabled(event.target.checked)}
-              className="h-5 w-5 accent-teal-600"
-              aria-label="Personalized discovery"
+      {/* Row 1: profile status / public profile / privacy */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <ControlCard icon={Check} title="Profile status">
+          <div className="flex items-center gap-4">
+            <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
+              <Avatar src={avatarUrl} alt={user?.name || 'You'} size="lg" online={true} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{user?.name || user?.username}</p>
+                <p className="truncate text-xs text-teal-600 dark:text-teal-300">{handle ? `@${handle}` : 'No handle yet'}</p>
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <CompletionRing percent={completion} />
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">Complete</span>
+            </div>
+          </div>
+          <button
+            onClick={() => onOpenSection('profile')}
+            className="mt-4 w-full rounded-xl bg-teal-600 py-2 text-[13px] font-semibold text-white transition hover:bg-teal-700 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+          >
+            {completion < 100 ? 'Complete profile' : 'Edit profile'}
+          </button>
+        </ControlCard>
+
+        <ControlCard icon={Globe} title="Public profile" cta="View public profile" onCta={openPublicProfile}>
+          {profile ? (
+            <>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                {profile.visibility === 'public' ? 'Public' : 'Private'}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {profile.visibility === 'public' ? 'Visible to everyone' : 'Only approved followers see your content'}
+              </p>
+              <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                <ControlMetric icon={Users} value={String(profile.counts?.followers ?? 0)} label="Followers" />
+                <ControlMetric
+                  icon={Newspaper}
+                  value={handle ? countWithMore(postsQuery.data?.posts.length, Boolean(postsQuery.data?.nextCursor)) : '0'}
+                  label="Posts"
+                />
+                <ControlMetric
+                  icon={Clapperboard}
+                  value={handle ? countWithMore(reelsQuery.data?.reels.length, Boolean(reelsQuery.data?.nextCursor)) : '0'}
+                  label="Reels"
+                />
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">Loading profile…</p>
+          )}
+        </ControlCard>
+
+        <ControlCard icon={Shield} title="Privacy snapshot" cta="Manage privacy" onCta={() => onOpenSection('privacy')}>
+          {settings ? (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              <ControlRow label="Messages" value={<StatusPill on={settings.messagePrivacy === 'everyone'} label={CONTACT_PRIVACY_LABEL[settings.messagePrivacy]} />} />
+              <ControlRow label="Group invites" value={<StatusPill on={settings.groupInvitePrivacy === 'everyone'} label={CONTACT_PRIVACY_LABEL[settings.groupInvitePrivacy]} />} />
+              <ControlRow label="Read receipts" value={<StatusPill on={settings.readReceiptsEnabled} label={settings.readReceiptsEnabled ? 'On' : 'Off'} />} />
+              <ControlRow label="Last seen" value={<StatusPill on={settings.lastSeenVisible} label={settings.lastSeenVisible ? 'On' : 'Off'} />} />
+              <ControlRow label="Incoming calls" value={<StatusPill on={settings.incomingCallsEnabled} label={settings.incomingCallsEnabled ? 'On' : 'Off'} />} />
+              <ControlRow label="Moment archive" value={<StatusPill on={settings.momentArchiveEnabled} label={settings.momentArchiveEnabled ? 'On' : 'Off'} />} />
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">Loading privacy settings…</p>
+          )}
+        </ControlCard>
+      </div>
+
+      {/* Row 2: notifications / security / AI / discovery */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <ControlCard icon={Bell} title="Notifications" cta="Manage notifications" onCta={() => onOpenSection('notifications')}>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            <ControlRow
+              label="Browser alerts"
+              value={
+                <StatusPill
+                  on={browserPermission === 'granted'}
+                  label={
+                    browserPermission === 'granted'
+                      ? 'Allowed'
+                      : browserPermission === 'denied'
+                        ? 'Blocked'
+                        : browserPermission === 'unsupported'
+                          ? 'Unsupported'
+                          : 'Not asked'
+                  }
+                />
+              }
             />
-          </label>
-          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-            <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">{prefs.data?.followedTopics.length || 0} followed topics</div>
-            <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">{prefs.data?.mutedTopics.length || 0} muted topics</div>
-            <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">{prefs.data?.hiddenPostCount || 0} hidden posts</div>
+            <ControlRow
+              label="Message alerts"
+              value={preferences ? <StatusPill on={preferences.messageNotificationsEnabled} label={preferences.messageNotificationsEnabled ? 'On' : 'Off'} /> : <StatusPill label="…" />}
+            />
+            <ControlRow
+              label="Moment alerts"
+              value={preferences ? <StatusPill on={preferences.momentUpdatesEnabled} label={preferences.momentUpdatesEnabled ? 'On' : 'Off'} /> : <StatusPill label="…" />}
+            />
           </div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              onClick={() => savePersonalization.mutate()}
-              disabled={savePersonalization.isPending}
-              className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-slate-950"
-            >
-              Save personalization
-            </button>
-            <button
-              onClick={() => {
-                if (window.confirm('Clear the activity Blabber uses for personalized discovery? Your follows, posts, Communities, and messages will not be deleted.')) {
-                  clearPersonalization.mutate();
+        </ControlCard>
+
+        <ControlCard icon={Laptop} title="Account security" cta="Review devices" onCta={() => onOpenSection('account')}>
+          {sessionsQuery.isError ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">Device details unavailable.</p>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              <ControlRow
+                label="Recognized devices"
+                value={<span className="text-sm font-bold text-slate-900 dark:text-white">{sessionsQuery.data ? deviceGroups.length : '…'}</span>}
+              />
+              <div className="py-1.5">
+                <p className="text-[13px] text-slate-600 dark:text-slate-400">Last active</p>
+                {lastLoginAt ? (
+                  <>
+                    <p className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-white">
+                      {new Date(lastLoginAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </p>
+                    {currentSession?.label && (
+                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">{currentSession.label}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    {sessionsQuery.data ? 'Device details unavailable' : '…'}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </ControlCard>
+
+        <ControlCard icon={Sparkles} title="AI & VEYRA" cta="Manage AI access" onCta={() => onOpenSection('ai')}>
+          {veyra ? (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              <ControlRow
+                label="Approved spaces"
+                value={<span className="text-sm font-bold text-slate-900 dark:text-white">{veyra.settings.scopes.length}</span>}
+              />
+              <ControlRow label="AI requests" value={<StatusPill on={veyra.settings.enabled && veyra.globalAiEnabled} label={veyra.settings.enabled && veyra.globalAiEnabled ? 'Enabled' : 'Disabled'} />} />
+              <ControlRow label="Voice replies" value={<StatusPill on={veyra.settings.voiceRepliesEnabled} label={veyra.settings.voiceRepliesEnabled ? 'On' : 'Off'} />} />
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">Loading VEYRA settings…</p>
+          )}
+          <p className="mt-2 text-[11px] leading-4 text-slate-400 dark:text-slate-500">
+            VEYRA only reads spaces you have approved.
+          </p>
+        </ControlCard>
+
+        <ControlCard icon={Compass} title="Discovery" cta="Manage discovery" onCta={() => onOpenSection('discovery')}>
+          {profile && discoveryPrefsQuery.data ? (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              <ControlRow
+                label="Profile in Discover"
+                value={<StatusPill on={profile.creatorDiscovery?.enabled} label={profile.creatorDiscovery?.enabled ? 'On' : 'Off'} />}
+              />
+              <ControlRow
+                label="Posts in Discover"
+                value={
+                  <StatusPill
+                    on={profile.creatorDiscovery?.showPostsInDiscover !== false}
+                    label={profile.creatorDiscovery?.showPostsInDiscover !== false ? 'On' : 'Off'}
+                  />
                 }
-              }}
-              disabled={clearPersonalization.isPending}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
-            >
-              Clear personalization data
-            </button>
+              />
+              <ControlRow
+                label="Reels in Discover"
+                value={
+                  <StatusPill
+                    on={profile.creatorDiscovery?.showReelsInDiscover !== false}
+                    label={profile.creatorDiscovery?.showReelsInDiscover !== false ? 'On' : 'Off'}
+                  />
+                }
+              />
+              <ControlRow
+                label="Personalization"
+                value={<StatusPill on={discoveryPrefsQuery.data.personalizedDiscoveryEnabled} label={discoveryPrefsQuery.data.personalizedDiscoveryEnabled ? 'On' : 'Off'} />}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-slate-400">Loading discovery settings…</p>
+          )}
+        </ControlCard>
+      </div>
+
+      {/* Row 3: saved summary */}
+      <ControlCard icon={Bookmark} title="Saved summary">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-8">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+                <MessageSquare size={17} />
+              </span>
+              <div>
+                <p className="text-lg font-bold leading-tight text-slate-900 dark:text-white">
+                  {savedMessagesQuery.data ? savedMessagesQuery.data.savedMessages.length : '…'}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Saved messages · across all chats</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+                <Bookmark size={17} />
+              </span>
+              <div>
+                <p className="text-lg font-bold leading-tight text-slate-900 dark:text-white">
+                  {savedPostsQuery.data
+                    ? countWithMore(savedPostsQuery.data.savedPosts.length, Boolean(savedPostsQuery.data.nextCursor))
+                    : '…'}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Saved posts · from your feed</p>
+              </div>
+            </div>
           </div>
+          <button
+            onClick={() => onOpenSection('saved')}
+            className="inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-xl bg-teal-600 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-teal-700 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+          >
+            Open saved
+            <ArrowRight size={13} />
+          </button>
         </div>
-      </section>
-      {notice && <p className="text-sm text-slate-500 dark:text-slate-400">{notice}</p>}
+      </ControlCard>
     </div>
   );
 }
@@ -2348,13 +3801,17 @@ export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
 
-  const activeKey = (searchParams.get('s') as SectionKey) || 'profile';
+  // `s` is the canonical param; `section` is accepted as an alias. Unknown or
+  // missing values land on the Control Center dashboard.
+  const requestedKey = searchParams.get('s') || searchParams.get('section') || '';
+  const activeKey: SectionKey = SECTION_KEYS.has(requestedKey) ? (requestedKey as SectionKey) : 'control-center';
 
   const setSection = (key: SectionKey) => {
     setSearchParams({ s: key }, { replace: true });
   };
 
   const sectionContent: Record<SectionKey, React.ReactNode> = {
+    'control-center': <ControlCenterSection onOpenSection={setSection} />,
     profile:       <ProfileSection />,
     saved:         <SavedContentSection embedded />,
     account:       <AccountSection />,
@@ -2396,7 +3853,7 @@ export default function SettingsPage() {
                 onClick={() => setSection(s.key)}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition ${
                   activeKey === s.key
-                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                    ? 'bg-teal-50 font-semibold text-teal-700 dark:bg-teal-500/15 dark:text-teal-300'
                     : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
                 }`}
               >

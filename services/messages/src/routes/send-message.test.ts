@@ -28,6 +28,10 @@ describe('POST /:chatId - Send Message', () => {
     const db = getDatabase();
     await db.collection('messages').deleteMany({});
     await db.collection('chats').deleteMany({});
+    await db.collection('posts').deleteMany({});
+    await db.collection('reels').deleteMany({});
+    await db.collection('users').deleteMany({});
+    await db.collection('user_blocks').deleteMany({});
 
     // Create test chat
     await db.collection('chats').insertOne({
@@ -210,5 +214,195 @@ describe('POST /:chatId - Send Message', () => {
     });
 
     expect(response.status).toBe(401);
+  });
+
+  describe('Shared post/reel', () => {
+    async function seedAuthor(overrides: Record<string, unknown> = {}) {
+      const authorId = new ObjectId();
+      await getDatabase()
+        .collection('users')
+        .insertOne({
+          _id: authorId,
+          name: 'Post Author',
+          username: 'postauthor',
+          profileVisibility: 'public',
+          ...overrides,
+        });
+      return authorId;
+    }
+
+    it('shares a public post as rich sharedItem metadata, not raw client-supplied data', async () => {
+      const authorId = await seedAuthor();
+      const mediaId = new ObjectId();
+      const postId = new ObjectId();
+      await getDatabase()
+        .collection('posts')
+        .insertOne({
+          _id: postId,
+          authorUserId: authorId,
+          body: 'A caption clients should never be trusted to supply themselves',
+          visibility: 'public',
+          mediaIds: [mediaId],
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+          updatedAt: new Date('2026-01-01T00:00:00Z'),
+        });
+
+      const token = generateToken(TEST_USER_ID.toString());
+      const response = await request(app)
+        .post(`/${TEST_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Shared a post',
+          type: 'text',
+          sharedItem: { type: 'post', id: postId.toString() },
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body.sharedItem).toMatchObject({
+        type: 'post',
+        id: postId.toString(),
+        url: `/feed?post=${postId.toString()}`,
+        text: 'A caption clients should never be trusted to supply themselves',
+        authorName: 'Post Author',
+        thumbnailUrl: `/api/posts/${postId.toString()}/media/${mediaId.toString()}`,
+      });
+    });
+
+    it('rejects sharing a followers-only post', async () => {
+      const authorId = await seedAuthor();
+      const postId = new ObjectId();
+      await getDatabase()
+        .collection('posts')
+        .insertOne({
+          _id: postId,
+          authorUserId: authorId,
+          body: 'Private caption',
+          visibility: 'followers',
+          mediaIds: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+      const token = generateToken(TEST_USER_ID.toString());
+      const response = await request(app)
+        .post(`/${TEST_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Shared a post',
+          sharedItem: { type: 'post', id: postId.toString() },
+        });
+
+      expect(response.status).toBe(403);
+      const stored = await getDatabase().collection('messages').findOne({ chatId: TEST_CHAT_ID });
+      expect(stored).toBeNull();
+    });
+
+    it('rejects sharing a post from a blocked author', async () => {
+      const authorId = await seedAuthor();
+      const postId = new ObjectId();
+      await getDatabase()
+        .collection('posts')
+        .insertOne({
+          _id: postId,
+          authorUserId: authorId,
+          body: 'Blocked author caption',
+          visibility: 'public',
+          mediaIds: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      await getDatabase()
+        .collection('user_blocks')
+        .insertOne({ blockerUserId: authorId, blockedUserId: TEST_USER_ID, createdAt: new Date(), updatedAt: new Date() });
+
+      const token = generateToken(TEST_USER_ID.toString());
+      const response = await request(app)
+        .post(`/${TEST_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Shared a post',
+          sharedItem: { type: 'post', id: postId.toString() },
+        });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('shares a public reel as rich sharedItem metadata', async () => {
+      const authorId = await seedAuthor({ name: 'Reel Author', username: 'reelauthor' });
+      const reelId = new ObjectId();
+      await getDatabase()
+        .collection('reels')
+        .insertOne({
+          _id: reelId,
+          authorUserId: authorId,
+          caption: 'A reel caption',
+          visibility: 'public',
+          publishState: 'published',
+          processingStatus: 'ready',
+          posterPath: '/tmp/poster.jpg',
+          createdAt: new Date('2026-02-01T00:00:00Z'),
+          updatedAt: new Date('2026-02-01T00:00:00Z'),
+        });
+
+      const token = generateToken(TEST_USER_ID.toString());
+      const response = await request(app)
+        .post(`/${TEST_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Shared a reel',
+          sharedItem: { type: 'reel', id: reelId.toString() },
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body.sharedItem).toMatchObject({
+        type: 'reel',
+        id: reelId.toString(),
+        url: `/reels/${reelId.toString()}`,
+        text: 'A reel caption',
+        authorName: 'Reel Author',
+        thumbnailUrl: `/api/reels/${reelId.toString()}/poster`,
+      });
+    });
+
+    it('rejects sharing a reel that is still processing', async () => {
+      const authorId = await seedAuthor();
+      const reelId = new ObjectId();
+      await getDatabase()
+        .collection('reels')
+        .insertOne({
+          _id: reelId,
+          authorUserId: authorId,
+          caption: 'Not ready yet',
+          visibility: 'public',
+          publishState: 'published',
+          processingStatus: 'processing',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+      const token = generateToken(TEST_USER_ID.toString());
+      const response = await request(app)
+        .post(`/${TEST_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Shared a reel',
+          sharedItem: { type: 'reel', id: reelId.toString() },
+        });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('rejects an invalid shared item id', async () => {
+      const token = generateToken(TEST_USER_ID.toString());
+      const response = await request(app)
+        .post(`/${TEST_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Shared a post',
+          sharedItem: { type: 'post', id: 'not-an-object-id' },
+        });
+
+      expect(response.status).toBe(400);
+    });
   });
 });

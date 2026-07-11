@@ -103,25 +103,65 @@ async function requireRecentAuth(user: UserDocument, currentPassword?: string) {
 async function findCurrentSession(req: Request, userId: ObjectId) {
   const refreshToken = req.cookies?.refreshToken;
   if (!refreshToken) return null;
-  const sessions = await getDeviceSessionsCollection().find({ userId, revokedAt: { $exists: false } } as any).toArray();
+  const sessions = await getDeviceSessionsCollection()
+    .find({ userId, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() } } as any)
+    .sort({ lastActiveAt: -1, createdAt: -1 })
+    .toArray();
   for (const session of sessions) {
     if (await compareRefreshToken(refreshToken, session.refreshTokenHash)) return session;
   }
   return null;
 }
 
-function deviceLabel(userAgent = '') {
+function deviceMetadata(userAgent = '') {
   const ua = userAgent.toLowerCase();
-  const browser = ua.includes('firefox') ? 'Firefox' : ua.includes('edg') ? 'Edge' : ua.includes('chrome') ? 'Chrome' : ua.includes('safari') ? 'Safari' : 'Browser';
-  const platform = ua.includes('iphone') || ua.includes('ipad') ? 'iOS' : ua.includes('android') ? 'Android' : ua.includes('mac') ? 'macOS' : ua.includes('win') ? 'Windows' : ua.includes('linux') ? 'Linux' : 'Device';
-  return `${browser} on ${platform}`;
+  const browser = ua.includes('firefox')
+    ? 'Firefox'
+    : ua.includes('edg')
+      ? 'Edge'
+      : ua.includes('opr') || ua.includes('opera')
+        ? 'Opera'
+        : ua.includes('samsungbrowser')
+          ? 'Samsung Internet'
+          : ua.includes('chrome') || ua.includes('crios')
+            ? 'Chrome'
+            : ua.includes('safari')
+              ? 'Safari'
+              : 'Browser';
+  const operatingSystem = ua.includes('iphone') || ua.includes('ipad')
+    ? 'iOS'
+    : ua.includes('android')
+      ? 'Android'
+      : ua.includes('mac')
+        ? 'macOS'
+        : ua.includes('win')
+          ? 'Windows'
+          : ua.includes('linux')
+            ? 'Linux'
+            : 'Device';
+  const deviceType = ua.includes('ipad') || ua.includes('tablet')
+    ? 'tablet'
+    : ua.includes('iphone') || ua.includes('android') || ua.includes('mobile')
+      ? 'mobile'
+      : operatingSystem === 'Device'
+        ? 'unknown'
+        : 'desktop';
+
+  return {
+    browser,
+    operatingSystem,
+    deviceType,
+    label: `${browser} on ${operatingSystem}`,
+  };
 }
 
 function serializeSession(session: any, currentSessionId?: string) {
+  const metadata = deviceMetadata(session.userAgent);
   return {
     id: session._id.toString(),
     current: session._id.toString() === currentSessionId,
-    label: deviceLabel(session.userAgent),
+    ...metadata,
+    userAgent: session.userAgent || '',
     createdAt: session.createdAt,
     lastActiveAt: session.lastActiveAt || session.createdAt,
     expiresAt: session.expiresAt,
@@ -237,7 +277,10 @@ export const confirmEmailChange = asyncHandler(async (req: Request, res: Respons
 export const listSessions = asyncHandler(async (req: Request, res: Response) => {
   const user = await requireUser(req);
   const current = await findCurrentSession(req, user._id);
-  const sessions = await getDeviceSessionsCollection().find({ userId: user._id, expiresAt: { $gt: new Date() } }).sort({ createdAt: -1 }).toArray();
+  const sessions = await getDeviceSessionsCollection()
+    .find({ userId: user._id, expiresAt: { $gt: new Date() }, revokedAt: { $exists: false } } as any)
+    .sort({ lastActiveAt: -1, createdAt: -1 })
+    .toArray();
   res.status(200).json({ sessions: sessions.map((session) => serializeSession(session, current?._id.toString())) });
 });
 

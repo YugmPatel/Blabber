@@ -78,6 +78,15 @@ export interface MessageDocument {
     createdAt?: Date;
     updatedAt?: Date;
   };
+  sharedItem?: {
+    type: 'post' | 'reel';
+    id: ObjectId;
+    url: string;
+    text?: string;
+    authorName?: string;
+    thumbnailUrl?: string;
+    createdAt?: Date;
+  };
   replyTo?: {
     messageId: ObjectId;
     body: string;

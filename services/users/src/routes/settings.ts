@@ -2,11 +2,18 @@ import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { asyncHandler, ValidationError } from '@repo/utils';
 import {
+  ContactPrivacy,
   DEFAULT_USER_SETTINGS,
   getOrCreateUserSettings,
   getUserSettingsCollection,
   ThemePreference,
 } from '../models/user-settings';
+
+// 'contacts' is intentionally not offered for messagePrivacy: a "contact" is
+// someone you already share a direct chat with, so contacts-only messaging
+// would be indistinguishable from no_one for new conversations.
+const MESSAGE_PRIVACY_VALUES: ContactPrivacy[] = ['everyone', 'followers', 'no_one'];
+const GROUP_INVITE_PRIVACY_VALUES: ContactPrivacy[] = ['everyone', 'followers', 'contacts', 'no_one'];
 
 const booleanFields = [
   'readReceiptsEnabled',
@@ -27,6 +34,8 @@ function serializeSettings(settings: any) {
     chatIntelligenceEnabled:
       settings.chatIntelligenceEnabled ?? DEFAULT_USER_SETTINGS.chatIntelligenceEnabled,
     momentArchiveEnabled: settings.momentArchiveEnabled ?? DEFAULT_USER_SETTINGS.momentArchiveEnabled,
+    messagePrivacy: settings.messagePrivacy ?? DEFAULT_USER_SETTINGS.messagePrivacy,
+    groupInvitePrivacy: settings.groupInvitePrivacy ?? DEFAULT_USER_SETTINGS.groupInvitePrivacy,
     timezone: settings.timezone ?? DEFAULT_USER_SETTINGS.timezone,
     updatedAt: settings.updatedAt,
   };
@@ -81,6 +90,20 @@ export const updateMySettings = asyncHandler(async (req: Request, res: Response)
       throw new ValidationError('timezone must be a valid IANA timezone');
     }
     patch.timezone = req.body.timezone;
+  }
+
+  if ('messagePrivacy' in req.body) {
+    if (!MESSAGE_PRIVACY_VALUES.includes(req.body.messagePrivacy)) {
+      throw new ValidationError('messagePrivacy must be everyone, followers, or no_one');
+    }
+    patch.messagePrivacy = req.body.messagePrivacy;
+  }
+
+  if ('groupInvitePrivacy' in req.body) {
+    if (!GROUP_INVITE_PRIVACY_VALUES.includes(req.body.groupInvitePrivacy)) {
+      throw new ValidationError('groupInvitePrivacy must be everyone, followers, contacts, or no_one');
+    }
+    patch.groupInvitePrivacy = req.body.groupInvitePrivacy;
   }
 
   if (Object.keys(patch).length === 0) {

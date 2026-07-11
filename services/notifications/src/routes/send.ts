@@ -9,7 +9,7 @@ import {
   findPushSubscriptionsByUserId,
   deletePushSubscriptionById,
 } from '../models/push-subscription';
-import { getNotificationPreferences } from '../models/notification-preferences';
+import { getNotificationPreferences, isWithinQuietHours } from '../models/notification-preferences';
 import { recordNotificationInboxItem } from '../models/inbox';
 import { incrementPushCounter, pushOperationalStatus } from '../push-ops';
 import { getMobilePushDevicesCollection } from '../models/mobile-push-device';
@@ -102,6 +102,19 @@ export async function send(req: Request, res: Response) {
         ? data.noPreviewBody
         : body;
     const inboxItem = await recordNotificationInboxItem({ userId: userObjectId, kind, title, body: inboxBody, data });
+
+    // Quiet hours pause push delivery for non-urgent kinds. Calls stay urgent
+    // and are always delivered; the inbox item above is still recorded.
+    if (kind !== 'call' && isWithinQuietHours(preferences)) {
+      incrementPushCounter('skipped');
+      logger.info({ userId, kind }, 'Push notification paused by quiet hours');
+      return res.status(200).json({
+        success: true,
+        message: 'Push delivery paused by quiet hours',
+        sent: 0,
+        notificationId: inboxItem._id.toString(),
+      });
+    }
 
     // Find all push subscriptions for the user
     const [subscriptions, mobileDevices] = await Promise.all([

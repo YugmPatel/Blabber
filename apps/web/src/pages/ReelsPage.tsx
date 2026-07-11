@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, CalendarClock, Flag, Menu, MessageCircle, Play, Upload, Volume2, VolumeX, XCircle } from 'lucide-react';
+import { Bookmark, CalendarClock, Flag, Menu, MessageCircle, Play, Share2, Upload, Volume2, VolumeX, XCircle } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import Sidebar from '@/components/Sidebar';
 import PlanThisDialog from '@/components/PlanThisDialog';
+import { ShareToChatPanel } from '@/components/ShareToChat';
 import {
   createReelComment,
   createReelEventToken,
@@ -61,6 +62,7 @@ function ReelCard({
   const [muted, setMuted] = useState(true);
   const [commentBody, setCommentBody] = useState('');
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [eventToken, setEventToken] = useState(reel.eventToken || '');
   const [whyOpen, setWhyOpen] = useState(false);
@@ -275,6 +277,15 @@ function ReelCard({
           <button onClick={() => setCommentsOpen((value) => !value)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/75" aria-label="Open Reel comments">
             <MessageCircle size={18} />
           </button>
+          {reel.visibility === 'public' && (
+            <button
+              onClick={() => setShareOpen((value) => !value)}
+              className={`inline-flex h-11 w-11 items-center justify-center rounded-full backdrop-blur transition ${shareOpen ? 'bg-teal-500 text-white' : 'bg-black/65 text-white hover:bg-black/75'}`}
+              aria-label="Share Reel"
+            >
+              <Share2 size={18} />
+            </button>
+          )}
           <button onClick={() => setPlanOpen(true)} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600/85 text-white backdrop-blur transition hover:bg-emerald-600" aria-label="Plan this Reel" title="Plan this">
             <CalendarClock size={18} />
           </button>
@@ -300,6 +311,14 @@ function ReelCard({
             </button>
           ))}
         </div>
+        {shareOpen && (
+          <div className="absolute inset-x-3 bottom-3 max-h-[55%] overflow-auto">
+            <ShareToChatPanel
+              item={{ type: 'reel', id: reel.id }}
+              onClose={() => setShareOpen(false)}
+            />
+          </div>
+        )}
         {commentsOpen && (
           <div className="absolute inset-x-3 bottom-3 max-h-[45%] overflow-auto rounded-xl border border-white/10 bg-black/85 p-3 text-white backdrop-blur">
             <form

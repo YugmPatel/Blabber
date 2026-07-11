@@ -31,7 +31,10 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
 
   // Find matching DeviceSession
   const deviceSessionsCollection = getDeviceSessionsCollection();
-  const sessions = await deviceSessionsCollection.find({ userId, revokedAt: { $exists: false } } as any).toArray();
+  const sessions = await deviceSessionsCollection
+    .find({ userId, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() } } as any)
+    .sort({ lastActiveAt: -1, createdAt: -1 })
+    .toArray();
 
   if (sessions.length === 0) {
     throw new UnauthorizedError('Invalid refresh token');
@@ -59,9 +62,6 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
     throw new UnauthorizedError('User not found');
   }
 
-  // Invalidate old DeviceSession
-  await deviceSessionsCollection.deleteOne({ _id: matchingSession._id });
-
   // Generate new access and refresh tokens
   const tokenPayload = {
     userId: user._id.toString(),
@@ -75,21 +75,32 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
   // Hash new refresh token
   const newRefreshTokenHash = await hashRefreshToken(newRefreshToken);
 
-  // Create new DeviceSession
+  // Rotate credentials without creating a new device row.
   const refreshTTL = getRefreshTokenTTL();
-  const expiresAt = new Date(Date.now() + refreshTTL);
   const now = new Date();
+  const rotation = await deviceSessionsCollection.updateOne(
+    {
+      _id: matchingSession._id,
+      refreshTokenHash: matchingSession.refreshTokenHash,
+      revokedAt: { $exists: false },
+      expiresAt: { $gt: now },
+    } as any,
+    {
+      $set: {
+        refreshTokenHash: newRefreshTokenHash,
+        userAgent: req.headers['user-agent'] || matchingSession.userAgent || 'unknown',
+        ipAddress: req.ip || matchingSession.ipAddress || 'unknown',
+        expiresAt: new Date(now.getTime() + refreshTTL),
+        lastActiveAt: now,
+      },
+    }
+  );
 
-  await deviceSessionsCollection.insertOne({
-    _id: new ObjectId(),
-    userId: user._id,
-    refreshTokenHash: newRefreshTokenHash,
-    userAgent: req.headers['user-agent'] || 'unknown',
-    ipAddress: req.ip || 'unknown',
-    expiresAt,
-    createdAt: now,
-    lastActiveAt: now,
-  });
+  // Only one concurrent request may consume a refresh token. Keeping the same
+  // row also prevents token rotation from looking like a new physical device.
+  if (rotation.matchedCount === 0) {
+    throw new UnauthorizedError('Invalid refresh token');
+  }
 
   // Set new httpOnly cookie
   res.cookie('refreshToken', newRefreshToken, getRefreshCookieOptions(refreshTTL));

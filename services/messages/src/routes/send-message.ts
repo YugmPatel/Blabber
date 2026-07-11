@@ -11,6 +11,7 @@ import { buildReplyPreview } from '../message-preview';
 import { validateMentions } from '../mentions';
 import { unarchiveChatForParticipants } from '../chat-state';
 import { parseEventDate, validateMeetingUrl, validateTimezone } from '../event-utils';
+import { resolveShareablePost, resolveShareableReel } from '../shared-item-access';
 
 function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' {
   if (fileType.startsWith('image/')) {
@@ -58,8 +59,20 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const { body, type, mediaId, mediaDuration, poll, sticker, event, replyToId, mentions, tempId, clientMessageId } =
-      bodyResult.data;
+    const {
+      body,
+      type,
+      mediaId,
+      mediaDuration,
+      poll,
+      sticker,
+      event,
+      replyToId,
+      sharedItem,
+      mentions,
+      tempId,
+      clientMessageId,
+    } = bodyResult.data;
     const stableClientMessageId = clientMessageId || tempId;
 
     const collection = getMessagesCollection();
@@ -220,6 +233,36 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
             updatedAt: new Date(),
           },
         ],
+      };
+    }
+
+    if (sharedItem) {
+      if (!ObjectId.isValid(sharedItem.id)) {
+        res.status(400).json({ error: 'Bad Request', message: 'Invalid shared item ID' });
+        return;
+      }
+      const sharedObjectId = new ObjectId(sharedItem.id);
+      const resolved =
+        sharedItem.type === 'post'
+          ? await resolveShareablePost(sharedObjectId, senderObjectId)
+          : await resolveShareableReel(sharedObjectId, senderObjectId);
+
+      if (!resolved) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: `This ${sharedItem.type} is not available to share.`,
+        });
+        return;
+      }
+
+      messageDoc.sharedItem = {
+        type: sharedItem.type,
+        id: sharedObjectId,
+        url: sharedItem.type === 'post' ? `/feed?post=${sharedItem.id}` : `/reels/${sharedItem.id}`,
+        text: resolved.text,
+        authorName: resolved.authorName,
+        thumbnailUrl: resolved.thumbnailUrl,
+        createdAt: resolved.createdAt,
       };
     }
 

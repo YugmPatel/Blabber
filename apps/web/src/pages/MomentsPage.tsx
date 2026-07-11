@@ -207,7 +207,7 @@ export default function MomentsPage() {
                 <h1 className="text-4xl font-bold tracking-tight text-[color:var(--bl-text)] sm:text-5xl">Moments</h1>
                 <p className="mt-2 text-xl font-semibold text-teal-600 dark:text-teal-300">Capture. Create. Connect.</p>
                 <p className="mt-3 text-[15px] leading-6 text-[color:var(--bl-text-secondary)]">
-                  Share what matters in the moment — text, photos, videos, or audio.
+                  Share text, photos, videos, or audio with the people you choose.
                 </p>
                 <p className="mt-1.5 text-xs text-[color:var(--bl-text-muted)]">Moments automatically expire after 24 hours.</p>
               </div>

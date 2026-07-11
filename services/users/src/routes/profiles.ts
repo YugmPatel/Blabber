@@ -183,6 +183,11 @@ function serializeFullProfile(user: User, relationship: string, counts: Awaited<
       topicIds: Array.isArray(user.creatorTopicIds) ? user.creatorTopicIds : [],
       enabledAt: user.creatorDiscoveryEnabledAt || null,
       updatedAt: user.creatorDiscoveryUpdatedAt || null,
+      showPostsInDiscover: user.discoveryShowPosts !== false,
+      showReelsInDiscover: user.discoveryShowReels !== false,
+      suggestMeToOthers: user.discoverySuggestEnabled !== false,
+      usernameFindability: user.usernameFindability || 'everyone',
+      hideBlockedUsers: user.discoveryHideBlocked !== false,
     },
   };
 }

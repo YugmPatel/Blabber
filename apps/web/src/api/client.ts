@@ -50,6 +50,31 @@ export const setAccessToken = (token: string | null) => {
 
 export const getAccessToken = () => accessToken;
 
+let refreshAccessTokenRequest: Promise<string> | null = null;
+
+export function refreshAccessToken(): Promise<string> {
+  if (!refreshAccessTokenRequest) {
+    const request = axios
+      .post<{ accessToken: string }>(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true })
+      .then((response) => {
+        setAccessToken(response.data.accessToken);
+        return response.data.accessToken;
+      });
+
+    refreshAccessTokenRequest = request;
+    void request.then(
+      () => {
+        if (refreshAccessTokenRequest === request) refreshAccessTokenRequest = null;
+      },
+      () => {
+        if (refreshAccessTokenRequest === request) refreshAccessTokenRequest = null;
+      }
+    );
+  }
+
+  return refreshAccessTokenRequest;
+}
+
 export const normalizeMediaUrl = (url?: string | null): string | undefined => {
   if (!url) return undefined;
   if (url.startsWith('blob:') || url.startsWith('data:')) return url;
@@ -324,6 +349,11 @@ export interface SocialProfile {
     topicIds: string[];
     enabledAt?: string | null;
     updatedAt?: string | null;
+    showPostsInDiscover?: boolean;
+    showReelsInDiscover?: boolean;
+    suggestMeToOthers?: boolean;
+    usernameFindability?: 'everyone' | 'followers' | 'contacts' | 'no_one';
+    hideBlockedUsers?: boolean;
   };
 }
 
@@ -1052,7 +1082,15 @@ export async function updateDiscoveryPreferences(payload: { personalizedDiscover
   return data;
 }
 
-export async function updateCreatorDiscovery(payload: { creatorDiscoveryEnabled: boolean; creatorTopicIds: string[] }) {
+export async function updateCreatorDiscovery(payload: {
+  creatorDiscoveryEnabled: boolean;
+  creatorTopicIds: string[];
+  showPostsInDiscover?: boolean;
+  showReelsInDiscover?: boolean;
+  suggestMeToOthers?: boolean;
+  usernameFindability?: 'everyone' | 'followers' | 'contacts' | 'no_one';
+  hideBlockedUsers?: boolean;
+}) {
   const { data } = await apiClient.patch('/api/profiles/me/discovery', payload);
   return data.discovery;
 }
@@ -1531,10 +1569,15 @@ export interface AccountStatus {
 export interface DeviceSession {
   id: string;
   label: string;
+  browser?: string;
+  operatingSystem?: string;
+  deviceType?: 'desktop' | 'mobile' | 'tablet' | 'unknown';
+  userAgent?: string;
   createdAt: string;
   lastActiveAt?: string;
   expiresAt: string;
   current: boolean;
+  status?: 'active' | 'expired' | 'revoked';
 }
 
 export interface AccountExport {
@@ -1873,14 +1916,7 @@ apiClient.interceptors.response.use(
 
       try {
         // Call refresh endpoint (uses httpOnly cookie)
-        const response = await axios.post(
-          `${API_URL}/api/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
-
-        const { accessToken: newAccessToken } = response.data;
-        setAccessToken(newAccessToken);
+        const newAccessToken = await refreshAccessToken();
 
         // Retry the original request with new token
         if (originalRequest.headers) {

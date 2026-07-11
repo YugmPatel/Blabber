@@ -5,8 +5,8 @@ import { Bookmark, CalendarClock, ChevronDown, Globe, ImagePlus, Loader2, Menu, 
 import Avatar from '@/components/Avatar';
 import Sidebar from '@/components/Sidebar';
 import PlanThisDialog from '@/components/PlanThisDialog';
+import { ShareToChatPanel } from '@/components/ShareToChat';
 import {
-  apiClient,
   createPost,
   fetchAuthorizedObjectUrl,
   createPostComment,
@@ -28,7 +28,6 @@ import {
 } from '@/api/client';
 import type { FeedPost } from '@/api/client';
 import { useFileUpload } from '@/hooks/useFileUpload';
-import { useChats } from '@/hooks/useChats';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🙌'];
 
@@ -104,7 +103,6 @@ function PostCard({ post }: { post: FeedPost }) {
   const [planOpen, setPlanOpen] = useState(false);
   const [topicIds, setTopicIds] = useState<string[]>(post.discovery?.topicIds || []);
   const topicsQuery = useQuery({ queryKey: ['discovery-topics'], queryFn: fetchDiscoveryTopics, enabled: post.canDelete && post.visibility === 'public' });
-  const shareChats = useChats({ archived: false, limit: 50 });
   const commentsQuery = useQuery({
     queryKey: ['post-comments', post.id],
     queryFn: () => fetchPostComments(post.id),
@@ -157,15 +155,6 @@ function PostCard({ post }: { post: FeedPost }) {
       updateFeedPost(queryClient, post.id, (item) => ({ ...item, reposted: result.reposted }));
       queryClient.invalidateQueries({ queryKey: ['feed'] });
     },
-  });
-  const share = useMutation({
-    mutationFn: async (chatId: string) => {
-      await apiClient.post(`/api/messages/${chatId}`, {
-        body: `Shared a Blabber post\n/feed?post=${post.id}`,
-        type: 'text',
-      });
-    },
-    onSuccess: () => setShareOpen(false),
   });
   const discovery = useMutation({
     mutationFn: (discoverable: boolean) => updatePostDiscovery(post.id, { discoverable, discoveryTopicIds: discoverable ? topicIds : topicIds.slice(0, 3) }),
@@ -330,28 +319,8 @@ function PostCard({ post }: { post: FeedPost }) {
       <PlanThisDialog source={{ type: 'post', id: post.id }} open={planOpen} onClose={() => setPlanOpen(false)} />
 
       {shareOpen && (
-        <div className="mt-3 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] p-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold text-[color:var(--bl-text)]">Share to conversation</p>
-            <button onClick={() => setShareOpen(false)} className="rounded-md p-1 text-[color:var(--bl-text-muted)] transition hover:bg-[color:var(--bl-panel)]" aria-label="Close share">
-              <X size={15} />
-            </button>
-          </div>
-          <div className="mt-3 grid gap-2">
-            {(shareChats.data || []).slice(0, 8).map((chat: any) => (
-              <button
-                key={chat._id || chat.id}
-                onClick={() => share.mutate(chat._id || chat.id)}
-                disabled={share.isPending}
-                className="flex items-center justify-between gap-3 rounded-lg border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-left text-sm text-[color:var(--bl-text)] transition hover:border-teal-400 disabled:opacity-60"
-              >
-                <span className="truncate">{chat.name || chat.displayName || chat.title || 'Conversation'}</span>
-                {share.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} className="text-teal-600 dark:text-teal-300" />}
-              </button>
-            ))}
-            {!shareChats.isLoading && (shareChats.data || []).length === 0 && <p className="text-sm text-[color:var(--bl-text-muted)]">No conversations available.</p>}
-          </div>
-          {share.isError && <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">Unable to share this post.</p>}
+        <div className="mt-3">
+          <ShareToChatPanel item={{ type: 'post', id: post.id }} onClose={() => setShareOpen(false)} />
         </div>
       )}
 

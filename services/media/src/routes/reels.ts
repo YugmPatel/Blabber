@@ -207,6 +207,24 @@ async function hasBlockBetween(a: ObjectId, b: ObjectId) {
   }));
 }
 
+// Discovery-only block check: users who blocked the viewer are always hidden;
+// users the viewer blocked are hidden unless discoveryHideBlocked is false.
+async function isHiddenByBlocksForDiscovery(viewerUserId: ObjectId, otherUserId: ObjectId) {
+  const blocks = await getDatabase().collection('user_blocks').find({
+    $or: [
+      { blockerUserId: viewerUserId, blockedUserId: otherUserId },
+      { blockerUserId: otherUserId, blockedUserId: viewerUserId },
+    ],
+  }).toArray();
+  if (blocks.length === 0) return false;
+  if (blocks.some((block: any) => block.blockerUserId.equals(otherUserId))) return true;
+  const viewer = await getDatabase().collection('users').findOne(
+    { _id: viewerUserId },
+    { projection: { discoveryHideBlocked: 1 } }
+  );
+  return (viewer as any)?.discoveryHideBlocked !== false;
+}
+
 async function isFollowing(followerUserId: ObjectId, targetUserId: ObjectId) {
   return Boolean(await getDatabase().collection('profile_relationships').findOne({ followerUserId, targetUserId, state: 'following' }));
 }
@@ -261,7 +279,8 @@ async function isCreatorEligible(author: any, viewerUserId: ObjectId) {
   if (!author || author.deletedAt || author.deactivatedAt) return false;
   if (!author.emailVerified || !author.profileHandle || author.profileVisibility !== 'public') return false;
   if (!author.creatorDiscoveryEnabled) return false;
-  if (await hasBlockBetween(viewerUserId, author._id)) return false;
+  if (author.discoveryShowReels === false) return false;
+  if (await isHiddenByBlocksForDiscovery(viewerUserId, author._id)) return false;
   const muted = await getDatabase().collection('discovery_feedback').findOne({
     userId: viewerUserId,
     targetType: 'creator',

@@ -33,6 +33,10 @@ const updatePreferencesSchema = z
     momentActivityEnabled: z.boolean().optional(),
     postActivityEnabled: z.boolean().optional(),
     reelActivityEnabled: z.boolean().optional(),
+    quietHoursEnabled: z.boolean().optional(),
+    quietHoursStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    quietHoursEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    quietHoursTimezone: z.string().max(100).optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'At least one preference is required',

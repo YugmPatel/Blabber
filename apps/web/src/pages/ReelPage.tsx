@@ -18,6 +18,7 @@ import {
   unsaveReel,
 } from '@/api/client';
 import type { ReelItem } from '@/api/client';
+import ShareToChat from '@/components/ShareToChat';
 
 const reactions = ['❤️', '😂', '😮', '😢', '🙌'];
 
@@ -134,6 +135,11 @@ export default function ReelPage() {
                 <button onClick={() => report.mutate()} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700"><Flag size={15} /> Report</button>
                 <button onClick={() => remove.mutate()} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:text-red-300"><Trash2 size={15} /> Delete</button>
               </div>
+              {reel.data.visibility === 'public' && (
+                <div className="mt-3">
+                  <ShareToChat item={{ type: 'reel', id: reelId }} />
+                </div>
+              )}
               {commentsOpen && (
                 <div className="mt-4 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
                   <form

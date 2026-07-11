@@ -11,6 +11,7 @@ import {
 import { asyncHandler, createEvent, logger } from '@repo/utils';
 import { getChatsCollection } from '../models/chat';
 import { getDatabase } from '../db';
+import { canAddToGroup } from '../contact-privacy';
 import { isChatExpired, serializeChat } from '../serialize-chat';
 import { getPubSub } from '../pubsub';
 
@@ -103,6 +104,14 @@ export const addMember = asyncHandler(async (req: Request, res: Response) => {
     return res.status(400).json({
       error: 'Validation Error',
       message: 'Selected user does not exist',
+    });
+  }
+
+  const actorId = new ObjectId((req as any).user.userId);
+  if (!(await canAddToGroup(actorId, newMemberId))) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'This user does not allow group invites from everyone.',
     });
   }
 

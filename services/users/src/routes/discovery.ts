@@ -6,7 +6,7 @@ import { AppError, UnauthorizedError, ValidationError, asyncHandler } from '@rep
 import { DISCOVERY_TOPICS, normalizeDiscoveryTopicIds, topicLabels } from '../discovery-topics';
 import { getDatabase } from '../db';
 import { getUsersCollection, User } from '../models/user';
-import { hasBlockBetween } from '../models/user-block';
+import { getUserBlocksCollection } from '../models/user-block';
 import { getProfileRelationshipsCollection } from '../models/profile-relationship';
 import { getPostsCollection, PostDocument } from '../models/post';
 import { getPostReactionsCollection } from '../models/post-reaction';
@@ -86,6 +86,11 @@ const preferencePatchSchema = z.object({ personalizedDiscoveryEnabled: z.boolean
 const discoverySettingsSchema = z.object({
   creatorDiscoveryEnabled: z.boolean(),
   creatorTopicIds: z.array(z.string()).default([]),
+  showPostsInDiscover: z.boolean().optional(),
+  showReelsInDiscover: z.boolean().optional(),
+  suggestMeToOthers: z.boolean().optional(),
+  usernameFindability: z.enum(['everyone', 'followers', 'contacts', 'no_one']).optional(),
+  hideBlockedUsers: z.boolean().optional(),
 }).strict();
 const postDiscoverySchema = z.object({
   discoverable: z.boolean(),
@@ -199,11 +204,34 @@ function creatorTopicIds(user: User) {
   return Array.isArray(user.creatorTopicIds) ? user.creatorTopicIds.filter((id) => DISCOVERY_TOPICS.some((topic) => topic.id === id)) : [];
 }
 
+/**
+ * Directional block check for Discover surfaces: users who blocked the viewer
+ * are always hidden; users the viewer blocked are hidden unless the viewer set
+ * discoveryHideBlocked to false.
+ */
+async function isHiddenByBlocks(viewerUserId: ObjectId, otherUserId: ObjectId) {
+  const blocks = await getUserBlocksCollection()
+    .find({
+      $or: [
+        { blockerUserId: viewerUserId, blockedUserId: otherUserId },
+        { blockerUserId: otherUserId, blockedUserId: viewerUserId },
+      ],
+    })
+    .toArray();
+  if (blocks.length === 0) return false;
+  if (blocks.some((block) => block.blockerUserId.equals(otherUserId))) return true;
+  const viewer = await getUsersCollection().findOne(
+    { _id: viewerUserId },
+    { projection: { discoveryHideBlocked: 1 } }
+  );
+  return (viewer as any)?.discoveryHideBlocked !== false;
+}
+
 async function isCreatorEligibleForViewer(creator: User, viewerUserId: ObjectId) {
   if (!creator || creator.deletedAt || creator.deactivatedAt) return false;
   if (!(creator as any).emailVerified || !creator.profileHandle || creator.profileVisibility !== 'public') return false;
   if (!creator.creatorDiscoveryEnabled || creatorTopicIds(creator).length === 0) return false;
-  if (await hasBlockBetween(viewerUserId, creator._id)) return false;
+  if (await isHiddenByBlocks(viewerUserId, creator._id)) return false;
   if (await hasFeedback(viewerUserId, 'creator', creator._id, 'muted')) return false;
   return true;
 }
@@ -226,6 +254,7 @@ async function isDiscoverablePostForViewer(post: PostDocument, viewerUserId: Obj
   if (await hasFeedback(viewerUserId, 'post', post._id, 'not_interested')) return false;
   const author = await getUsersCollection().findOne(activeUserQuery({ _id: post.authorUserId }) as any);
   if (!author || !(await isCreatorEligibleForViewer(author, viewerUserId))) return false;
+  if (author.discoveryShowPosts === false) return false;
   const pref = await ensureDiscoveryPreference(viewerUserId);
   const mutedTopics = new Set(pref?.mutedTopicIds || []);
   if (topicIds.every((topicId) => mutedTopics.has(topicId as any))) return false;
@@ -239,7 +268,7 @@ async function isCommunityListedForViewer(community: CommunityDocument, viewerUs
   if (await hasFeedback(viewerUserId, 'community', community._id, 'muted')) return false;
   if (await getCommunityBansCollection().findOne({ communityId: community._id, userId: viewerUserId })) return false;
   const owner = await getUsersCollection().findOne(activeUserQuery({ _id: community.ownerUserId }) as any);
-  if (!owner || await hasBlockBetween(viewerUserId, community.ownerUserId)) return false;
+  if (!owner || await isHiddenByBlocks(viewerUserId, community.ownerUserId)) return false;
   const pref = await ensureDiscoveryPreference(viewerUserId);
   const mutedTopics = new Set(pref?.mutedTopicIds || []);
   if (topicIds.every((topicId) => mutedTopics.has(topicId as any))) return false;
@@ -871,6 +900,11 @@ export const updateCreatorDiscovery = asyncHandler(async (req: Request, res: Res
         creatorTopicIds: topicIds,
         creatorDiscoveryUpdatedAt: now,
         ...(parsed.creatorDiscoveryEnabled ? { creatorDiscoveryEnabledAt: user.creatorDiscoveryEnabledAt || now } : {}),
+        ...(parsed.showPostsInDiscover === undefined ? {} : { discoveryShowPosts: parsed.showPostsInDiscover }),
+        ...(parsed.showReelsInDiscover === undefined ? {} : { discoveryShowReels: parsed.showReelsInDiscover }),
+        ...(parsed.suggestMeToOthers === undefined ? {} : { discoverySuggestEnabled: parsed.suggestMeToOthers }),
+        ...(parsed.usernameFindability === undefined ? {} : { usernameFindability: parsed.usernameFindability }),
+        ...(parsed.hideBlockedUsers === undefined ? {} : { discoveryHideBlocked: parsed.hideBlockedUsers }),
         updatedAt: now,
       },
       ...(parsed.creatorDiscoveryEnabled ? {} : { $unset: { creatorDiscoveryEnabledAt: '' } }),
@@ -899,6 +933,11 @@ function creatorDiscoverySettings(user: User) {
     creatorTopics: topicLabels(creatorTopicIds(user)),
     creatorDiscoveryEnabledAt: user.creatorDiscoveryEnabledAt || null,
     creatorDiscoveryUpdatedAt: user.creatorDiscoveryUpdatedAt || null,
+    showPostsInDiscover: user.discoveryShowPosts !== false,
+    showReelsInDiscover: user.discoveryShowReels !== false,
+    suggestMeToOthers: user.discoverySuggestEnabled !== false,
+    usernameFindability: user.usernameFindability || 'everyone',
+    hideBlockedUsers: user.discoveryHideBlocked !== false,
   };
 }
 
@@ -956,6 +995,8 @@ export const listCreators = asyncHandler(async (req: Request, res: Response) => 
     profileHandle: { $exists: true },
     profileVisibility: 'public',
     creatorDiscoveryEnabled: true,
+    // Suggested-creator recommendations respect the "Suggest me to others" setting.
+    discoverySuggestEnabled: { $ne: false },
     ...(topic ? { creatorTopicIds: topic } : {}),
     ...cursorFilter(cursor, 'creatorDiscoveryEnabledAt'),
   });

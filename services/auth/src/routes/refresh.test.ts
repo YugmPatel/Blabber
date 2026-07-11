@@ -96,7 +96,7 @@ describe('POST /refresh', () => {
     expect(newRefreshToken).not.toBe(refreshToken); // Should be different from old token
   });
 
-  it('should invalidate old device session and create new one', async () => {
+  it('should rotate credentials in the existing device session', async () => {
     // Create a user with only ONE session (login only, skip register)
     const userData = {
       username: 'testuser',
@@ -144,15 +144,17 @@ describe('POST /refresh', () => {
     // Refresh token
     await request(app).post('/refresh').set('Cookie', `refreshToken=${refreshToken}`).expect(200);
 
-    // Check that we still have exactly 1 session (old deleted, new created)
+    // Check that rotation did not create another device row.
     const sessionsAfterRefresh = await testDb
       .collection('deviceSessions')
       .find({ userId })
       .toArray();
 
     expect(sessionsAfterRefresh.length).toBe(1);
+    expect(sessionsAfterRefresh[0]._id.toString()).toBe(sessionsBeforeRefresh[0]._id.toString());
+    expect(sessionsAfterRefresh[0].createdAt).toEqual(sessionsBeforeRefresh[0].createdAt);
 
-    // Verify the session was actually replaced (different hash)
+    // Verify the credentials were actually rotated.
     const oldSessionHash = sessionsBeforeRefresh[0].refreshTokenHash;
     const newSessionHash = sessionsAfterRefresh[0].refreshTokenHash;
     expect(newSessionHash).not.toBe(oldSessionHash);
@@ -169,7 +171,19 @@ describe('POST /refresh', () => {
     expect(retryResponse.body).toHaveProperty('error');
   });
 
-  it('should create new device session with correct metadata', async () => {
+  it('allows only one concurrent rotation of the same refresh token', async () => {
+    const { refreshToken, userId } = await registerAndLoginTestUser();
+
+    const responses = await Promise.all([
+      request(app).post('/refresh').set('Cookie', `refreshToken=${refreshToken}`),
+      request(app).post('/refresh').set('Cookie', `refreshToken=${refreshToken}`),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 401]);
+    expect(await testDb.collection('deviceSessions').countDocuments({ userId: new ObjectId(userId) })).toBe(2);
+  });
+
+  it('should update device session metadata', async () => {
     const { refreshToken, userId } = await registerAndLoginTestUser();
 
     // Refresh token with custom user agent

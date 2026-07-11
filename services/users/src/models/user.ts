@@ -23,6 +23,15 @@ export interface User {
   creatorTopicIds?: string[];
   creatorDiscoveryEnabledAt?: Date;
   creatorDiscoveryUpdatedAt?: Date;
+  // Absent means true — discovery content visibility is opt-out.
+  discoveryShowPosts?: boolean;
+  discoveryShowReels?: boolean;
+  // Absent means true — appear in suggested-creator recommendations.
+  discoverySuggestEnabled?: boolean;
+  // Absent means 'everyone'.
+  usernameFindability?: 'everyone' | 'followers' | 'contacts' | 'no_one';
+  // Absent means true — hide users I blocked from my Discover and search.
+  discoveryHideBlocked?: boolean;
   role?: string;
   platformRole?: 'user' | 'moderator' | 'admin';
   department?: string;

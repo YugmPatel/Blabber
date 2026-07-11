@@ -86,6 +86,15 @@ export interface Message {
     createdAt?: string;
     updatedAt?: string;
   };
+  sharedItem?: {
+    type: 'post' | 'reel';
+    id: string;
+    url: string;
+    text?: string;
+    authorName?: string;
+    thumbnailUrl?: string;
+    createdAt?: string;
+  };
   replyTo?: {
     messageId: string;
     body: string;
@@ -202,6 +211,15 @@ export const MessageSchema = z.object({
     createdAt: z.string().optional(),
     updatedAt: z.string().optional(),
   }).optional(),
+  sharedItem: z.object({
+    type: z.enum(['post', 'reel']),
+    id: z.string(),
+    url: z.string(),
+    text: z.string().optional(),
+    authorName: z.string().optional(),
+    thumbnailUrl: z.string().optional(),
+    createdAt: z.string().optional(),
+  }).optional(),
   replyTo: z.object({
     messageId: z.string(),
     body: z.string(),
@@ -263,6 +281,14 @@ export const CreateMessageDTOSchema = z.object({
     reminderOffsetMinutes: z.number().int().positive().optional(),
   }).optional(),
   replyToId: z.string().optional(),
+  // Client sends only the reference — the server resolves and verifies the
+  // real text/author/thumbnail from the source post/reel, the same way
+  // `mediaId` is resolved into `media` above. Never trust client-supplied
+  // shared-item display data.
+  sharedItem: z.object({
+    type: z.enum(['post', 'reel']),
+    id: z.string(),
+  }).optional(),
   mentions: z.array(z.object({
     userId: z.string(),
     start: z.number().int().min(0),

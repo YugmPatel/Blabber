@@ -120,10 +120,13 @@ export default function GroupBrainPanel({
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {transcript.length === 0 ? (
-          <div className="space-y-3 rounded-lg bg-slate-50 p-4 dark:bg-slate-950">
+          <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <p className="text-sm font-semibold text-slate-900 dark:text-white">Ask Group Brain</p>
             <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
               Answers are private to you and grounded in this group&apos;s actual conversation history.
+            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
+              Try asking
             </p>
             <div className="flex flex-wrap gap-2">
               {SUGGESTIONS.map((suggestion) => (
@@ -131,7 +134,7 @@ export default function GroupBrainPanel({
                   key={suggestion}
                   type="button"
                   onClick={() => void ask(suggestion)}
-                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-left text-xs font-medium text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  className="rounded-full border border-teal-500/30 bg-teal-50/60 px-3 py-1.5 text-left text-xs font-medium text-teal-800 transition hover:border-teal-400 hover:bg-teal-50 dark:border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-200 dark:hover:bg-teal-500/20"
                 >
                   {suggestion}
                 </button>

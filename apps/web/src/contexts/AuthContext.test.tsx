@@ -9,6 +9,7 @@ vi.mock('@/api/client', () => ({
     post: vi.fn(),
     get: vi.fn(),
   },
+  refreshAccessToken: vi.fn(),
   setAccessToken: vi.fn(),
   getAccessToken: vi.fn(),
 }));
@@ -20,6 +21,7 @@ describe('AuthContext', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(apiClient.refreshAccessToken).mockRejectedValue(new Error('No session'));
   });
 
   describe('useAuth hook', () => {
@@ -30,8 +32,6 @@ describe('AuthContext', () => {
     });
 
     it('should provide auth context when used within AuthProvider', async () => {
-      vi.mocked(apiClient.apiClient.post).mockRejectedValue(new Error('No session'));
-
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       await waitFor(() => {
@@ -46,9 +46,6 @@ describe('AuthContext', () => {
 
   describe('initialization', () => {
     it('should attempt to refresh token on mount', async () => {
-      const mockRefreshResponse = {
-        data: { accessToken: 'test-token' },
-      };
       const mockUserResponse = {
         data: {
           user: {
@@ -60,7 +57,7 @@ describe('AuthContext', () => {
         },
       };
 
-      vi.mocked(apiClient.apiClient.post).mockResolvedValueOnce(mockRefreshResponse);
+      vi.mocked(apiClient.refreshAccessToken).mockResolvedValueOnce('test-token');
       vi.mocked(apiClient.apiClient.get).mockResolvedValueOnce(mockUserResponse);
 
       const { result } = renderHook(() => useAuth(), { wrapper });
@@ -69,14 +66,14 @@ describe('AuthContext', () => {
         expect(result.current.isLoading).toBe(false);
       });
 
-      expect(apiClient.apiClient.post).toHaveBeenCalledWith('/api/auth/refresh');
+      expect(apiClient.refreshAccessToken).toHaveBeenCalledTimes(1);
       expect(apiClient.apiClient.get).toHaveBeenCalledWith('/api/auth/me');
       expect(result.current.user).toEqual(mockUserResponse.data.user);
       expect(result.current.isAuthenticated).toBe(true);
     });
 
     it('should handle failed initialization gracefully', async () => {
-      vi.mocked(apiClient.apiClient.post).mockRejectedValueOnce(new Error('No session'));
+      vi.mocked(apiClient.refreshAccessToken).mockRejectedValueOnce(new Error('No session'));
 
       const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -92,8 +89,6 @@ describe('AuthContext', () => {
   describe('login', () => {
     it('should login user and set token', async () => {
       // Mock initial refresh failure
-      vi.mocked(apiClient.apiClient.post).mockRejectedValueOnce(new Error('No session'));
-
       const mockLoginResponse = {
         data: {
           accessToken: 'login-token',
@@ -130,8 +125,6 @@ describe('AuthContext', () => {
   describe('register', () => {
     it('should register user and set token', async () => {
       // Mock initial refresh failure
-      vi.mocked(apiClient.apiClient.post).mockRejectedValueOnce(new Error('No session'));
-
       const mockRegisterResponse = {
         data: {
           accessToken: 'register-token',
@@ -187,8 +180,6 @@ describe('AuthContext', () => {
     });
 
     it('should clear state even if logout request fails', async () => {
-      vi.mocked(apiClient.apiClient.post).mockRejectedValueOnce(new Error('No session'));
-
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       await waitFor(() => {
@@ -208,8 +199,6 @@ describe('AuthContext', () => {
 
   describe('refreshUser', () => {
     it('should fetch and update current user', async () => {
-      vi.mocked(apiClient.apiClient.post).mockRejectedValueOnce(new Error('No session'));
-
       const mockUserResponse = {
         data: {
           user: {
