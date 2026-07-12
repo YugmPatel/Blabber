@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { CalendarClock, CheckCircle2, Circle, Clock3, MessageSquarePlus, Pencil, Plus, Trash2 } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Circle, Clock3, ListChecks, MessageSquarePlus, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { ChatActionItem, ChatActionStatus, CreateChatActionDTO, SourceReference, UpdateChatActionDTO } from '@repo/types';
 import SourceEvidence from './SourceEvidence';
 
@@ -49,8 +49,14 @@ function sourceIds(action: ChatActionItem) {
 
 function statusClasses(status: string): string {
   if (status === 'completed') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300';
-  if (status === 'in_progress') return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300';
+  if (status === 'in_progress') return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300';
   return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300';
+}
+
+function StatusDot({ status }: { status: string }) {
+  if (status === 'completed') return <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0 text-emerald-500" />;
+  if (status === 'in_progress') return <Clock3 size={16} className="mt-0.5 flex-shrink-0 text-sky-500" />;
+  return <Circle size={16} className="mt-0.5 flex-shrink-0 text-amber-500" />;
 }
 
 function sourceFallback(action: ChatActionItem) {
@@ -227,7 +233,7 @@ function ActionRow({
   const canUpdateStatus = Boolean(action.permissions?.canUpdateStatus);
 
   return (
-    <article id={actionId ? `action-${actionId}` : undefined} className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950">
+    <article id={actionId ? `action-${actionId}` : undefined} className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm dark:border-slate-700 dark:bg-slate-800/60">
       {isEditing ? (
         <ActionForm
           action={action}
@@ -240,27 +246,30 @@ function ActionRow({
       ) : (
         <>
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClasses(status)}`}>
-                  {statusLabels[status]}
-                </span>
-                {(action.dueAt || action.dueDate) && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    <CalendarClock size={11} />
-                    {formatDate(action.dueAt || action.dueDate)}
-                  </span>
+            <div className="flex min-w-0 items-start gap-2">
+              <StatusDot status={status} />
+              <div className="min-w-0">
+                <h4 className="text-sm font-semibold text-slate-900 dark:text-white">{action.title}</h4>
+                {action.description && (
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{action.description}</p>
                 )}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClasses(status)}`}>
+                    {statusLabels[status]}
+                  </span>
+                  {(action.dueAt || action.dueDate) && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <CalendarClock size={11} />
+                      Due {formatDate(action.dueAt || action.dueDate)}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  Owner: {action.assignedTo?.name || 'Unassigned'}
+                  {sourceIds(action).length > 0 ? ` · ${sourceIds(action).length} source` : ''}
+                </p>
+                <SourceEvidence sources={action.sources} compact fallbackText={sourceFallback(action)} onJump={onJumpToSource} />
               </div>
-              <h4 className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">{action.title}</h4>
-              {action.description && (
-                <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{action.description}</p>
-              )}
-              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                Owner: {action.assignedTo?.name || 'Unassigned'}
-                {sourceIds(action).length > 0 ? ` · ${sourceIds(action).length} source` : ''}
-              </p>
-              <SourceEvidence sources={action.sources} compact fallbackText={sourceFallback(action)} onJump={onJumpToSource} />
             </div>
             <div className="flex shrink-0 items-center gap-1">
               {actionId && onUpdateAction && canEdit && (
@@ -297,7 +306,7 @@ function ActionRow({
                 <Circle size={12} />
                 Open
               </button>
-              <button type="button" onClick={() => onUpdateStatus(actionId, 'in_progress')} disabled={isUpdating || status === 'in_progress'} className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50 dark:border-blue-800 dark:text-blue-300">
+              <button type="button" onClick={() => onUpdateStatus(actionId, 'in_progress')} disabled={isUpdating || status === 'in_progress'} className="inline-flex items-center gap-1 rounded-md border border-sky-200 px-2 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-50 disabled:opacity-50 dark:border-sky-800 dark:text-sky-300">
                 <Clock3 size={12} />
                 In Progress
               </button>
@@ -379,33 +388,44 @@ export default function ChatActionsPanel({
   }, [currentUserCanManageActions, defaultOwnerUserId, ownerOptions]);
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-start justify-between gap-3 px-4 py-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Actions</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {isLoading ? 'Loading actions...' : `${openCount} open · ${progressCount} in progress`}
-          </p>
-          {errorMessage && (
-            <div className="mt-1 flex items-center gap-2">
-              <p className="text-xs text-rose-500">{errorMessage}</p>
-              {onRetry && (
-                <button type="button" onClick={onRetry} className="rounded-md border border-rose-200 px-2 py-0.5 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-300 dark:hover:bg-rose-950/30">
-                  Retry
-                </button>
-              )}
-            </div>
+    <section className="space-y-3">
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+            <ListChecks size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[15px] font-semibold text-slate-900 dark:text-white">
+              {isLoading ? 'Loading actions...' : `${openCount} open · ${progressCount} in progress`}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Track and manage action items from this conversation.
+            </p>
+          </div>
+          {onCreateAction && safeOwnerOptions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsCreatingManual(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-teal-500/40 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-50 dark:border-teal-500/40 dark:text-teal-300 dark:hover:bg-teal-500/10"
+            >
+              <Plus size={13} />
+              New
+            </button>
           )}
         </div>
-        {onCreateAction && safeOwnerOptions.length > 0 && (
-          <button type="button" onClick={() => setIsCreatingManual(true)} className="inline-flex items-center gap-1 rounded-md border border-teal-200 px-2 py-1 text-xs font-semibold text-teal-700 transition hover:bg-teal-50 dark:border-teal-800 dark:text-teal-300">
-            <Plus size={13} />
-            New
-          </button>
+        {errorMessage && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 dark:border-rose-900/40 dark:bg-rose-950/20">
+            <p className="text-xs text-rose-600 dark:text-rose-300">{errorMessage}</p>
+            {onRetry && (
+              <button type="button" onClick={onRetry} className="ml-auto flex-shrink-0 rounded-md border border-rose-300 px-2 py-0.5 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-100 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40">
+                Retry
+              </button>
+            )}
+          </div>
         )}
       </div>
 
-      <div className="space-y-2 border-t border-slate-100 p-3 dark:border-slate-800">
+      <div className="space-y-2.5">
         {isCreatingManual && (
           <ActionForm
             ownerOptions={safeOwnerOptions}
@@ -433,15 +453,22 @@ export default function ChatActionsPanel({
             />
           ))
         ) : (
-          <p className="text-xs text-slate-400 dark:text-slate-500">No active actions yet.</p>
+          !isCreatingManual && (
+            <div className="rounded-xl border border-slate-200 bg-white p-5 text-center dark:border-slate-700 dark:bg-slate-800/60">
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">No actions yet</p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Action items from this conversation will appear here.
+              </p>
+            </div>
+          )
         )}
 
         {completed.length > 0 && (
-          <details className="rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-950">
+          <details className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-800/60">
             <summary className="cursor-pointer font-semibold text-slate-600 dark:text-slate-300">
               Completed ({completed.length})
             </summary>
-            <div className="mt-2 space-y-2">
+            <div className="mt-2.5 space-y-2.5">
               {completed.slice(0, 8).map((action) => (
                 <ActionRow
                   key={action.id || action.title}

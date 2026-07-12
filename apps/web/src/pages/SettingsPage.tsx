@@ -1282,7 +1282,7 @@ function AccountSection() {
             label="Password"
             value={
               isGoogleOnly
-                ? "You sign in with Google — password sign-in isn't set up for this account."
+                ? "You sign in with Google, so password sign-in isn't set up for this account."
                 : 'Manage your password'
             }
             action={
@@ -1853,7 +1853,7 @@ function PrivacySection() {
           last
         />
         <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
-          Who can see each Moment is chosen when you post it — including a Close Friends audience, managed below.
+          Who can see each Moment is chosen when you post it, including a Close Friends audience, managed below.
         </p>
       </PrivacyCard>
 
@@ -2929,7 +2929,7 @@ function HelpSection() {
       icon: MessageSquare,
       title: 'Chats & groups',
       desc: 'Everything about messaging and group chats.',
-      body: 'Use New Chat for one-to-one conversations, or create a group and add members. Start voice and video calls from a direct chat — if someone disabled incoming calls, Blabber will tell you cleanly. Open Intelligence from a chat for summaries, actions, decisions, and group memory.',
+      body: 'Use New Chat for one-to-one conversations, or create a group and add members. Start voice and video calls from a direct chat: if someone disabled incoming calls, Blabber will tell you cleanly. Open Intelligence from a chat for summaries, actions, decisions, and group memory.',
     },
     {
       key: 'content',
@@ -3241,7 +3241,7 @@ function DiscoverySection() {
               <>
                 Allow my public posts to appear in Blabber Discover.
                 <span className="mt-0.5 block text-xs text-slate-400 dark:text-slate-500">
-                  Applies to posts you've marked discoverable — private posts never appear.
+                  Applies to posts you've marked discoverable. Private posts never appear.
                 </span>
               </>
             }
@@ -3254,7 +3254,7 @@ function DiscoverySection() {
               <>
                 Allow my public reels to appear in Blabber Discover.
                 <span className="mt-0.5 block text-xs text-slate-400 dark:text-slate-500">
-                  Applies to reels you've marked discoverable — private reels never appear.
+                  Applies to reels you've marked discoverable. Private reels never appear.
                 </span>
               </>
             }

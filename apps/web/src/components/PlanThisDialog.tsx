@@ -91,7 +91,7 @@ export default function PlanThisDialog({ source, open, onClose }: PlanThisDialog
       toast.success(`Proposal sent to ${destinationName}.`);
     },
     onError: () => {
-      setSendError('We could not send this proposal. Your details are still here—please try again.');
+      setSendError('We could not send this proposal. Your details are still here, please try again.');
     },
   });
 

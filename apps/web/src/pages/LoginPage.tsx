@@ -91,7 +91,7 @@ function BrandPanel() {
           Do<span className="text-teal-300">.</span>
         </h1>
         <p className="max-w-[24ch] text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.8)' }}>
-          Turn conversations into summaries, tasks, decisions, and shared memory — seamlessly.
+          Turn conversations into summaries, tasks, decisions, and shared memory, seamlessly.
         </p>
       </div>
 

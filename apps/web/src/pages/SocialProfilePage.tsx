@@ -578,7 +578,7 @@ export default function SocialProfilePage() {
                       {savedQuery.isLoading ? (
                         <p className="py-8 text-center text-sm text-[color:var(--bl-text-muted)]">Loading saved posts...</p>
                       ) : savedPosts.length === 0 ? (
-                        <EmptyState icon={Bookmark} title="Nothing saved yet" hint="Posts you save will appear here — only you can see them." />
+                        <EmptyState icon={Bookmark} title="Nothing saved yet" hint="Posts you save will appear here. Only you can see them." />
                       ) : (
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                           {savedPosts.map((item) => (

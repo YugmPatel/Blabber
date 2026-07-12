@@ -121,8 +121,8 @@ function voteSummary(plan?: PlanThisPlan | null) {
 function planStatus(plan?: PlanThisPlan | null) {
   if (!plan) return 'Plan is unavailable.';
   if (plan.state === 'draft') return 'Voting open';
-  if (plan.state === 'voting' && plan.lastMaterialChangeAt) return 'Updated — vote again';
-  if (plan.state === 'voting' && (plan.updateCount || 0) > 0) return 'Updated — review changes';
+  if (plan.state === 'voting' && plan.lastMaterialChangeAt) return 'Updated, vote again';
+  if (plan.state === 'voting' && (plan.updateCount || 0) > 0) return 'Updated, review changes';
   return statusLabels[plan.state];
 }
 
@@ -268,7 +268,7 @@ export default function PlanThisMessageCard({ planId }: { planId: string }) {
             <span className="mt-3 grid gap-1 text-xs text-slate-500 dark:text-slate-400">
               <span>
                 {sourceTypeLabel(plan.source.type)}
-                {plan.source.available ? (plan.source.previewLabel ? `: ${plan.source.previewLabel}` : '') : ' — original content is no longer available.'}
+                {plan.source.available ? (plan.source.previewLabel ? `: ${plan.source.previewLabel}` : '') : ' (original content is no longer available)'}
               </span>
               <span className="inline-flex items-center gap-1 text-teal-700/80 dark:text-teal-300/80"><CalendarClock className="h-3.5 w-3.5" /> {localDateTime(plan.suggestedAt, true)}</span>
               {plan.suggestedLocation && <span className="inline-flex items-center gap-1 text-teal-700/80 dark:text-teal-300/80"><MapPin className="h-3.5 w-3.5" /> {plan.suggestedLocation}</span>}

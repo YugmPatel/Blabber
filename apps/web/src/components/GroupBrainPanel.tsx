@@ -1,10 +1,13 @@
 import { useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
-import { Brain, Loader2, RotateCcw, Send } from 'lucide-react';
+import { Brain, Database, Loader2, Lock, RotateCcw, Send, Sparkles } from 'lucide-react';
 import type { GroupBrainAnswer, SourceReference } from '@repo/types';
 import SourceEvidence from './SourceEvidence';
 
+export type AskMode = 'group' | 'direct';
+
 interface GroupBrainPanelProps {
+  mode?: AskMode;
   isAsking: boolean;
   errorMessage?: string;
   onAsk: (question: string) => Promise<GroupBrainAnswer>;
@@ -19,13 +22,64 @@ interface TranscriptItem {
   error?: string;
 }
 
-const SUGGESTIONS = [
-  'What did we decide this week?',
-  'What is still pending?',
-  'Who owns the current tasks?',
-  'What changed since last week?',
-  'What are the important links?',
-  'What did we decide about the group topic?',
+const COPY: Record<AskMode, {
+  heroTitle: string;
+  heroSubtitle: string;
+  suggestions: string[];
+  placeholder: string;
+  askLabel: string;
+  loadingLabel: string;
+  errorFallback: string;
+}> = {
+  group: {
+    heroTitle: "Your team's collective knowledge",
+    heroSubtitle: "Ask about this group's past conversations, decisions, plans, and open questions.",
+    suggestions: [
+      'What did we decide this week?',
+      'What is still pending?',
+      'Who owns the current tasks?',
+      'What changed since last week?',
+      'What are the important links?',
+      'Show me all files related to pricing.',
+    ],
+    placeholder: 'Ask Group Brain anything...',
+    askLabel: 'Ask Group Brain',
+    loadingLabel: 'Looking for relevant group evidence...',
+    errorFallback: 'Group Brain could not answer that right now. Try again.',
+  },
+  direct: {
+    heroTitle: 'Ask about this conversation',
+    heroSubtitle: 'Find answers, decisions, links, and tasks from this chat.',
+    suggestions: [
+      'What did we decide?',
+      'What is still pending?',
+      'What links were shared?',
+      'What tasks came from this chat?',
+      'Summarize this conversation.',
+    ],
+    placeholder: 'Ask about this chat...',
+    askLabel: 'Ask Chat',
+    loadingLabel: 'Looking for relevant messages...',
+    errorFallback: 'That could not be answered right now. Try again.',
+  },
+};
+
+const TRUST_POINTS = [
+  {
+    icon: Database,
+    title: 'Grounded in this chat',
+    description: 'Answers come from messages, files, and links.',
+  },
+  {
+    icon: Lock,
+    title: 'Private and secure',
+    description: 'Only group members can use it.',
+  },
+  {
+    icon: Sparkles,
+    title: 'Keeps getting smarter',
+    description: 'Improves as your team shares more.',
+  },
 ];
 
 function safeArray<T>(value: T[] | null | undefined): T[] {
@@ -33,6 +87,7 @@ function safeArray<T>(value: T[] | null | undefined): T[] {
 }
 
 export default function GroupBrainPanel({
+  mode = 'group',
   isAsking,
   errorMessage,
   onAsk,
@@ -41,6 +96,8 @@ export default function GroupBrainPanel({
   const [question, setQuestion] = useState('');
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const requestIdRef = useRef(0);
+  const copy = COPY[mode];
+  const isGroup = mode === 'group';
 
   const ask = async (rawQuestion: string) => {
     const trimmed = rawQuestion.trim();
@@ -70,7 +127,7 @@ export default function GroupBrainPanel({
             ? {
                 ...item,
                 isLoading: false,
-                error: 'Group Brain could not answer that right now. Try again.',
+                error: copy.errorFallback,
               }
             : item
         )
@@ -90,55 +147,84 @@ export default function GroupBrainPanel({
   };
 
   return (
-    <section className="flex min-h-[calc(100vh-8rem)] flex-col rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <div className="border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Brain size={16} className="shrink-0 text-teal-600 dark:text-teal-300" />
-            <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Group Brain</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Ask about this group&apos;s past conversations, decisions, plans, and open questions.
-              </p>
-            </div>
-          </div>
-          {transcript.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setTranscript([])}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              <RotateCcw size={12} />
-              Clear
-            </button>
-          )}
+    <section className="flex min-h-[calc(100vh-8rem)] flex-col rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-700">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+            <Brain size={17} />
+          </span>
+          <h3 className="text-[15px] font-semibold text-slate-900 dark:text-white">{isGroup ? 'Group Brain' : 'Ask Chat'}</h3>
         </div>
-        {errorMessage && (
-          <p className="mt-2 text-xs text-rose-500">Group Brain is unavailable right now.</p>
+        {transcript.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setTranscript([])}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60"
+          >
+            <RotateCcw size={12} />
+            Clear
+          </button>
         )}
       </div>
+      {errorMessage && (
+        <p className="px-4 pt-2 text-xs text-rose-500">{isGroup ? 'Group Brain' : 'Ask Chat'} is unavailable right now.</p>
+      )}
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {transcript.length === 0 ? (
-          <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-sm font-semibold text-slate-900 dark:text-white">Ask Group Brain</p>
-            <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-              Answers are private to you and grounded in this group&apos;s actual conversation history.
-            </p>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
-              Try asking
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {SUGGESTIONS.map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onClick={() => void ask(suggestion)}
-                  className="rounded-full border border-teal-500/30 bg-teal-50/60 px-3 py-1.5 text-left text-xs font-medium text-teal-800 transition hover:border-teal-400 hover:bg-teal-50 dark:border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-200 dark:hover:bg-teal-500/20"
-                >
-                  {suggestion}
-                </button>
-              ))}
+          <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">
+              <Brain size={22} />
+            </span>
+            <div>
+              <p className="text-base font-semibold text-slate-900 dark:text-white">{copy.heroTitle}</p>
+              <p className="mx-auto mt-1 max-w-xs text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                {copy.heroSubtitle}
+              </p>
+            </div>
+
+            {isGroup && (
+              <div className="space-y-2.5 text-left">
+                {TRUST_POINTS.map((point) => (
+                  <div key={point.title} className="flex items-start gap-2.5 rounded-xl bg-slate-50 p-2.5 dark:bg-slate-900/50">
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white text-teal-600 dark:bg-slate-800 dark:text-teal-300">
+                      <point.icon size={14} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-slate-800 dark:text-slate-100">{point.title}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{point.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-left dark:border-slate-700 dark:bg-slate-900/40">
+              <div className="flex items-center gap-1.5">
+                <Sparkles size={13} className="text-teal-600 dark:text-teal-300" />
+                <p className="text-[13px] font-semibold text-slate-800 dark:text-slate-100">{copy.askLabel}</p>
+                <span className="ml-auto rounded-full bg-teal-100 px-1.5 py-0.5 text-[10px] font-bold text-teal-700 dark:bg-teal-500/20 dark:text-teal-300">
+                  AI
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Get answers, find context, and surface decisions from {isGroup ? "this group's conversations." : 'this conversation.'}
+              </p>
+              <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
+                Try asking
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {copy.suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => void ask(suggestion)}
+                    className="rounded-full border border-teal-500/30 bg-teal-50/60 px-3 py-1.5 text-left text-xs font-medium text-teal-800 transition hover:border-teal-400 hover:bg-teal-50 dark:border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-200 dark:hover:bg-teal-500/20"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
@@ -150,12 +236,12 @@ export default function GroupBrainPanel({
                   <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-teal-100">You</p>
                   <p className="mt-1 whitespace-pre-wrap">{item.question}</p>
                 </div>
-                <div className="max-w-[92%] rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-950">
+                <div className="max-w-[92%] rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900/60">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Blabber</p>
                   {item.isLoading ? (
                     <p className="mt-2 inline-flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                       <Loader2 size={14} className="animate-spin" />
-                      Looking for relevant group evidence...
+                      {copy.loadingLabel}
                     </p>
                   ) : item.error ? (
                     <div className="mt-2 space-y-2">
@@ -189,27 +275,27 @@ export default function GroupBrainPanel({
         )}
       </div>
 
-      <form onSubmit={submit} className="border-t border-slate-100 p-3 dark:border-slate-800">
+      <form onSubmit={submit} className="border-t border-slate-100 p-3 dark:border-slate-700">
         <div className="flex gap-2">
           <textarea
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             onKeyDown={handleKeyDown}
             rows={2}
-            placeholder="Ask Group Brain about this group..."
-            className="min-w-0 flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-teal-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+            placeholder={copy.placeholder}
+            className="min-w-0 flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-teal-400 dark:border-slate-700 dark:bg-slate-900/60 dark:text-white"
           />
           <button
             type="submit"
             disabled={!question.trim() || isAsking}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white transition hover:bg-slate-700 disabled:opacity-50 dark:bg-white dark:text-slate-950"
-            aria-label="Ask Group Brain"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-teal-600 text-white transition hover:bg-teal-700 disabled:opacity-50"
+            aria-label={copy.askLabel}
           >
             {isAsking ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
           </button>
         </div>
-        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-          Enter to send, Shift+Enter for a new line.
+        <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+          AI responses may be inaccurate. Check important info.
         </p>
       </form>
     </section>
