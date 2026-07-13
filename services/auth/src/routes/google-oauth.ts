@@ -7,6 +7,7 @@ import { getUsersCollection, UserDocument } from '../models/user';
 import { getDeviceSessionsCollection, hashRefreshToken } from '../models/device-session';
 import { generateAccessToken, generateRefreshToken, getRefreshTokenTTL } from '../utils/jwt';
 import { getRefreshCookieOptions } from '../utils/cookies';
+import { isReservedUsername } from '../reserved-usernames';
 
 const STATE_COOKIE = 'googleOAuthState';
 const VERIFIER_COOKIE = 'googleOAuthVerifier';
@@ -87,12 +88,16 @@ async function createSession(req: Request, res: Response, user: UserDocument) {
 
 async function uniqueUsernameFromEmail(email: string) {
   const collection = getUsersCollection();
-  const rawBase = email.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_]/g, '') || 'user';
-  const base = rawBase.slice(0, 24) || 'user';
+  const rawBase = email.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'user';
+  const trimmedBase = rawBase.replace(/^[._]+|[._]+$/g, '');
+  const base = (trimmedBase.slice(0, 24) || 'user').padEnd(3, '0');
   let candidate = base;
   let suffix = 0;
 
-  while (await collection.findOne({ username: candidate })) {
+  // Reserved names and collisions both fall through to the same
+  // counter-suffix loop, so a Google user can never land on a reserved
+  // handle or someone else's username.
+  while (isReservedUsername(candidate) || (await collection.findOne({ username: candidate }))) {
     suffix += 1;
     candidate = `${base}${suffix}`.slice(0, 30);
   }

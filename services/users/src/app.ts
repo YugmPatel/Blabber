@@ -6,6 +6,7 @@ import {
   createAuthMiddleware,
   errorHandler,
   notFoundHandler,
+  RateLimiter,
   requestIdMiddleware,
   requestLogger,
   runReadinessChecks,
@@ -14,6 +15,35 @@ import { getDatabase } from './db';
 import { connectToRedis } from './redis';
 
 const app: Express = express();
+const rateLimitRedis = connectToRedis();
+
+// Discovery/safety routes are the abuse-prone surface this pass hardens —
+// rate limits fail open (never block real users) if Redis has a hiccup,
+// since these are a defense-in-depth layer, not core functionality.
+const searchRateLimit = new RateLimiter(rateLimitRedis, {
+  windowMs: 60_000,
+  maxRequests: 30,
+  keyPrefix: 'ratelimit:user-search',
+  failOpen: true,
+}).middleware();
+const profileLookupRateLimit = new RateLimiter(rateLimitRedis, {
+  windowMs: 60_000,
+  maxRequests: 60,
+  keyPrefix: 'ratelimit:profile-lookup',
+  failOpen: true,
+}).middleware();
+const inviteCreateRateLimit = new RateLimiter(rateLimitRedis, {
+  windowMs: 60_000,
+  maxRequests: 5,
+  keyPrefix: 'ratelimit:invite-create',
+  failOpen: true,
+}).middleware();
+const safetyActionRateLimit = new RateLimiter(rateLimitRedis, {
+  windowMs: 60_000,
+  maxRequests: 20,
+  keyPrefix: 'ratelimit:safety-action',
+  failOpen: true,
+}).middleware();
 
 // Load configuration
 const commonConfig = loadCommonConfig();
@@ -108,6 +138,7 @@ import {
   followProfile,
   getMyProfile,
   getProfileByHandle,
+  getProfileByUsername,
   listFollowers,
   listFollowing,
   listIncomingFollowRequests,
@@ -116,6 +147,10 @@ import {
   updateMyHandle,
   updateMyProfile,
 } from './routes/profiles';
+import { getMyPrivacy, updateMyPrivacy } from './routes/privacy';
+import { getMyDiscoveryInfo } from './routes/my-discovery';
+import { createInvite, getInviteProfile } from './routes/invites';
+import { muteUser, unmuteUser } from './routes/mute';
 import {
   createReport,
   getModerationReport,
@@ -205,7 +240,7 @@ import {
 import { requirePlatformModerator } from './middleware/platform-role';
 
 // Specific routes must come before parameterized routes
-app.get('/search', searchUsers);
+app.get('/search', authMiddleware, searchRateLimit, searchUsers);
 app.get('/settings/me', authMiddleware, getMySettings);
 app.patch('/settings/me', authMiddleware, updateMySettings);
 app.get('/settings/:id/public', getPublicSettings);
@@ -223,7 +258,15 @@ app.post('/profiles/:handle/follow', authMiddleware, followProfile);
 app.delete('/profiles/:handle/follow', authMiddleware, unfollowProfile);
 app.post('/profiles/:handle/cancel', authMiddleware, cancelFollowRequest);
 app.delete('/profiles/:handle/follower', authMiddleware, removeFollower);
-app.get('/profiles/:handle', authMiddleware, getProfileByHandle);
+app.get('/profiles/:handle', authMiddleware, profileLookupRateLimit, getProfileByHandle);
+app.get('/profile/:username', authMiddleware, profileLookupRateLimit, getProfileByUsername);
+app.get('/me/privacy', authMiddleware, getMyPrivacy);
+app.patch('/me/privacy', authMiddleware, updateMyPrivacy);
+app.get('/me/discovery', authMiddleware, getMyDiscoveryInfo);
+app.post('/invites', authMiddleware, inviteCreateRateLimit, createInvite);
+app.get('/invites/:token', authMiddleware, profileLookupRateLimit, getInviteProfile);
+app.post('/:userId/mute', authMiddleware, safetyActionRateLimit, muteUser);
+app.delete('/:userId/mute', authMiddleware, unmuteUser);
 app.get('/presence/:id', getPresence);
 app.get('/moments/contacts', authMiddleware, listMomentContacts);
 app.get('/moments/close-friends', authMiddleware, listCloseFriends);
@@ -339,18 +382,18 @@ app.patch('/posts/:postId', authMiddleware, updatePost);
 app.patch('/posts/:postId/discovery', authMiddleware, updatePostDiscovery);
 app.delete('/posts/:postId', authMiddleware, deletePost);
 app.get('/blocked', authMiddleware, listBlockedUsers);
-app.post('/:userId/block', authMiddleware, blockUser);
+app.post('/:userId/block', authMiddleware, safetyActionRateLimit, blockUser);
 app.delete('/:userId/block', authMiddleware, unblockUser);
 app.get('/blocks/relationship/:userId', authMiddleware, getBlockRelationship);
 app.get('/blocks/visibility-exclusions', authMiddleware, listBlockVisibilityExclusions);
-app.post('/block', authMiddleware, blockUser);
+app.post('/block', authMiddleware, safetyActionRateLimit, blockUser);
 app.post('/unblock', authMiddleware, unblockUser);
-app.post('/reports', authMiddleware, createReport);
+app.post('/reports', authMiddleware, safetyActionRateLimit, createReport);
 app.get('/reports/mine', authMiddleware, listMyReports);
 app.get('/moderation/reports', authMiddleware, requirePlatformModerator, listModerationReports);
 app.get('/moderation/reports/:reportId', authMiddleware, requirePlatformModerator, getModerationReport);
 app.patch('/moderation/reports/:reportId', authMiddleware, requirePlatformModerator, updateModerationReport);
-app.get('/:id', getUserProfile);
+app.get('/:id', authMiddleware, profileLookupRateLimit, getUserProfile);
 
 // 404 handler
 app.use(notFoundHandler);

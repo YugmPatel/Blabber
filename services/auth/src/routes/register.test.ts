@@ -67,6 +67,31 @@ describe('POST /register', () => {
     expect(response.body).toHaveProperty('error');
   });
 
+  it('should reject a reserved username', async () => {
+    const response = await request(app)
+      .post('/register')
+      .send({ username: 'admin', email: 'reserved@example.com', password: 'password123', name: 'Someone' });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('should reject a username with disallowed characters', async () => {
+    const response = await request(app)
+      .post('/register')
+      .send({ username: 'bad user!', email: 'badchars@example.com', password: 'password123', name: 'Someone' });
+
+    expect(response.status).toBe(400);
+  });
+
+  it('should normalize username casing to lowercase', async () => {
+    const response = await request(app)
+      .post('/register')
+      .send({ username: 'MixedCase', email: 'mixedcase@example.com', password: 'password123', name: 'Someone' })
+      .expect(201);
+
+    expect(response.body.user.username).toBe('mixedcase');
+  });
+
   it('should reject registration with duplicate username', async () => {
     const userData = {
       username: 'testuser',

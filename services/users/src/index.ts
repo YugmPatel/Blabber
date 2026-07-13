@@ -8,6 +8,8 @@ import { createUserIndexes } from './models/user';
 import { createStatusIndexes } from './models/status';
 import { createUserSettingsIndexes } from './models/user-settings';
 import { createUserBlockIndexes } from './models/user-block';
+import { createUserMuteIndexes } from './models/user-mute';
+import { createUserInviteIndexes } from './models/user-invite';
 import { createProfileRelationshipIndexes } from './models/profile-relationship';
 import {
   cleanupExpiredProfileHandleReservations,
@@ -64,6 +66,8 @@ async function startServer() {
     // Create indexes
     await createUserIndexes();
     await createUserBlockIndexes();
+    await createUserMuteIndexes();
+    await createUserInviteIndexes();
     await createProfileRelationshipIndexes();
     await createProfileHandleReservationIndexes();
     await cleanupExpiredProfileHandleReservations();

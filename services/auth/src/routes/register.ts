@@ -9,6 +9,7 @@ import { generateAccessToken, generateRefreshToken, getRefreshTokenTTL } from '.
 import { getRefreshCookieOptions } from '../utils/cookies';
 import { getEmailVerificationTokensCollection, hashToken, randomToken } from '../models/account-security';
 import { sendVerifyEmail } from '../utils/account-email';
+import { isReservedUsername } from '../reserved-usernames';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   // Validate request body
@@ -19,6 +20,10 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const { username, email, password, name } = validation.data;
+
+  if (isReservedUsername(username)) {
+    throw new ValidationError('This username is reserved. Please choose another.');
+  }
 
   const usersCollection = getUsersCollection();
 

@@ -15,7 +15,9 @@ import { createGroupInviteLinkIndexes } from './models/group-invite-link';
 import { createGroupModerationActivityIndexes } from './models/group-moderation-activity';
 import { createPlanThisIndexes } from './models/plan-this';
 import { createVeyraIndexes } from './models/veyra';
+import { createMessageRequestIndexes } from './models/message-request';
 import { initPubSub, closePubSub } from './pubsub';
+import { connectToRedis, closeRedis } from './redis';
 import { startActionReminderProcessor, stopActionReminderProcessor } from './action-reminders';
 
 const config = loadCommonConfig();
@@ -39,6 +41,8 @@ async function startServer() {
     await createGroupModerationActivityIndexes();
     await createPlanThisIndexes();
     await createVeyraIndexes();
+    await createMessageRequestIndexes();
+    connectToRedis();
     initPubSub();
     startActionReminderProcessor();
     logger.info('Database indexes created');
@@ -62,6 +66,7 @@ async function startServer() {
         logger.info('HTTP server closed');
         stopActionReminderProcessor();
         await closePubSub();
+        await closeRedis();
         await closeDatabase();
         process.exit(0);
       });

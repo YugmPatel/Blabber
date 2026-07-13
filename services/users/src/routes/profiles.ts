@@ -132,8 +132,13 @@ async function findActiveUserByHandle(handle: string) {
   return getUsersCollection().findOne(activeUserQuery({ profileHandle: canonicalHandle(handle) }) as any);
 }
 
+async function findActiveUserByUsername(username: string) {
+  return getUsersCollection().findOne(activeUserQuery({ username: username.trim().toLowerCase() }) as any);
+}
+
 function userIdentity(user: User) {
   return {
+    username: user.username,
     name: user.name,
     handle: user.profileHandle || null,
     displayHandle: user.profileHandle ? `@${user.profileHandle}` : null,
@@ -216,7 +221,7 @@ function serializePublicProfile(user: User, relationship: string, counts: Awaite
   };
 }
 
-async function serializeProfileForViewer(user: User, viewerUserId: ObjectId) {
+export async function serializeProfileForViewer(user: User, viewerUserId: ObjectId) {
   if (await hasBlockBetween(viewerUserId, user._id)) {
     throw new AppError(404, 'Profile is unavailable.', 'PROFILE_UNAVAILABLE');
   }
@@ -353,6 +358,17 @@ export const getProfileByHandle = asyncHandler(async (req: Request, res: Respons
   const viewerUserId = requireUserId(req);
   await requireActiveUser(viewerUserId);
   const user = await findActiveUserByHandle(req.params.handle);
+  if (!user) throw new AppError(404, 'Profile is unavailable.', 'PROFILE_UNAVAILABLE');
+  res.status(200).json(await serializeProfileForViewer(user, viewerUserId));
+});
+
+// Username-keyed lookup for basic discovery (New Convo / search results),
+// independent of the optional Social Profile handle system above — every
+// account has a username, not every account has set a profileHandle.
+export const getProfileByUsername = asyncHandler(async (req: Request, res: Response) => {
+  const viewerUserId = requireUserId(req);
+  await requireActiveUser(viewerUserId);
+  const user = await findActiveUserByUsername(req.params.username);
   if (!user) throw new AppError(404, 'Profile is unavailable.', 'PROFILE_UNAVAILABLE');
   res.status(200).json(await serializeProfileForViewer(user, viewerUserId));
 });

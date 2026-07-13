@@ -48,7 +48,13 @@ export const UserSchema = z.object({
 
 // User Registration DTO
 export const RegisterDTOSchema = z.object({
-  username: z.string().min(3).max(30),
+  // Case-insensitive on input; normalized to lowercase for storage/uniqueness.
+  username: z
+    .string()
+    .min(3)
+    .max(30)
+    .regex(/^[a-zA-Z0-9_.]+$/, 'Username can only contain letters, numbers, underscores, and dots')
+    .transform((value) => value.toLowerCase()),
   email: z.string().email(),
   password: z.string().min(8).max(100),
   name: z.string().min(1).max(100),

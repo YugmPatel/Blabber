@@ -46,7 +46,10 @@ describe('Release D communities', () => {
     await db.collection('community_post_reactions').deleteMany({});
     await db.collection('community_handle_reservations').deleteMany({});
     await db.collection('community_moderation_activity').deleteMany({});
-    await db.collection('user_blocks').deleteMany({});
+    // Not clearing user_blocks: this file's user IDs are freshly randomized
+    // every run, so stale rows from other tests can never match them, and an
+    // unconditional deleteMany({}) on this shared collection races with other
+    // test files running concurrently against the same database.
 
     const now = new Date();
     const result = await db.collection('users').insertMany([

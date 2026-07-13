@@ -1,12 +1,28 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import { ObjectId } from 'mongodb';
+import { createHmac } from 'crypto';
 import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
 import { User } from '../models/user';
 
+function signTestToken(userId: string) {
+  const encodedHeader = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const encodedPayload = Buffer.from(
+    JSON.stringify({
+      userId,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 15 * 60,
+    })
+  ).toString('base64url');
+  const data = `${encodedHeader}.${encodedPayload}`;
+  const signature = createHmac('sha256', process.env.JWT_ACCESS_SECRET!).update(data).digest('base64url');
+  return `${data}.${signature}`;
+}
+
 describe('GET /:id - User Profile Retrieval', () => {
   let testUserId: ObjectId;
+  let viewerToken: string;
 
   beforeAll(async () => {
     await connectToDatabase();
@@ -40,10 +56,16 @@ describe('GET /:id - User Profile Retrieval', () => {
 
     const result = await usersCollection.insertOne(testUser as User);
     testUserId = result.insertedId;
+    viewerToken = signTestToken(new ObjectId().toString());
+  });
+
+  it('requires authentication', async () => {
+    const response = await request(app).get(`/${testUserId.toString()}`);
+    expect(response.status).toBe(401);
   });
 
   it('should return user profile by ID', async () => {
-    const response = await request(app).get(`/${testUserId.toString()}`);
+    const response = await request(app).get(`/${testUserId.toString()}`).set('Authorization', `Bearer ${viewerToken}`);
 
     expect(response.status).toBe(200);
     expect(response.body.user).toMatchObject({
@@ -60,7 +82,7 @@ describe('GET /:id - User Profile Retrieval', () => {
 
   it('should return 404 for non-existent user', async () => {
     const nonExistentId = new ObjectId();
-    const response = await request(app).get(`/${nonExistentId.toString()}`);
+    const response = await request(app).get(`/${nonExistentId.toString()}`).set('Authorization', `Bearer ${viewerToken}`);
 
     expect(response.status).toBe(404);
     expect(response.body).toMatchObject({
@@ -70,7 +92,7 @@ describe('GET /:id - User Profile Retrieval', () => {
   });
 
   it('should return 400 for invalid user ID format', async () => {
-    const response = await request(app).get('/invalid-id-format');
+    const response = await request(app).get('/invalid-id-format').set('Authorization', `Bearer ${viewerToken}`);
 
     expect(response.status).toBe(400);
     expect(response.body).toMatchObject({
@@ -80,7 +102,7 @@ describe('GET /:id - User Profile Retrieval', () => {
   });
 
   it('should not expose sensitive information', async () => {
-    const response = await request(app).get(`/${testUserId.toString()}`);
+    const response = await request(app).get(`/${testUserId.toString()}`).set('Authorization', `Bearer ${viewerToken}`);
 
     expect(response.status).toBe(200);
     expect(response.body.user.passwordHash).toBeUndefined();

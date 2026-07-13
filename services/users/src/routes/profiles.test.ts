@@ -37,9 +37,13 @@ describe('Release D profiles', () => {
   beforeEach(async () => {
     const db = getDatabase();
     await db.collection('users').deleteMany({ username: /^rdprofile-/ });
-    await db.collection('profile_relationships').deleteMany({});
     await db.collection('profile_handle_reservations').deleteMany({});
-    await db.collection('user_blocks').deleteMany({});
+    // Intentionally not clearing profile_relationships/user_blocks here: this
+    // file's user IDs are freshly randomized every run, so stale rows from
+    // other tests can never match them. An unconditional deleteMany({}) on a
+    // shared collection races with other test files that run concurrently
+    // against the same database (confirmed: it was intermittently wiping out
+    // a block row that search.test.ts had just inserted).
 
     const now = new Date();
     const result = await db.collection<User>('users').insertMany([

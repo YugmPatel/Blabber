@@ -6,11 +6,13 @@ import {
   createAuthMiddleware,
   errorHandler,
   notFoundHandler,
+  RateLimiter,
   requestIdMiddleware,
   requestLogger,
   runReadinessChecks,
 } from '@repo/utils';
 import { getDatabase } from './db';
+import { connectToRedis } from './redis';
 
 const app: Express = express();
 
@@ -23,6 +25,22 @@ const jwtConfig = loadJWTConfig();
 const authMiddleware = createAuthMiddleware({
   secret: jwtConfig.JWT_ACCESS_SECRET,
 });
+
+const rateLimitRedis = connectToRedis();
+// Rate limits fail open (never block real users) if Redis has a hiccup —
+// defense-in-depth, not core functionality.
+const messageRequestRateLimit = new RateLimiter(rateLimitRedis, {
+  windowMs: 60_000,
+  maxRequests: 10,
+  keyPrefix: 'ratelimit:message-request-create',
+  failOpen: true,
+}).middleware();
+const conversationCreateRateLimit = new RateLimiter(rateLimitRedis, {
+  windowMs: 60_000,
+  maxRequests: 20,
+  keyPrefix: 'ratelimit:conversation-create',
+  failOpen: true,
+}).middleware();
 
 // Security middleware
 app.use(helmet());
@@ -64,6 +82,13 @@ app.get('/readyz', async (_req: Request, res: Response) => {
 
 // Chat routes
 import { createChat } from './routes/create-chat';
+import {
+  acceptMessageRequest,
+  createMessageRequest,
+  declineMessageRequest,
+  listInboxRequests,
+  listSentRequests,
+} from './routes/message-requests';
 import { listChats } from './routes/list-chats';
 import { getChat } from './routes/get-chat';
 import {
@@ -145,7 +170,12 @@ import {
   updateVeyraSettings,
 } from './routes/veyra';
 
-app.post('/', authMiddleware, createChat);
+app.post('/', authMiddleware, conversationCreateRateLimit, createChat);
+app.post('/message-requests', authMiddleware, messageRequestRateLimit, createMessageRequest);
+app.get('/message-requests/inbox', authMiddleware, listInboxRequests);
+app.get('/message-requests/sent', authMiddleware, listSentRequests);
+app.post('/message-requests/:id/accept', authMiddleware, acceptMessageRequest);
+app.post('/message-requests/:id/decline', authMiddleware, declineMessageRequest);
 app.get('/', authMiddleware, listChats);
 app.get('/intelligence/availability', authMiddleware, getIntelligenceAvailability);
 app.delete('/intelligence/history/me', authMiddleware, clearMyAiHistory);

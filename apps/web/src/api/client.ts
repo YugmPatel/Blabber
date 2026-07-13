@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import type {
+  Chat,
   ChatActionExtractionResult,
   ChatActionItem,
   CreateChatActionDTO,
@@ -324,6 +325,136 @@ export async function blockUser(userId: string) {
 
 export async function unblockUser(userId: string) {
   await apiClient.delete(`/api/users/${userId}/block`);
+}
+
+export async function muteUser(userId: string) {
+  await apiClient.post(`/api/users/${userId}/mute`);
+}
+
+export async function unmuteUser(userId: string) {
+  await apiClient.delete(`/api/users/${userId}/mute`);
+}
+
+// ── Safe user discovery / New Convo ─────────────────────────────────────────
+
+export type RelationshipStatus = 'connected' | 'following' | 'pending_sent' | 'pending_received' | 'none';
+
+export interface UserSearchResult {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+  bioPreview?: string;
+  isVerified: boolean;
+  relationshipStatus: RelationshipStatus;
+  canMessage: boolean;
+  requiresMessageRequest: boolean;
+}
+
+export async function searchUsers(query: string, cursor?: string | null): Promise<{ users: UserSearchResult[]; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ users: UserSearchResult[]; nextCursor: string | null }>('/api/users/search', {
+    params: { q: query, cursor: cursor || undefined },
+  });
+  return data;
+}
+
+export async function fetchUserProfileByUsername(username: string) {
+  const { data } = await apiClient.get(`/api/users/profile/${encodeURIComponent(username)}`);
+  return data;
+}
+
+export interface MyDiscoveryInfo {
+  username: string;
+  profileUrl: string | null;
+  inviteUrl: string | null;
+  qrPayload: string | null;
+  discoverabilitySettings: {
+    profileVisibility: 'public' | 'private';
+    searchVisibility: 'everyone' | 'followers' | 'contacts' | 'no_one';
+    emailDiscoverability: 'exact_match' | 'nobody';
+  };
+}
+
+export async function fetchMyDiscoveryInfo(): Promise<MyDiscoveryInfo> {
+  const { data } = await apiClient.get<MyDiscoveryInfo>('/api/users/me/discovery');
+  return data;
+}
+
+export async function createProfileInvite(): Promise<{ token: string; url: string; expiresAt: string }> {
+  const { data } = await apiClient.post('/api/users/invites');
+  return data;
+}
+
+export interface PrivacySettings {
+  profileVisibility: 'public' | 'private';
+  searchVisibility: 'everyone' | 'followers' | 'contacts' | 'no_one';
+  emailDiscoverability: 'exact_match' | 'nobody';
+  messagePermission: 'everyone' | 'followers' | 'no_one';
+  groupAddPermission: 'everyone' | 'followers' | 'contacts' | 'no_one';
+  callPermission: 'everyone' | 'no_one';
+  updatedAt?: string;
+}
+
+export async function fetchMyPrivacySettings(): Promise<{ privacy: PrivacySettings }> {
+  const { data } = await apiClient.get<{ privacy: PrivacySettings }>('/api/users/me/privacy');
+  return data;
+}
+
+export async function updateMyPrivacySettings(patch: Partial<PrivacySettings>): Promise<{ privacy: PrivacySettings }> {
+  const { data } = await apiClient.patch<{ privacy: PrivacySettings }>('/api/users/me/privacy', patch);
+  return data;
+}
+
+// ── Message requests ─────────────────────────────────────────────────────────
+
+export type MessageRequestStatus = 'pending' | 'accepted' | 'declined';
+
+export interface MessageRequestSummary {
+  id: string;
+  senderId: string;
+  recipientId: string;
+  status: MessageRequestStatus;
+  introMessage?: string;
+  chatId?: string;
+  createdAt: string;
+  updatedAt: string;
+  respondedAt?: string;
+}
+
+export interface MessageRequestWithSender extends MessageRequestSummary {
+  sender: { id: string; username?: string; displayName?: string; avatarUrl?: string };
+}
+
+export interface MessageRequestWithRecipient extends MessageRequestSummary {
+  recipient: { id: string; username?: string; displayName?: string; avatarUrl?: string };
+}
+
+export async function sendMessageRequest(recipientId: string, introMessage?: string) {
+  const { data } = await apiClient.post<{ status: 'accepted' | 'pending'; chat?: Chat; request?: MessageRequestSummary }>(
+    '/api/chats/message-requests',
+    { recipientId, introMessage: introMessage || undefined }
+  );
+  return data;
+}
+
+export async function fetchMessageRequestInbox(): Promise<{ requests: MessageRequestWithSender[] }> {
+  const { data } = await apiClient.get<{ requests: MessageRequestWithSender[] }>('/api/chats/message-requests/inbox');
+  return data;
+}
+
+export async function fetchSentMessageRequests(): Promise<{ requests: MessageRequestWithRecipient[] }> {
+  const { data } = await apiClient.get<{ requests: MessageRequestWithRecipient[] }>('/api/chats/message-requests/sent');
+  return data;
+}
+
+export async function acceptMessageRequest(requestId: string): Promise<{ status: 'accepted'; chat: Chat }> {
+  const { data } = await apiClient.post(`/api/chats/message-requests/${requestId}/accept`);
+  return data;
+}
+
+export async function declineMessageRequest(requestId: string): Promise<{ status: 'declined' }> {
+  const { data } = await apiClient.post(`/api/chats/message-requests/${requestId}/decline`);
+  return data;
 }
 
 export interface SocialProfile {

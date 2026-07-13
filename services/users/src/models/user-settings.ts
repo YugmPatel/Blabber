@@ -10,6 +10,10 @@ export type ThemePreference = 'light' | 'dark' | 'system';
  */
 export type ContactPrivacy = 'everyone' | 'followers' | 'contacts' | 'no_one';
 
+// Defaults closed: emails are never searchable unless a user explicitly
+// opts in to exact-match lookup.
+export type EmailDiscoverability = 'exact_match' | 'nobody';
+
 export interface UserSettings {
   _id?: ObjectId;
   userId: ObjectId;
@@ -22,6 +26,7 @@ export interface UserSettings {
   momentArchiveEnabled: boolean;
   messagePrivacy: ContactPrivacy;
   groupInvitePrivacy: ContactPrivacy;
+  emailDiscoverability: EmailDiscoverability;
   timezone?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -37,6 +42,7 @@ export const DEFAULT_USER_SETTINGS = {
   momentArchiveEnabled: true,
   messagePrivacy: 'everyone' as ContactPrivacy,
   groupInvitePrivacy: 'everyone' as ContactPrivacy,
+  emailDiscoverability: 'nobody' as EmailDiscoverability,
   timezone: 'UTC',
 };
 

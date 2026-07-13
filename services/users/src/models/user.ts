@@ -94,19 +94,26 @@ export async function findUserById(userId: string | ObjectId): Promise<User | nu
 
 export async function searchUsersByText(
   query: string,
-  excludeUserIds: ObjectId[] = []
+  excludeUserIds: ObjectId[] = [],
+  options: { limit?: number; after?: ObjectId | null } = {}
 ): Promise<User[]> {
   const collection = getUsersCollection();
+  const limit = Math.min(21, Math.max(1, options.limit ?? 20));
+
+  const filter: Record<string, unknown> = {
+    $text: { $search: query },
+    _id: options.after ? { $nin: excludeUserIds, $gt: options.after } : { $nin: excludeUserIds },
+    deactivatedAt: { $exists: false },
+    deletedAt: { $exists: false },
+  };
 
   const results = await collection
-    .find({
-      $text: { $search: query },
-      _id: { $nin: excludeUserIds },
-    })
+    .find(filter)
     .project({
       passwordHash: 0,
     })
-    .limit(20)
+    .sort({ _id: 1 })
+    .limit(limit)
     .toArray();
 
   return results as User[];
