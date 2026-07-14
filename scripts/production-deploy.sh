@@ -63,14 +63,16 @@ BACKUP_FILE="backups/mongo/pre-deploy-${TARGET_SHA}-$(date -u +%Y%m%dT%H%M%SZ).a
 # script cannot know whether docker-compose.gcp.yml/hardening.yml enable Mongo
 # auth, since those files aren't visible outside the VM — verify this matches
 # your actual Mongo auth setup (see docs/production-cicd.md).
+MONGO_BACKUP_URI=""
 if [ -f .env ]; then
-  # shellcheck disable=SC1091
-  set -a; source .env; set +a
+  MONGO_BACKUP_URI="$(grep -E '^(MONGO_URI|MONGODB_URI)=' .env | tail -n 1 | cut -d= -f2- || true)"
+  MONGO_BACKUP_URI="${MONGO_BACKUP_URI%\"}"
+  MONGO_BACKUP_URI="${MONGO_BACKUP_URI#\"}"
 fi
 
-if [ -n "${MONGO_URI:-}" ]; then
-  docker exec "$MONGO_CID" mongodump --quiet --archive --gzip --uri="$MONGO_URI" > "$BACKUP_FILE" \
-    || fail "mongodump failed (via MONGO_URI) — aborting deploy, nothing has been changed"
+if [ -n "$MONGO_BACKUP_URI" ]; then
+  docker exec "$MONGO_CID" mongodump --quiet --archive --gzip --uri="$MONGO_BACKUP_URI" > "$BACKUP_FILE" \
+    || fail "mongodump failed (via Mongo URI from .env) — aborting deploy, nothing has been changed"
 else
   docker exec "$MONGO_CID" mongodump --quiet --archive --gzip > "$BACKUP_FILE" \
     || fail "mongodump failed — aborting deploy, nothing has been changed"
