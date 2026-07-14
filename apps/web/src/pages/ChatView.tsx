@@ -247,6 +247,17 @@ export default function ChatView() {
   const isEndedTemporaryGroup =
     chat?.type === 'group' &&
     (Boolean(chat.endedAt) || Boolean(chat.expiresAt && new Date(chat.expiresAt).getTime() <= Date.now()));
+  // Direct chats only — canMessage/blockedState are omitted for group chats,
+  // which aren't subject to 1:1 block rules. blockedState never reveals that
+  // the other participant specifically blocked us; only our own block choice
+  // is distinguished ('blocked_by_me') so the copy can stay non-scary.
+  const isBlockedDirectChat = Boolean(
+    chat?.type === 'direct' && chat.blockedState && chat.blockedState !== 'none'
+  );
+  const blockedBannerText =
+    chat?.blockedState === 'blocked_by_me'
+      ? 'You blocked this user. Unblock to message again.'
+      : "You can't message this user.";
   const participantProfiles = new Map(
     (chat?.participantProfiles || []).map((profile) => [profile._id, profile])
   );
@@ -635,6 +646,12 @@ export default function ChatView() {
         </div>
       )}
 
+      {isBlockedDirectChat && (
+        <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          {blockedBannerText}
+        </div>
+      )}
+
       <MessageList
         messages={messages}
         currentUserId={currentUser?._id || ''}
@@ -644,19 +661,19 @@ export default function ChatView() {
         getUserName={getUserName}
         getUserAvatar={getUserAvatar}
         isGroupChat={isGroupChat}
-        onReply={handleReply}
+        onReply={isBlockedDirectChat ? undefined : handleReply}
         onForward={setForwardingMessage}
         onPin={(message) => pinMessageMutation.mutate(message._id)}
         onUnpin={(message) => unpinMessageMutation.mutate(message._id)}
         onSave={(message) => saveMessageMutation.mutate(message._id)}
         onUnsave={(message) => unsaveMessageMutation.mutate(message._id)}
         onJumpToMessage={jumpToMessage}
-        onReact={handleReact}
+        onReact={isBlockedDirectChat ? undefined : handleReact}
         onDelete={handleDelete}
-        onPollVote={handlePollVote}
-        onClosePoll={(messageId) => closePollMutation.mutate(messageId)}
-        onEventRsvp={handleEventRsvp}
-        onEventCancel={handleEventCancel}
+        onPollVote={isBlockedDirectChat ? undefined : handlePollVote}
+        onClosePoll={isBlockedDirectChat ? undefined : (messageId) => closePollMutation.mutate(messageId)}
+        onEventRsvp={isBlockedDirectChat ? undefined : handleEventRsvp}
+        onEventCancel={isBlockedDirectChat ? undefined : handleEventCancel}
         onEventIcs={(messageId) => downloadEventIcsMutation.mutate(messageId)}
         highlightedMessageId={highlightedMessageId}
         onUserScrollInteraction={handleMessageListInteraction}
@@ -674,7 +691,7 @@ export default function ChatView() {
         </div>
       )}
 
-      {!isEndedTemporaryGroup && (
+      {!isEndedTemporaryGroup && !isBlockedDirectChat && (
         <Composer
           chatId={id!}
           replyToMessage={replyToMessage}
@@ -712,7 +729,13 @@ export default function ChatView() {
 
       <ForwardMessageModal
         message={forwardingMessage}
-        chats={allChats.filter((candidate) => candidate._id !== id)}
+        chats={allChats.filter(
+          (candidate) =>
+            candidate._id !== id &&
+            // Forwarding FROM a blocked chat is fine (it's just old content),
+            // but forwarding INTO one is a new message and must be excluded.
+            !(candidate.type === 'direct' && candidate.blockedState && candidate.blockedState !== 'none')
+        )}
         currentUserId={currentUser?._id}
         onClose={() => setForwardingMessage(null)}
         onForward={async (destinationChatIds) => {

@@ -3,7 +3,7 @@ import { ObjectId } from 'mongodb';
 import { EventRsvpDTOSchema, EventType, MessageEditedEvent, UpdateEventDTOSchema } from '@repo/types';
 import { createEvent, logger } from '@repo/utils';
 import { getMessagesCollection, MessageDocument } from '../models/message';
-import { assertChatMembership } from '../chat-access';
+import { assertChatMembership, assertChatWritable } from '../chat-access';
 import { serializeMessage } from '../serialize-message';
 import { getPubSub } from '../pubsub';
 import { parseEventDate, validateMeetingUrl, validateTimezone } from '../event-utils';
@@ -23,7 +23,12 @@ async function publishMessageEdited(message: ReturnType<typeof serializeMessage>
   }
 }
 
-async function loadEventMessage(messageId: string, userObjectId: ObjectId, res: Response) {
+async function loadEventMessage(
+  messageId: string,
+  userObjectId: ObjectId,
+  res: Response,
+  options: { requireWritable?: boolean } = {}
+) {
   if (!ObjectId.isValid(messageId)) {
     res.status(400).json({ error: 'Bad Request', message: 'Invalid message ID' });
     return null;
@@ -35,7 +40,13 @@ async function loadEventMessage(messageId: string, userObjectId: ObjectId, res: 
     return null;
   }
 
-  await assertChatMembership(message.chatId, userObjectId);
+  const chat = await assertChatMembership(message.chatId, userObjectId);
+  // RSVP/update/cancel edit the event and notify the other participant, so a
+  // blocked direct chat must reject them the same as a new message. Viewing/
+  // exporting the existing event (exportEventIcs) stays allowed regardless.
+  if (options.requireWritable !== false) {
+    await assertChatWritable(chat, userObjectId);
+  }
   return message;
 }
 
@@ -212,7 +223,7 @@ export async function exportEventIcs(req: Request, res: Response, next: NextFunc
       res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
       return;
     }
-    const message = await loadEventMessage(req.params.messageId, new ObjectId(userId), res);
+    const message = await loadEventMessage(req.params.messageId, new ObjectId(userId), res, { requireWritable: false });
     if (!message) return;
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');

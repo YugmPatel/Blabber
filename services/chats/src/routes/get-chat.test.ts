@@ -23,6 +23,7 @@ describe('GET /:id - Get Chat', () => {
     await connectToDatabase();
     const db = getDatabase();
     await db.collection('chats').deleteMany({});
+    await db.collection('user_blocks').deleteMany({});
   });
 
   afterEach(async () => {
@@ -178,5 +179,92 @@ describe('GET /:id - Get Chat', () => {
     expect(response.body.chat.admins).toHaveLength(2);
     expect(response.body.chat.admins).toContain(mockUserId.toString());
     expect(response.body.chat.admins).toContain(user2.toString());
+  });
+
+  describe('canMessage / blockedState', () => {
+    it('reports canMessage true and blockedState none for an unblocked direct chat', async () => {
+      const db = getDatabase();
+      const otherUserId = new ObjectId();
+      const result = await db.collection('chats').insertOne({
+        type: 'direct',
+        participants: [mockUserId, otherUserId],
+        admins: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const response = await request(app).get(`/${result.insertedId.toString()}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.chat.canMessage).toBe(true);
+      expect(response.body.chat.blockedState).toBe('none');
+    });
+
+    it('reports blocked_by_me when the current user blocked the other participant', async () => {
+      const db = getDatabase();
+      const otherUserId = new ObjectId();
+      const result = await db.collection('chats').insertOne({
+        type: 'direct',
+        participants: [mockUserId, otherUserId],
+        admins: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await db.collection('user_blocks').insertOne({
+        blockerUserId: mockUserId,
+        blockedUserId: otherUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const response = await request(app).get(`/${result.insertedId.toString()}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.chat.canMessage).toBe(false);
+      expect(response.body.chat.blockedState).toBe('blocked_by_me');
+    });
+
+    it('reports the generic blocked state (not the direction) when the other participant blocked the current user', async () => {
+      const db = getDatabase();
+      const otherUserId = new ObjectId();
+      const result = await db.collection('chats').insertOne({
+        type: 'direct',
+        participants: [mockUserId, otherUserId],
+        admins: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await db.collection('user_blocks').insertOne({
+        blockerUserId: otherUserId,
+        blockedUserId: mockUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const response = await request(app).get(`/${result.insertedId.toString()}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.chat.canMessage).toBe(false);
+      expect(response.body.chat.blockedState).toBe('blocked');
+    });
+
+    it('omits canMessage/blockedState for group chats', async () => {
+      const db = getDatabase();
+      const otherUserId = new ObjectId();
+      const result = await db.collection('chats').insertOne({
+        type: 'group',
+        participants: [mockUserId, otherUserId],
+        admins: [mockUserId],
+        title: 'Group',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const response = await request(app).get(`/${result.insertedId.toString()}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.chat.canMessage).toBeUndefined();
+      expect(response.body.chat.blockedState).toBeUndefined();
+    });
   });
 });

@@ -41,6 +41,22 @@ describe('Socket.io Client Events', () => {
   });
 
   beforeEach(() => {
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url.includes('/blocks/relationship/')) {
+        return Promise.resolve({ data: { blocked: false } });
+      }
+
+      // Chat lookup (getAuthorizedChat), e.g. `${serviceUrls.chats}/chat123`
+      return Promise.resolve({
+        data: {
+          chat: {
+            type: 'direct',
+            participants: [TEST_USER_ID, 'user456'],
+          },
+        },
+      });
+    });
+
     mockedAxios.post.mockImplementation((url: string, body: any) => {
       if (url.endsWith('/chat123')) {
         return Promise.resolve({
@@ -238,6 +254,68 @@ describe('Socket.io Client Events', () => {
         client1.disconnect();
         client2.disconnect();
         reject(new Error('typing events test timeout'));
+      }, 5000);
+    });
+  });
+
+  it('does not emit typing indicators across a blocked direct chat', async () => {
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url.includes('/blocks/relationship/')) {
+        return Promise.resolve({ data: { blocked: true } });
+      }
+      return Promise.resolve({
+        data: { chat: { type: 'direct', participants: [TEST_USER_ID, 'user456'] } },
+      });
+    });
+
+    return new Promise<void>((resolve, reject) => {
+      const client1 = ioClient(`http://localhost:${PORT}`, {
+        transports: ['websocket'],
+        auth: { token: validToken },
+      });
+
+      const client2 = ioClient(`http://localhost:${PORT}`, {
+        transports: ['websocket'],
+        auth: { token: jwt.sign({ userId: 'user456' }, JWT_SECRET, { expiresIn: '15m' }) },
+      });
+
+      let sawTypingUpdate = false;
+
+      client1.on('connect', () => {
+        client1.emit('chat:join', { chatId: 'chat123' });
+      });
+
+      client2.on('connect', () => {
+        client2.on('chat:joined', () => {
+          client2.on('typing:update', () => {
+            sawTypingUpdate = true;
+          });
+
+          client1.emit('typing:start', { chatId: 'chat123' });
+
+          // No server round-trip to await here — typing:update is a
+          // fire-and-forget broadcast, so give it a beat to arrive (or not).
+          setTimeout(() => {
+            expect(sawTypingUpdate).toBe(false);
+            client1.disconnect();
+            client2.disconnect();
+            resolve();
+          }, 500);
+        });
+
+        client2.emit('chat:join', { chatId: 'chat123' });
+      });
+
+      client1.on('connect_error', (error) => {
+        client1.disconnect();
+        client2.disconnect();
+        reject(error);
+      });
+
+      setTimeout(() => {
+        client1.disconnect();
+        client2.disconnect();
+        reject(new Error('blocked typing test timeout'));
       }, 5000);
     });
   });

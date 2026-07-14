@@ -3,7 +3,7 @@ import { ObjectId } from 'mongodb';
 import { EventType, MessageEditedEvent } from '@repo/types';
 import { createEvent, logger } from '@repo/utils';
 import { getMessagesCollection } from '../models/message';
-import { assertChatMembership } from '../chat-access';
+import { assertChatMembership, assertChatWritable } from '../chat-access';
 import { serializeMessage } from '../serialize-message';
 import { getPubSub } from '../pubsub';
 
@@ -43,7 +43,10 @@ export async function closePoll(req: Request, res: Response, next: NextFunction)
       return;
     }
 
-    await assertChatMembership(message.chatId, userObjectId);
+    const chat = await assertChatMembership(message.chatId, userObjectId);
+    // Closing edits the poll and notifies the other participant, so a
+    // blocked direct chat must reject it the same as a new message.
+    await assertChatWritable(chat, userObjectId);
     const creatorId = message.poll.createdBy || message.senderId;
     if (!creatorId.equals(userObjectId)) {
       res.status(403).json({ error: 'Forbidden', message: 'Only the poll creator can close this poll' });

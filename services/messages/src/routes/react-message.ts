@@ -4,7 +4,7 @@ import { AddReactionDTOSchema, EventType, MessageReactionEvent } from '@repo/typ
 import { getMessagesCollection } from '../models/message';
 import { createEvent, logger } from '@repo/utils';
 import { serializeMessage } from '../serialize-message';
-import { assertChatMembership } from '../chat-access';
+import { assertChatMembership, assertChatWritable } from '../chat-access';
 import { getPubSub } from '../pubsub';
 
 export async function reactToMessage(
@@ -52,7 +52,10 @@ export async function reactToMessage(
       return;
     }
 
-    await assertChatMembership(message.chatId, userObjectId);
+    const chat = await assertChatMembership(message.chatId, userObjectId);
+    // Reacting creates a new interaction the other participant is notified
+    // of, so a blocked direct chat must reject it the same as a new message.
+    await assertChatWritable(chat, userObjectId);
 
     // Check if user already has a reaction on this message
     const existingReactionIndex = message.reactions.findIndex(

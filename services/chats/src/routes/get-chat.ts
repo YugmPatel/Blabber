@@ -51,7 +51,7 @@ export const getChat = asyncHandler(async (req: Request, res: Response) => {
     });
   }
 
-  const serializedChat = await serializeChat(chat, { includeParticipants: true });
+  const serializedChat = await serializeChat(chat, { includeParticipants: true, viewerId: userObjectId });
 
   return res.status(200).json({
     chat: serializedChat,

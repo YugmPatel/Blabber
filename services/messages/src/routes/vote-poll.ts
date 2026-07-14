@@ -5,7 +5,7 @@ import { createEvent, logger } from '@repo/utils';
 import { getMessagesCollection } from '../models/message';
 import { getPubSub } from '../pubsub';
 import { serializeMessage } from '../serialize-message';
-import { assertChatMembership } from '../chat-access';
+import { assertChatMembership, assertChatWritable } from '../chat-access';
 import { getPollVoteRecords, isPollClosed } from '../poll-utils';
 
 export async function votePoll(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -43,7 +43,10 @@ export async function votePoll(req: Request, res: Response, next: NextFunction):
       return;
     }
 
-    await assertChatMembership(message.chatId, voterObjectId);
+    const chat = await assertChatMembership(message.chatId, voterObjectId);
+    // Voting edits the poll and notifies the other participant, so a blocked
+    // direct chat must reject it the same as a new message.
+    await assertChatWritable(chat, voterObjectId);
 
     if (isPollClosed(message.poll)) {
       res.status(400).json({ error: 'Bad Request', message: 'Poll is closed' });

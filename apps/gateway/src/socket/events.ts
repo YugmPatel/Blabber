@@ -60,6 +60,29 @@ async function validateCallTarget(socket: Socket, chatId: string, toUserId: stri
   }
 }
 
+// Suppresses typing indicators across a blocked direct chat. Mirrors
+// validateCallTarget's block check, but fails closed (suppresses the
+// broadcast) on any lookup error instead of throwing, since typing is a
+// best-effort UI signal, not an authorized action worth failing loudly for.
+async function isDirectChatBlocked(socket: Socket, chatId: string): Promise<boolean> {
+  try {
+    const chat = await getAuthorizedChat(socket, chatId);
+    if (chat.type !== 'direct') return false;
+
+    const fromUserId = socket.data.userId;
+    const toUserId = chat.participants.find((id) => id !== fromUserId);
+    if (!toUserId) return false;
+
+    const response = await axios.get(`${serviceUrls.users}/blocks/relationship/${toUserId}`, {
+      headers: { Authorization: `Bearer ${socket.data.token}` },
+    });
+    return Boolean(response.data?.blocked);
+  } catch (error) {
+    logger.warn({ error, chatId }, 'Failed to verify block relationship for typing indicator; suppressing');
+    return true;
+  }
+}
+
 async function getPublicUserSettings(userId: string) {
   const response = await axios.get(`${serviceUrls.users}/settings/${userId}/public`);
   return response.data.settings as {
@@ -527,12 +550,16 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
   });
 
   // typing:start - User started typing
-  socket.on('typing:start', (data: { chatId: string }) => {
+  socket.on('typing:start', async (data: { chatId: string }) => {
     const { chatId } = data;
     const userId = socket.data.userId;
 
     if (!chatId) {
       socket.emit('error', { message: 'chatId is required' });
+      return;
+    }
+
+    if (await isDirectChatBlocked(socket, chatId)) {
       return;
     }
 
@@ -565,7 +592,7 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
   });
 
   // typing:stop - User stopped typing
-  socket.on('typing:stop', (data: { chatId: string }) => {
+  socket.on('typing:stop', async (data: { chatId: string }) => {
     const { chatId } = data;
     const userId = socket.data.userId;
 
@@ -579,6 +606,10 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
     if (typingDebounceMap.has(key)) {
       clearTimeout(typingDebounceMap.get(key)!);
       typingDebounceMap.delete(key);
+    }
+
+    if (await isDirectChatBlocked(socket, chatId)) {
+      return;
     }
 
     // Broadcast typing stopped to chat room (except sender)

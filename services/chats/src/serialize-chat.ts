@@ -35,7 +35,10 @@ export async function markExpiredIfNeeded(chat: Chat): Promise<Chat> {
   return { ...chat, endedAt, updatedAt: endedAt };
 }
 
-export async function serializeChat(chat: Chat, options: { includeParticipants?: boolean } = {}) {
+export async function serializeChat(
+  chat: Chat,
+  options: { includeParticipants?: boolean; viewerId?: ObjectId } = {}
+) {
   const activeChat = await markExpiredIfNeeded(chat);
   const serialized: any = {
     _id: activeChat._id.toString(),
@@ -73,6 +76,36 @@ export async function serializeChat(chat: Chat, options: { includeParticipants?:
       senderId: objectIdToString(activeChat.lastMessageRef.senderId),
       createdAt: activeChat.lastMessageRef.createdAt,
     };
+  }
+
+  // Group chats aren't subject to 1:1 block rules, so canMessage/blockedState
+  // are only meaningful (and only ever set) for direct chats. Direction is
+  // only revealed when the viewer is the blocker ('blocked_by_me') — the
+  // reverse case collapses to the generic 'blocked' so the frontend can
+  // never learn that the other participant specifically blocked them.
+  if (activeChat.type === 'direct' && options.viewerId) {
+    const otherParticipantId = activeChat.participants.find((id) => !id.equals(options.viewerId!));
+    if (otherParticipantId) {
+      const block = await getDatabase().collection('user_blocks').findOne({
+        $or: [
+          { blockerUserId: options.viewerId, blockedUserId: otherParticipantId },
+          { blockerUserId: otherParticipantId, blockedUserId: options.viewerId },
+        ],
+      });
+      if (!block) {
+        serialized.blockedState = 'none';
+        serialized.canMessage = true;
+      } else if (block.blockerUserId.equals(options.viewerId)) {
+        serialized.blockedState = 'blocked_by_me';
+        serialized.canMessage = false;
+      } else {
+        serialized.blockedState = 'blocked';
+        serialized.canMessage = false;
+      }
+    } else {
+      serialized.blockedState = 'none';
+      serialized.canMessage = true;
+    }
   }
 
   if (options.includeParticipants) {

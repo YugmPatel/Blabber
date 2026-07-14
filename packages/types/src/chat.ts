@@ -46,6 +46,12 @@ export interface Chat {
   archivedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+  // Direct chats only — omitted for group chats, which aren't subject to 1:1
+  // block rules. blockedState direction is only ever revealed as
+  // 'blocked_by_me'; the reverse case collapses to the generic 'blocked' so
+  // the frontend never learns that the other participant blocked it.
+  canMessage?: boolean;
+  blockedState?: 'none' | 'blocked_by_me' | 'blocked';
 }
 
 export interface ChatParticipantProfile {
@@ -99,6 +105,8 @@ export const ChatSchema = z.object({
   archivedAt: z.date().optional(),
   createdAt: z.date(),
   updatedAt: z.date(),
+  canMessage: z.boolean().optional(),
+  blockedState: z.enum(['none', 'blocked_by_me', 'blocked']).optional(),
 });
 
 // Create Chat DTO

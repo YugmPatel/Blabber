@@ -405,4 +405,47 @@ describe('POST /:chatId - Send Message', () => {
       expect(response.status).toBe(400);
     });
   });
+
+  describe('Direct chat block enforcement', () => {
+    it('rejects a plain text message once either participant has blocked the other', async () => {
+      await getDatabase().collection('user_blocks').insertOne({
+        blockerUserId: OTHER_USER_ID,
+        blockedUserId: TEST_USER_ID,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const token = generateToken(TEST_USER_ID.toString());
+      const response = await request(app)
+        .post(`/${TEST_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Hello, world!' });
+
+      expect(response.status).toBe(403);
+      const stored = await getDatabase().collection('messages').findOne({ chatId: TEST_CHAT_ID });
+      expect(stored).toBeNull();
+    });
+
+    it('rejects a poll message once either participant has blocked the other', async () => {
+      await getDatabase().collection('user_blocks').insertOne({
+        blockerUserId: TEST_USER_ID,
+        blockedUserId: OTHER_USER_ID,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const token = generateToken(TEST_USER_ID.toString());
+      const response = await request(app)
+        .post(`/${TEST_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Lunch poll',
+          poll: { question: 'Lunch?', options: ['Pizza', 'Sushi'] },
+        });
+
+      expect(response.status).toBe(403);
+      const stored = await getDatabase().collection('messages').findOne({ chatId: TEST_CHAT_ID });
+      expect(stored).toBeNull();
+    });
+  });
 });

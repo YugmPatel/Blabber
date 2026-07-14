@@ -63,6 +63,16 @@ vi.mock('@/api/client', () => ({
   },
   fetchMessageWindow: vi.fn(),
   normalizeMediaUrl: (url?: string | null) => url ?? null,
+  // UserProfileModal (rendered inside ChatHeader) always references this as
+  // its queryFn, even when the query is disabled — the mock module needs the
+  // export to exist regardless of whether it's ever actually invoked.
+  fetchMyProfile: vi.fn().mockResolvedValue({
+    name: 'Current User',
+    handle: 'current',
+    displayHandle: '@current',
+    avatarUrl: null,
+    relationship: 'self',
+  }),
 }));
 
 const mockUseChatSummary = () => {
@@ -384,6 +394,66 @@ describe('ChatView', () => {
     await waitFor(() => {
       expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument();
     });
+  });
+
+  it('hides the composer and shows a non-scary banner when the current user blocked the other participant', async () => {
+    vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
+      data: { ...mockChat, canMessage: false, blockedState: 'blocked_by_me' },
+      isLoading: false,
+    } as any);
+
+    vi.spyOn(useMessagesModule, 'useMessages').mockReturnValue({
+      data: { pages: [{ messages: [], nextCursor: null }] },
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUser').mockReturnValue({
+      data: mockUser,
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUserPresence').mockReturnValue({
+      data: undefined,
+    } as any);
+
+    renderChatView();
+
+    await waitFor(() => {
+      expect(screen.getByText('You blocked this user. Unblock to message again.')).toBeInTheDocument();
+    });
+    expect(screen.queryByPlaceholderText(/type a message/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the generic blocked copy (not who blocked whom) when the other participant blocked the current user', async () => {
+    vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
+      data: { ...mockChat, canMessage: false, blockedState: 'blocked' },
+      isLoading: false,
+    } as any);
+
+    vi.spyOn(useMessagesModule, 'useMessages').mockReturnValue({
+      data: { pages: [{ messages: [], nextCursor: null }] },
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUser').mockReturnValue({
+      data: mockUser,
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUserPresence').mockReturnValue({
+      data: undefined,
+    } as any);
+
+    renderChatView();
+
+    await waitFor(() => {
+      expect(screen.getByText("You can't message this user.")).toBeInTheDocument();
+    });
+    expect(screen.queryByPlaceholderText(/type a message/i)).not.toBeInTheDocument();
   });
 
   it('renders catch me up action', async () => {

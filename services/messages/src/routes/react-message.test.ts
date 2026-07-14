@@ -29,6 +29,7 @@ describe('POST /:messageId/react - React to Message', () => {
     const db = getDatabase();
     await db.collection('messages').deleteMany({});
     await db.collection('chats').deleteMany({});
+    await db.collection('user_blocks').deleteMany({});
     await seedMessageTestChat(TEST_CHAT_ID, [TEST_USER_ID, OTHER_USER_ID]);
   });
 
@@ -212,5 +213,36 @@ describe('POST /:messageId/react - React to Message', () => {
     });
 
     expect(response.status).toBe(401);
+  });
+
+  it('rejects a reaction once either participant has blocked the other', async () => {
+    const collection = getMessagesCollection();
+    const insertResult = await collection.insertOne({
+      _id: new ObjectId(),
+      chatId: TEST_CHAT_ID,
+      senderId: OTHER_USER_ID,
+      body: 'Message to react to',
+      reactions: [],
+      status: 'sent' as const,
+      deletedFor: [],
+      createdAt: new Date(),
+    });
+
+    await getDatabase().collection('user_blocks').insertOne({
+      blockerUserId: OTHER_USER_ID,
+      blockedUserId: TEST_USER_ID,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const token = generateToken(TEST_USER_ID.toString());
+    const response = await request(app)
+      .post(`/${insertResult.insertedId.toString()}/react`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ emoji: '👍' });
+
+    expect(response.status).toBe(403);
+    const stored = await collection.findOne({ _id: insertResult.insertedId });
+    expect(stored?.reactions).toHaveLength(0);
   });
 });

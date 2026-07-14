@@ -191,6 +191,20 @@ describe('ChatHeader', () => {
     expect(screen.getByLabelText('Audio call')).toBeInTheDocument();
   });
 
+  it('disables video and audio call buttons for a blocked direct chat', () => {
+    renderHeader(
+      <ChatHeader
+        chat={{ ...mockDirectChat, canMessage: false, blockedState: 'blocked_by_me' }}
+        getChatTitle={mockGetChatTitle}
+        getChatAvatar={mockGetChatAvatar}
+        isGroupChat={false}
+      />
+    );
+
+    expect(screen.getByLabelText('Video call')).toBeDisabled();
+    expect(screen.getByLabelText('Audio call')).toBeDisabled();
+  });
+
   it('opens profile access from the direct chat identity area', async () => {
     renderHeader(
       <ChatHeader

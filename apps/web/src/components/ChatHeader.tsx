@@ -116,6 +116,7 @@ function UserProfileModal({
   const updateProfile = useUpdateProfile();
   const { uploadMedia, isUploading: isUploadingPhoto } = useFileUpload();
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
   // Own social handle — the auth user object doesn't carry it.
   const myProfileQuery = useQuery({
     queryKey: ['profiles', 'me'],
@@ -341,7 +342,15 @@ function UserProfileModal({
               Close
             </button>
             <button
-              onClick={() => runTrustAction(() => blockUser(user._id), 'User blocked.')}
+              onClick={() =>
+                runTrustAction(async () => {
+                  await blockUser(user._id);
+                  // ['chats'] prefix-matches both the chat list query and
+                  // every individual useChat(id) detail query (chatKeys.all),
+                  // so this refreshes canMessage/blockedState everywhere.
+                  await queryClient.invalidateQueries({ queryKey: ['chats'] });
+                }, 'User blocked.')
+              }
               className="flex items-center justify-center gap-2 rounded-xl border border-[color:var(--bl-border)] py-2.5 text-sm font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
             >
               <Ban size={15} />
@@ -1263,6 +1272,10 @@ export default function ChatHeader({
 
   const btnBase =
     'bl-focus-ring rounded-full p-2 transition hover:bg-teal-50 hover:text-teal-800 dark:hover:bg-teal-500/15 dark:hover:text-teal-100';
+  // Direct chats only — group chats aren't subject to 1:1 block rules.
+  const isBlockedDirectChat = Boolean(
+    chat.type === 'direct' && chat.blockedState && chat.blockedState !== 'none'
+  );
 
   const createDirectCallId = () =>
     globalThis.crypto?.randomUUID?.() || `call-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1411,7 +1424,8 @@ export default function ChatHeader({
             <button
               onClick={() => startCall('video')}
               aria-label="Video call"
-              className={btnBase}
+              disabled={isBlockedDirectChat}
+              className={`${btnBase} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent`}
             >
               <Video size={18} />
             </button>
@@ -1420,7 +1434,8 @@ export default function ChatHeader({
             <button
               onClick={() => startCall('audio')}
               aria-label="Audio call"
-              className={btnBase}
+              disabled={isBlockedDirectChat}
+              className={`${btnBase} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent`}
             >
               <Phone size={18} />
             </button>
