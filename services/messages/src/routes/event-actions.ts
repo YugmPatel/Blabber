@@ -9,13 +9,14 @@ import { getPubSub } from '../pubsub';
 import { parseEventDate, validateMeetingUrl, validateTimezone } from '../event-utils';
 import { buildEventIcs, eventIcsFilename } from '../ics';
 
-async function publishMessageEdited(message: ReturnType<typeof serializeMessage>) {
+async function publishMessageEdited(message: ReturnType<typeof serializeMessage>, participants?: string[]) {
   try {
     await getPubSub().publish(createEvent<MessageEditedEvent>(EventType.MESSAGE_EDITED, {
       messageId: message._id,
       chatId: message.chatId,
       content: message.body,
       message,
+      participants,
       editedAt: new Date().toISOString(),
     }));
   } catch (error) {
@@ -47,7 +48,8 @@ async function loadEventMessage(
   if (options.requireWritable !== false) {
     await assertChatWritable(chat, userObjectId);
   }
-  return message;
+  const participants = chat.participants.map((participantId) => participantId.toString());
+  return { message, participants };
 }
 
 function isEventCreator(message: MessageDocument, userObjectId: ObjectId) {
@@ -70,8 +72,9 @@ export async function rsvpEvent(req: Request, res: Response, next: NextFunction)
     }
 
     const userObjectId = new ObjectId(userId);
-    const message = await loadEventMessage(req.params.messageId, userObjectId, res);
-    if (!message) return;
+    const loaded = await loadEventMessage(req.params.messageId, userObjectId, res);
+    if (!loaded) return;
+    const { message, participants } = loaded;
     if (message.event?.cancelledAt) {
       res.status(400).json({ error: 'Bad Request', message: 'Event is cancelled' });
       return;
@@ -96,7 +99,7 @@ export async function rsvpEvent(req: Request, res: Response, next: NextFunction)
       { returnDocument: 'after' }
     );
     const apiMessage = serializeMessage(updated!, undefined, userObjectId);
-    await publishMessageEdited(apiMessage);
+    await publishMessageEdited(apiMessage, participants);
     res.status(200).json(apiMessage);
   } catch (error) {
     next(error);
@@ -118,8 +121,9 @@ export async function updateEvent(req: Request, res: Response, next: NextFunctio
     }
 
     const userObjectId = new ObjectId(userId);
-    const message = await loadEventMessage(req.params.messageId, userObjectId, res);
-    if (!message) return;
+    const loaded = await loadEventMessage(req.params.messageId, userObjectId, res);
+    if (!loaded) return;
+    const { message, participants } = loaded;
     if (!isEventCreator(message, userObjectId)) {
       res.status(403).json({ error: 'Forbidden', message: 'Only the event creator can edit this event' });
       return;
@@ -180,7 +184,7 @@ export async function updateEvent(req: Request, res: Response, next: NextFunctio
       { returnDocument: 'after' }
     );
     const apiMessage = serializeMessage(updated!, undefined, userObjectId);
-    await publishMessageEdited(apiMessage);
+    await publishMessageEdited(apiMessage, participants);
     res.status(200).json(apiMessage);
   } catch (error) {
     next(error);
@@ -195,8 +199,9 @@ export async function cancelEvent(req: Request, res: Response, next: NextFunctio
       return;
     }
     const userObjectId = new ObjectId(userId);
-    const message = await loadEventMessage(req.params.messageId, userObjectId, res);
-    if (!message) return;
+    const loaded = await loadEventMessage(req.params.messageId, userObjectId, res);
+    if (!loaded) return;
+    const { message, participants } = loaded;
     if (!isEventCreator(message, userObjectId)) {
       res.status(403).json({ error: 'Forbidden', message: 'Only the event creator can cancel this event' });
       return;
@@ -209,7 +214,7 @@ export async function cancelEvent(req: Request, res: Response, next: NextFunctio
       { returnDocument: 'after' }
     );
     const apiMessage = serializeMessage(updated!, undefined, userObjectId);
-    await publishMessageEdited(apiMessage);
+    await publishMessageEdited(apiMessage, participants);
     res.status(200).json(apiMessage);
   } catch (error) {
     next(error);
@@ -223,8 +228,9 @@ export async function exportEventIcs(req: Request, res: Response, next: NextFunc
       res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
       return;
     }
-    const message = await loadEventMessage(req.params.messageId, new ObjectId(userId), res, { requireWritable: false });
-    if (!message) return;
+    const loaded = await loadEventMessage(req.params.messageId, new ObjectId(userId), res, { requireWritable: false });
+    if (!loaded) return;
+    const { message } = loaded;
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${eventIcsFilename(message.event!.title)}"`);

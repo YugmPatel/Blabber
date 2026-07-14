@@ -356,7 +356,7 @@ describe('Socket.io Client Events', () => {
     });
   });
 
-  it('should emit error when required fields are missing', async () => {
+  it('should emit message:failed (not a bare error) when required fields are missing', async () => {
     return new Promise<void>((resolve, reject) => {
       const clientSocket = ioClient(`http://localhost:${PORT}`, {
         transports: ['websocket'],
@@ -366,8 +366,12 @@ describe('Socket.io Client Events', () => {
       });
 
       clientSocket.on('connect', () => {
-        clientSocket.on('error', (data) => {
+        // message:failed carries tempId/clientMessageId so the sender can
+        // correlate the failure back to its specific optimistic message and
+        // mark it failed instead of leaving it looking "sent" forever.
+        clientSocket.on('message:failed', (data) => {
           expect(data.message).toContain('required');
+          expect(data.tempId).toBe('temp-missing-body');
           clientSocket.disconnect();
           resolve();
         });
@@ -375,6 +379,7 @@ describe('Socket.io Client Events', () => {
         // Send message without body
         clientSocket.emit('message:send', {
           chatId: 'chat123',
+          tempId: 'temp-missing-body',
         });
       });
 
@@ -385,7 +390,52 @@ describe('Socket.io Client Events', () => {
 
       setTimeout(() => {
         clientSocket.disconnect();
-        reject(new Error('error test timeout'));
+        reject(new Error('message:failed test timeout'));
+      }, 5000);
+    });
+  });
+
+  it('emits message:failed with tempId correlation when the backend rejects the send', async () => {
+    mockedAxios.post.mockImplementation((url: string) => {
+      if (url.endsWith('/chat123')) {
+        const error: any = new Error('Request failed');
+        error.response = { data: { message: 'Direct messaging is unavailable' } };
+        return Promise.reject(error);
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    return new Promise<void>((resolve, reject) => {
+      const clientSocket = ioClient(`http://localhost:${PORT}`, {
+        transports: ['websocket'],
+        auth: { token: validToken },
+      });
+
+      clientSocket.on('connect', () => {
+        clientSocket.on('message:failed', (data) => {
+          expect(data.tempId).toBe('temp-rejected');
+          expect(data.clientMessageId).toBe('temp-rejected');
+          expect(data.chatId).toBe('chat123');
+          expect(data.message).toBe('Direct messaging is unavailable');
+          clientSocket.disconnect();
+          resolve();
+        });
+
+        clientSocket.emit('message:send', {
+          chatId: 'chat123',
+          body: 'Hello',
+          tempId: 'temp-rejected',
+        });
+      });
+
+      clientSocket.on('connect_error', (error) => {
+        clientSocket.disconnect();
+        reject(error);
+      });
+
+      setTimeout(() => {
+        clientSocket.disconnect();
+        reject(new Error('message:failed correlation test timeout'));
       }, 5000);
     });
   });

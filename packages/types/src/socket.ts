@@ -150,6 +150,7 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   'message:ack': (data: { tempId?: string; clientMessageId?: string; messageId: string; message: any }) => void;
   'message:new': (data: { message: any; tempId?: string }) => void;
+  'message:failed': (data: { tempId?: string; clientMessageId?: string; chatId?: string; message: string; code?: string }) => void;
   'message:edit': (data: { message: any }) => void;
   'message:deleted': (data: { messageId: string; chatId: string; deletedBy?: string }) => void;
   'message:reaction': (data: {

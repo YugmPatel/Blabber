@@ -136,6 +136,7 @@ export interface MessageReadEvent extends BaseEvent {
     chatId: string;
     userId: string;
     messageIds: string[];
+    participants?: string[];
   };
 }
 

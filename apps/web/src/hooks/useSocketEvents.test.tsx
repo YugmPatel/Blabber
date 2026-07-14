@@ -275,6 +275,76 @@ describe('useSocketEvents', () => {
     });
   });
 
+  describe('message:failed event', () => {
+    it('marks the optimistic message as failed instead of removing it', async () => {
+      const chatId = 'chat-1';
+      const clientMessageId = 'client-789';
+      const optimisticMessage: Message = {
+        _id: clientMessageId,
+        chatId,
+        senderId: 'user-1',
+        clientMessageId,
+        body: 'This will fail',
+        reactions: [],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: new Date(),
+      };
+
+      queryClient.setQueryData<InfiniteData<any>>(messageKeys.list(chatId), {
+        pages: [{ messages: [optimisticMessage], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      renderHook(() => useSocketEvents(mockSocket), { wrapper });
+
+      eventHandlers['message:failed']({
+        tempId: clientMessageId,
+        clientMessageId,
+        chatId,
+        message: 'Direct messaging is unavailable',
+      });
+
+      await waitFor(() => {
+        const data = queryClient.getQueryData<InfiniteData<any>>(messageKeys.list(chatId));
+        expect(data?.pages[0].messages).toHaveLength(1);
+        expect(data?.pages[0].messages[0]._id).toBe(clientMessageId);
+        expect(data?.pages[0].messages[0].status).toBe('failed');
+      });
+    });
+
+    it('does nothing when the correlation id does not match any cached message', async () => {
+      const chatId = 'chat-1';
+      const optimisticMessage: Message = {
+        _id: 'client-other',
+        chatId,
+        senderId: 'user-1',
+        clientMessageId: 'client-other',
+        body: 'Unrelated message',
+        reactions: [],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: new Date(),
+      };
+
+      queryClient.setQueryData<InfiniteData<any>>(messageKeys.list(chatId), {
+        pages: [{ messages: [optimisticMessage], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      renderHook(() => useSocketEvents(mockSocket), { wrapper });
+
+      eventHandlers['message:failed']({
+        tempId: 'client-does-not-exist',
+        chatId,
+        message: 'Failed to send message',
+      });
+
+      const data = queryClient.getQueryData<InfiniteData<any>>(messageKeys.list(chatId));
+      expect(data?.pages[0].messages[0].status).toBe('sent');
+    });
+  });
+
   describe('message:edit event', () => {
     it('should update edited message in cache', async () => {
       const chatId = 'chat-1';
@@ -645,14 +715,15 @@ describe('useSocketEvents', () => {
       const { unmount } = renderHook(() => useSocketEvents(mockSocket), { wrapper });
 
       // Verify listeners were registered
-      expect(mockSocket.on).toHaveBeenCalledTimes(20);
+      expect(mockSocket.on).toHaveBeenCalledTimes(21);
 
       // Unmount
       unmount();
 
       // Verify listeners were removed
-      expect(mockSocket.off).toHaveBeenCalledTimes(20);
+      expect(mockSocket.off).toHaveBeenCalledTimes(21);
       expect(mockSocket.off).toHaveBeenCalledWith('message:new', expect.any(Function));
+      expect(mockSocket.off).toHaveBeenCalledWith('message:failed', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('message:edit', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('message:deleted', expect.any(Function));
       expect(mockSocket.off).toHaveBeenCalledWith('message:reaction', expect.any(Function));

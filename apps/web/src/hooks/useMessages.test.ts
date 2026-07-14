@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiClient } from '../api/client';
+import { useQuery } from '@tanstack/react-query';
+import { apiClient, forwardMessage } from '../api/client';
 import { renderQueryHook, waitFor } from '../test/query-test-utils';
 import {
   useMessages,
@@ -8,8 +9,10 @@ import {
   useDeleteMessage,
   useAddReaction,
   useMarkMessagesRead,
+  useForwardMessage,
   messageKeys,
 } from './useMessages';
+import { chatKeys } from './useChats';
 import type { Message } from '@repo/types';
 
 // Mock the API client
@@ -20,6 +23,7 @@ vi.mock('../api/client', () => ({
     patch: vi.fn(),
     delete: vi.fn(),
   },
+  forwardMessage: vi.fn(),
 }));
 
 describe('useMessages hooks', () => {
@@ -265,6 +269,73 @@ describe('useMessages hooks', () => {
 
       expect(apiClient.post).toHaveBeenCalledWith('/api/messages/msg-1/react', { emoji: '👍' });
       expect(result.current.data).toEqual(messageWithReaction);
+    });
+  });
+
+  describe('useForwardMessage', () => {
+    it('inserts the forwarded message into an already-warm destination chat cache', async () => {
+      const forwardedMessage: Message = { ...mockMessage, _id: 'fwd-1', chatId: 'chat-warm' };
+      vi.mocked(forwardMessage).mockResolvedValueOnce({ messages: [forwardedMessage] });
+
+      // The test client's gcTime is 0, so a cache entry with no active
+      // observer would be collected almost immediately — same as an
+      // unopened chat in production. Mounting a disabled observer for
+      // 'chat-warm' alongside useForwardMessage keeps it "warm" without
+      // triggering a real fetch, matching a destination chat the user
+      // actually has open/recently viewed.
+      const { result, queryClient } = renderQueryHook(() => ({
+        forward: useForwardMessage(),
+        messages: useQuery({
+          queryKey: messageKeys.list('chat-warm'),
+          queryFn: () => Promise.resolve({ messages: [], nextCursor: null }),
+          enabled: false,
+        }),
+      }));
+
+      queryClient.setQueryData(messageKeys.list('chat-warm'), {
+        pages: [{ messages: [], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      result.current.forward.mutate({ messageId: 'msg-1', destinationChatIds: ['chat-warm'] });
+
+      await waitFor(() => expect(result.current.forward.isSuccess).toBe(true));
+
+      const cached = queryClient.getQueryData(messageKeys.list('chat-warm')) as any;
+      expect(cached.pages[0].messages).toHaveLength(1);
+      expect(cached.pages[0].messages[0]._id).toBe('fwd-1');
+    });
+
+    it('invalidates the destination chat instead of silently dropping the update when its cache is cold', async () => {
+      const forwardedMessage: Message = { ...mockMessage, _id: 'fwd-2', chatId: 'chat-cold' };
+      vi.mocked(forwardMessage).mockResolvedValueOnce({ messages: [forwardedMessage] });
+
+      const { result, queryClient } = renderQueryHook(() => useForwardMessage());
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      // No pre-populated cache for 'chat-cold' — it's never been opened this session.
+      result.current.mutate({ messageId: 'msg-1', destinationChatIds: ['chat-cold'] });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: messageKeys.list('chat-cold') });
+      // Still no cache entry created out of thin air — the point is the next
+      // real fetch picks it up, not that we fabricate data here.
+      expect(queryClient.getQueryData(messageKeys.list('chat-cold'))).toBeUndefined();
+    });
+
+    it('invalidates the chat list so the destination conversation preview updates', async () => {
+      const forwardedMessage: Message = { ...mockMessage, _id: 'fwd-3', chatId: 'chat-warm' };
+      vi.mocked(forwardMessage).mockResolvedValueOnce({ messages: [forwardedMessage] });
+
+      const { result, queryClient } = renderQueryHook(() => useForwardMessage());
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      result.current.mutate({ messageId: 'msg-1', destinationChatIds: ['chat-warm'] });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: chatKeys.lists() });
     });
   });
 

@@ -11,6 +11,18 @@ vi.mock('@/hooks/useSendMessage');
 vi.mock('@/hooks/useFileUpload');
 vi.mock('@/store/app-store');
 
+// VoiceRecorder itself needs real browser MediaRecorder/getUserMedia APIs
+// that jsdom doesn't provide — stand in with a button that immediately
+// invokes onSend, so these tests exercise Composer's own upload+send
+// handling (handleVoiceSend) rather than the recording UI.
+vi.mock('./VoiceRecorder', () => ({
+  default: ({ onSend }: { onSend: (blob: Blob, duration: number) => void | Promise<void> }) => (
+    <button onClick={() => onSend(new Blob(['fake-audio'], { type: 'audio/webm' }), 5)}>
+      Send test audio
+    </button>
+  ),
+}));
+
 describe('Composer', () => {
   const mockSendMessage = vi.fn();
   const mockUploadFile = vi.fn();
@@ -282,6 +294,53 @@ describe('Composer', () => {
 
     expect(input).toBeDisabled();
     expect(screen.getByLabelText('Voice message')).toBeDisabled();
+  });
+
+  it('uploads and sends a voice message, then returns to the normal composer', async () => {
+    const user = userEvent.setup();
+    mockUploadFile.mockResolvedValueOnce('media-audio-1');
+
+    render(<Composer chatId="chat-1" />);
+
+    await user.click(screen.getByLabelText('Voice message'));
+    await user.click(await screen.findByText('Send test audio'));
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 'chat-1',
+          mediaId: 'media-audio-1',
+          mediaKind: 'audio',
+          mediaDuration: 5,
+        })
+      );
+    });
+
+    // Success: back to the normal composer, no lingering error notice.
+    expect(screen.getByPlaceholderText(messagePlaceholder)).toBeInTheDocument();
+    expect(screen.queryByText(/audio upload failed/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a clear failure notice and does not send when the audio upload fails', async () => {
+    const user = userEvent.setup();
+    mockUploadFile.mockResolvedValueOnce(null);
+    vi.mocked(useFileUpload).mockReturnValue({
+      uploadFile: mockUploadFile,
+      isUploading: false,
+      uploadProgress: null,
+      error: 'Upload rejected: mime_mismatch',
+      reset: vi.fn(),
+    });
+
+    render(<Composer chatId="chat-1" />);
+
+    await user.click(screen.getByLabelText('Voice message'));
+    await user.click(await screen.findByText('Send test audio'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/audio upload failed/i)).toBeInTheDocument();
+    });
+    expect(mockSendMessage).not.toHaveBeenCalled();
   });
 
   it('emits typing:start when user starts typing', async () => {

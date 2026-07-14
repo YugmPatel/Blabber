@@ -292,11 +292,23 @@ function setupEventHandlers(pubsub: RedisPubSub, io: SocketIOServer): void {
   pubsub.on(EventType.MESSAGE_READ, (event: AppEvent) => {
     const e = event as MessageReadEvent;
     logger.debug({ event: e.type, chatId: e.data.chatId }, 'Broadcasting MESSAGE_READ');
-    io.to(`chat:${e.data.chatId}`).emit('message:read', {
+    const payload = {
       chatId: e.data.chatId,
       userId: e.data.userId,
       messageIds: e.data.messageIds,
-    });
+    };
+    // Broadcast to every participant's user room, not just the chat room —
+    // the sender may have already navigated away from this chat (leaving the
+    // chat:<id> room) by the time the recipient reads the message, and still
+    // needs their sent-message checkmark to update in real time.
+    const participants = Array.from(new Set(e.data.participants ?? []));
+    if (participants.length > 0) {
+      participants.forEach((userId) => {
+        io.to(`user:${userId}`).emit('message:read', payload);
+      });
+    } else {
+      io.to(`chat:${e.data.chatId}`).emit('message:read', payload);
+    }
   });
 
   pubsub.on(EventType.MOMENT_REACTION_UPDATED, (event: AppEvent) => {

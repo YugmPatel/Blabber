@@ -119,7 +119,10 @@ export interface Message {
     displayName: string;
   }>;
   reactions: Reaction[];
-  status: 'sent' | 'delivered' | 'read';
+  // 'failed' is client-only: an optimistic message whose send attempt errored
+  // out or timed out waiting for an ack. The server never persists or
+  // returns this status.
+  status: 'sent' | 'delivered' | 'read' | 'failed';
   deletedFor: string[];
   createdAt: Date;
   editedAt?: Date;

@@ -113,6 +113,18 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
       return response.data.chat;
     },
     onSuccess: (chat) => {
+      // Insert the real, server-confirmed chat directly into every cached
+      // chat-list query so it appears instantly regardless of invalidation/
+      // refetch timing, and seed its own detail cache so the chat page it's
+      // about to navigate to doesn't need a fresh fetch to render.
+      queryClient.getQueryCache().findAll({ queryKey: chatKeys.lists() }).forEach((query) => {
+        queryClient.setQueryData<Chat[]>(query.queryKey, (old) => {
+          if (!old) return old;
+          if (old.some((existing) => existing._id === chat._id)) return old;
+          return [chat, ...old];
+        });
+      });
+      queryClient.setQueryData(chatKeys.detail(chat._id), chat);
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
       handleClose();
       navigate(`/chats/${chat._id}`);

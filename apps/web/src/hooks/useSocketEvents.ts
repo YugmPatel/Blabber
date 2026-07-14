@@ -71,6 +71,27 @@ function upsertMessageInData(
   };
 }
 
+function markMessageFailedInData(
+  old: InfiniteData<MessagesResponse> | undefined,
+  tempId: string
+): InfiniteData<MessagesResponse> | undefined {
+  if (!old) return old;
+
+  let found = false;
+  const pages = old.pages.map((page) => ({
+    ...page,
+    messages: page.messages.map((existing) => {
+      if (existing._id === tempId || existing.clientMessageId === tempId) {
+        found = true;
+        return { ...existing, status: 'failed' as const };
+      }
+      return existing;
+    }),
+  }));
+
+  return found ? { ...old, pages } : old;
+}
+
 function mediaPreviewText(message: Message) {
   if (message.media?.type === 'image') return 'Sent an image';
   if (message.media?.type === 'audio') return 'Sent a voice message';
@@ -470,6 +491,26 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       resolvePendingMessage(data.tempId || data.clientMessageId!, message._id);
     };
 
+    // Handler for a message send that the server rejected or errored on.
+    // Marks the optimistic entry as failed in place (rather than removing it
+    // or leaving it looking "sent") so it survives a refresh as a visibly
+    // failed send instead of silently vanishing.
+    const handleMessageFailed = (data: {
+      tempId?: string;
+      clientMessageId?: string;
+      chatId?: string;
+      message: string;
+      code?: string;
+    }) => {
+      const correlationId = data.tempId || data.clientMessageId;
+      console.error('Message send failed:', data);
+      if (!correlationId || !data.chatId) return;
+
+      queryClient.setQueryData<InfiniteData<MessagesResponse>>(messageKeys.list(data.chatId), (old) =>
+        markMessageFailedInData(old, correlationId)
+      );
+    };
+
     // Handler for errors
     const handleError = (data: { message: string; code?: string }) => {
       console.error('Socket error:', data);
@@ -507,6 +548,7 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
 
     // Register all event listeners
     socket.on('message:ack', handleMessageAck);
+    socket.on('message:failed', handleMessageFailed);
     socket.on('message:new', handleMessageNew);
     socket.on('message:edit', handleMessageEdit);
     socket.on('message:deleted', handleMessageDelete);
@@ -530,6 +572,7 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
     // Cleanup: remove all event listeners
     return () => {
       socket.off('message:ack', handleMessageAck);
+      socket.off('message:failed', handleMessageFailed);
       socket.off('message:new', handleMessageNew);
       socket.off('message:edit', handleMessageEdit);
       socket.off('message:deleted', handleMessageDelete);

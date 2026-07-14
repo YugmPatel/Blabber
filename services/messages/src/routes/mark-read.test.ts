@@ -214,6 +214,40 @@ describe('POST /read - Mark Messages as Read', () => {
     expect(response.status).toBe(401);
   });
 
+  it('marks messages read in a group chat with more than two participants', async () => {
+    const groupChatId = new ObjectId();
+    const memberTwo = new ObjectId();
+    await seedMessageTestChat(groupChatId, [TEST_USER_ID, OTHER_USER_ID, memberTwo], 'group');
+
+    const collection = getMessagesCollection();
+    const insertResult = await collection.insertOne({
+      _id: new ObjectId(),
+      chatId: groupChatId,
+      senderId: OTHER_USER_ID,
+      body: 'Unread group message',
+      reactions: [],
+      status: 'sent' as const,
+      deletedFor: [],
+      createdAt: new Date(),
+    });
+
+    const token = generateToken(TEST_USER_ID.toString());
+    const response = await request(app)
+      .post('/read')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ messageIds: [insertResult.insertedId.toString()] });
+
+    expect(response.status).toBe(200);
+    expect(response.body.modifiedCount).toBe(1);
+    const message = await collection.findOne({ _id: insertResult.insertedId });
+    expect(message?.status).toBe('read');
+
+    const readState = await getDatabase()
+      .collection('chatReadStates')
+      .findOne({ userId: TEST_USER_ID, chatId: groupChatId });
+    expect(readState).toBeTruthy();
+  });
+
   it('should reject non-existent message IDs', async () => {
     const token = generateToken(TEST_USER_ID.toString());
     const nonExistentId1 = new ObjectId();

@@ -256,7 +256,12 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
         const stableClientMessageId = clientMessageId || tempId;
 
         if (!chatId || !body) {
-          socket.emit('error', { message: 'chatId and body are required' });
+          socket.emit('message:failed', {
+            tempId,
+            clientMessageId: stableClientMessageId,
+            chatId,
+            message: 'chatId and body are required',
+          });
           return;
         }
 
@@ -302,9 +307,16 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
         logger.info(`Message sent to chat ${chatId} by user ${userId}`);
       } catch (error: any) {
         logger.error('Error sending message:', error);
-        socket.emit('error', {
-          message: 'Failed to send message',
-          details: error.response?.data || error.message,
+        // A dedicated event (rather than the generic 'error') so the client
+        // can correlate the failure back to the specific optimistic message
+        // via tempId/clientMessageId and roll it back instead of leaving it
+        // stuck looking "sent" forever.
+        socket.emit('message:failed', {
+          tempId: data.tempId,
+          clientMessageId: data.clientMessageId || data.tempId,
+          chatId: data.chatId,
+          message: error.response?.data?.message || 'Failed to send message',
+          code: error.response?.data?.error,
         });
       }
     }

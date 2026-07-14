@@ -7,13 +7,14 @@ import { assertChatMembership, assertChatWritable } from '../chat-access';
 import { serializeMessage } from '../serialize-message';
 import { getPubSub } from '../pubsub';
 
-async function publishMessageEdited(message: ReturnType<typeof serializeMessage>) {
+async function publishMessageEdited(message: ReturnType<typeof serializeMessage>, participants?: string[]) {
   try {
     await getPubSub().publish(createEvent<MessageEditedEvent>(EventType.MESSAGE_EDITED, {
       messageId: message._id,
       chatId: message.chatId,
       content: message.body,
       message,
+      participants,
       editedAt: new Date().toISOString(),
     }));
   } catch (error) {
@@ -65,7 +66,10 @@ export async function closePoll(req: Request, res: Response, next: NextFunction)
     }
 
     const apiMessage = serializeMessage(updated, undefined, userObjectId);
-    await publishMessageEdited(apiMessage);
+    await publishMessageEdited(
+      apiMessage,
+      chat.participants.map((participantId) => participantId.toString())
+    );
     res.status(200).json(apiMessage);
   } catch (error) {
     next(error);

@@ -396,6 +396,102 @@ describe('ChatView', () => {
     });
   });
 
+  it('automatically marks an unread incoming message as read while the chat is actively being viewed', async () => {
+    // jsdom's document is not focused by default (unlike a real foregrounded
+    // browser tab) — make it explicit that this test simulates the user
+    // actively looking at the chat.
+    const hasFocusSpy = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
+        data: mockChat,
+        isLoading: false,
+      } as any);
+
+      const incomingUnread: Message = {
+        _id: 'incoming-1',
+        chatId: 'chat1',
+        senderId: 'user2',
+        body: 'Are you there?',
+        reactions: [],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: new Date('2024-01-15T10:05:00'),
+      };
+
+      vi.spyOn(useMessagesModule, 'useMessages').mockReturnValue({
+        data: { pages: [{ messages: [incomingUnread], nextCursor: null }] },
+        isLoading: false,
+        hasNextPage: false,
+        isFetchingNextPage: false,
+        fetchNextPage: vi.fn(),
+      } as any);
+
+      vi.spyOn(useUsersModule, 'useUser').mockReturnValue({ data: mockUser } as any);
+      vi.spyOn(useUsersModule, 'useUserPresence').mockReturnValue({ data: undefined } as any);
+
+      const markMessagesRead = vi.fn();
+      vi.spyOn(useMessagesModule, 'useMarkMessagesRead').mockReturnValue({
+        mutate: markMessagesRead,
+        isPending: false,
+      } as any);
+
+      renderChatView();
+
+      await waitFor(() => {
+        expect(markMessagesRead).toHaveBeenCalledWith(['incoming-1']);
+      });
+    } finally {
+      hasFocusSpy.mockRestore();
+    }
+  });
+
+  it('does not mark messages read while the document is not focused (chat not actively being viewed)', async () => {
+    const hasFocusSpy = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    try {
+      vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
+        data: mockChat,
+        isLoading: false,
+      } as any);
+
+      const incomingUnread: Message = {
+        _id: 'incoming-2',
+        chatId: 'chat1',
+        senderId: 'user2',
+        body: 'Are you there?',
+        reactions: [],
+        status: 'sent',
+        deletedFor: [],
+        createdAt: new Date('2024-01-15T10:05:00'),
+      };
+
+      vi.spyOn(useMessagesModule, 'useMessages').mockReturnValue({
+        data: { pages: [{ messages: [incomingUnread], nextCursor: null }] },
+        isLoading: false,
+        hasNextPage: false,
+        isFetchingNextPage: false,
+        fetchNextPage: vi.fn(),
+      } as any);
+
+      vi.spyOn(useUsersModule, 'useUser').mockReturnValue({ data: mockUser } as any);
+      vi.spyOn(useUsersModule, 'useUserPresence').mockReturnValue({ data: undefined } as any);
+
+      const markMessagesRead = vi.fn();
+      vi.spyOn(useMessagesModule, 'useMarkMessagesRead').mockReturnValue({
+        mutate: markMessagesRead,
+        isPending: false,
+      } as any);
+
+      renderChatView();
+
+      await waitFor(() => {
+        expect(screen.getByText('Are you there?')).toBeInTheDocument();
+      });
+      expect(markMessagesRead).not.toHaveBeenCalled();
+    } finally {
+      hasFocusSpy.mockRestore();
+    }
+  });
+
   it('hides the composer and shows a non-scary banner when the current user blocked the other participant', async () => {
     vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
       data: { ...mockChat, canMessage: false, blockedState: 'blocked_by_me' },

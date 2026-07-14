@@ -61,7 +61,10 @@ export async function markMessagesAsRead(
     }
 
     const chatIds = Array.from(new Set(messages.map((message) => message.chatId.toString())));
-    await Promise.all(chatIds.map((chatId) => assertChatMembership(new ObjectId(chatId), userObjectId)));
+    const chats = await Promise.all(chatIds.map((chatId) => assertChatMembership(new ObjectId(chatId), userObjectId)));
+    const participantsByChatId = new Map(
+      chats.map((chat) => [chat._id.toString(), chat.participants.map((participantId) => participantId.toString())])
+    );
 
     // Batch update: mark all messages as read
     // Only update messages that are not already read
@@ -128,6 +131,7 @@ export async function markMessagesAsRead(
             chatId,
             userId,
             messageIds: idsForChat,
+            participants: participantsByChatId.get(chatId),
           });
 
           return pubsub.publish(event);

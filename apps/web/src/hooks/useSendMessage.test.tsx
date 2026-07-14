@@ -278,4 +278,66 @@ describe('useSendMessage', () => {
       expect(data.pages[0].messages[0].body).toBe('New message');
     });
   });
+
+  it('marks the optimistic message failed if no ack/failure arrives within the timeout', () => {
+    vi.useFakeTimers();
+    try {
+      queryClient.setQueryData(['messages', 'list', 'chat-1'], {
+        pages: [{ messages: [], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      const { result } = renderHook(() => useSendMessage(), { wrapper });
+
+      result.current.sendMessage({ chatId: 'chat-1', body: 'Never acked' });
+
+      const beforeTimeout = queryClient.getQueryData(['messages', 'list', 'chat-1']) as any;
+      expect(beforeTimeout.pages[0].messages[0].status).toBe('sent');
+
+      vi.advanceTimersByTime(20000);
+
+      const afterTimeout = queryClient.getQueryData(['messages', 'list', 'chat-1']) as any;
+      expect(afterTimeout.pages[0].messages[0].status).toBe('failed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not mark the message failed if it was already resolved (ack) before the timeout', () => {
+    vi.useFakeTimers();
+    try {
+      queryClient.setQueryData(['messages', 'list', 'chat-1'], {
+        pages: [{ messages: [], nextCursor: null }],
+        pageParams: [undefined],
+      });
+
+      const { result } = renderHook(() => useSendMessage(), { wrapper });
+      result.current.sendMessage({ chatId: 'chat-1', body: 'Acked in time' });
+
+      const pending = queryClient.getQueryData(['messages', 'list', 'chat-1']) as any;
+      const tempId = pending.pages[0].messages[0]._id;
+
+      // Simulate the ack replacing the optimistic entry with the real message,
+      // as handleMessageAck in useSocketEvents.ts would.
+      queryClient.setQueryData(['messages', 'list', 'chat-1'], {
+        pages: [
+          {
+            messages: [{ ...pending.pages[0].messages[0], _id: 'real-server-id', status: 'sent' }],
+            nextCursor: null,
+          },
+        ],
+        pageParams: [undefined],
+      });
+
+      vi.advanceTimersByTime(20000);
+
+      const afterTimeout = queryClient.getQueryData(['messages', 'list', 'chat-1']) as any;
+      expect(afterTimeout.pages[0].messages).toHaveLength(1);
+      expect(afterTimeout.pages[0].messages[0]._id).toBe('real-server-id');
+      expect(afterTimeout.pages[0].messages[0].status).toBe('sent');
+      expect(tempId).toMatch(/^client-/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

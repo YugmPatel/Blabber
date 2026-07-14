@@ -140,12 +140,21 @@ export function validateMediaPolicy(params: {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation'].includes(expectedByExtension);
   const isCsv = extension === '.csv' && detected === 'text/plain';
-  const isMp4Family = detected === 'video/mp4' && ['audio/mp4', 'audio/x-m4a', 'audio/m4a'].includes(expectedByExtension);
+  // .m4a resolves to whichever of these three mime types was registered last
+  // in EXTENSION_TO_MIME (they're aliases for the same MP4-container audio
+  // format). Browsers disagree on which one MediaRecorder/File reports —
+  // notably Edge and Safari record audio as 'audio/mp4' rather than
+  // 'audio/webm' — so both the sniffed-container check and the
+  // declared-mimetype check below must treat the whole family as equivalent
+  // instead of requiring an exact string match against expectedByExtension.
+  const m4aFamily = ['audio/mp4', 'audio/x-m4a', 'audio/m4a'];
+  const isM4aExpected = m4aFamily.includes(expectedByExtension);
+  const isMp4Family = detected === 'video/mp4' && isM4aExpected;
 
   if (!detected || (!isOoxml && !isCsv && !isMp4Family && detected !== expectedByExtension)) {
     throw new Error('mime_mismatch');
   }
-  if (declared && declared !== expectedByExtension) {
+  if (declared && declared !== expectedByExtension && !(isM4aExpected && m4aFamily.includes(declared))) {
     throw new Error('mime_mismatch');
   }
 

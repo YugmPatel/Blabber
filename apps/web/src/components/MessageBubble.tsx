@@ -901,6 +901,11 @@ export default function MessageBubble({
               {actionNotice}
             </p>
           )}
+          {isSentByMe && message.status === 'failed' && (
+            <p className="mt-1 max-w-xs px-1 text-xs font-semibold text-rose-500" role="alert">
+              Failed to send
+            </p>
+          )}
         </div>
 
         {/* Reactions */}

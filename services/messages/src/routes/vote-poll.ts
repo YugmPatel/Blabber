@@ -115,6 +115,7 @@ export async function votePoll(req: Request, res: Response, next: NextFunction):
         chatId: apiMessage.chatId,
         content: apiMessage.body,
         message: apiMessage,
+        participants: chat.participants.map((participantId) => participantId.toString()),
         editedAt: new Date().toISOString(),
       });
       await pubsub.publish(event);

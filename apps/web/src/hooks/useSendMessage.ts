@@ -173,6 +173,29 @@ export const useSendMessage = () => {
         clientMessageId,
         tempId,
       });
+
+      // Fire-and-forget over a socket has no request/response guarantee: if
+      // the ack (or an explicit message:failed) never arrives — e.g. the
+      // socket drops and reconnects mid-flight — the optimistic message
+      // would otherwise stay looking "sent" forever and only reveal it was
+      // never persisted on the next refresh. Time it out defensively.
+      setTimeout(() => {
+        queryClient.setQueryData<InfiniteData<MessagesResponse>>(messageKeys.list(chatId), (old) => {
+          if (!old) return old;
+          let stillPending = false;
+          const pages = old.pages.map((page) => ({
+            ...page,
+            messages: page.messages.map((existing) => {
+              if (existing._id === tempId) {
+                stillPending = true;
+                return { ...existing, status: 'failed' as const };
+              }
+              return existing;
+            }),
+          }));
+          return stillPending ? { ...old, pages } : old;
+        });
+      }, 20000);
     },
     [socket, user, addPendingMessage, queryClient]
   );

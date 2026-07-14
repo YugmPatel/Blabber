@@ -213,6 +213,18 @@ export const useForwardMessage = () => {
     }) => forwardMessageRequest(messageId, destinationChatIds),
     onSuccess: (data) => {
       data.messages.forEach((message) => {
+        const existingQuery = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
+          messageKeys.list(message.chatId)
+        );
+        if (!existingQuery) {
+          // No warm cache for this destination chat this session (it's never
+          // been opened) — patching would silently no-op, so force a fresh
+          // fetch instead. Without this, the forwarded message wouldn't
+          // appear until something else happens to trigger a refetch.
+          queryClient.invalidateQueries({ queryKey: messageKeys.list(message.chatId) });
+          return;
+        }
+
         queryClient.setQueryData<InfiniteData<MessagesResponse>>(
           messageKeys.list(message.chatId),
           (old) => {
