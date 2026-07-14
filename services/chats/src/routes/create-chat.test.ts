@@ -36,6 +36,13 @@ describe('POST / - Create Chat', () => {
     it('should create a direct chat with exactly 2 participants', async () => {
       const userId2 = new ObjectId();
       await seedChatUsers([userId2]);
+      // Explicit 'everyone' privacy: this test validates chat-creation shape,
+      // not contact-privacy enforcement (covered separately below) — without
+      // this, the conservative 'followers' default would 403 two strangers.
+      await getDatabase().collection('userSettings').insertOne({
+        userId: userId2,
+        messagePrivacy: 'everyone',
+      } as any);
 
       const response = await request(app)
         .post('/')
@@ -86,6 +93,74 @@ describe('POST / - Create Chat', () => {
   });
 
   describe('Contact privacy enforcement', () => {
+    it('blocks a new direct chat between strangers with no privacy settings configured (conservative P0 default)', async () => {
+      const targetId = new ObjectId();
+      await seedChatUsers([targetId]);
+      // No userSettings doc inserted at all: exercises the real-world default
+      // path, not an explicit policy choice.
+
+      const response = await request(app)
+        .post('/')
+        .send({ type: 'direct', participantIds: [mockUserId.toString(), targetId.toString()] });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('blocks a new direct chat when either user has blocked the other', async () => {
+      const targetId = new ObjectId();
+      await seedChatUsers([targetId]);
+      await getDatabase().collection('userSettings').insertOne({
+        userId: targetId,
+        messagePrivacy: 'everyone',
+      } as any);
+      await getDatabase().collection('user_blocks').insertOne({
+        _id: new ObjectId(),
+        blockerUserId: targetId,
+        blockedUserId: mockUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const response = await request(app)
+        .post('/')
+        .send({ type: 'direct', participantIds: [mockUserId.toString(), targetId.toString()] });
+
+      expect(response.status).toBe(403);
+      const chat = await getDatabase().collection('chats').findOne({
+        type: 'direct',
+        participants: { $all: [mockUserId, targetId] },
+      });
+      expect(chat).toBeNull();
+    });
+
+    it('does not let a pending message request be used to open a normal direct chat', async () => {
+      const targetId = new ObjectId();
+      await seedChatUsers([targetId]);
+      await getDatabase().collection('userSettings').insertOne({
+        userId: targetId,
+        messagePrivacy: 'followers',
+      } as any);
+      await getDatabase().collection('message_requests').insertOne({
+        _id: new ObjectId(),
+        senderId: mockUserId,
+        recipientId: targetId,
+        status: 'pending',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const response = await request(app)
+        .post('/')
+        .send({ type: 'direct', participantIds: [mockUserId.toString(), targetId.toString()] });
+
+      expect(response.status).toBe(403);
+      const chat = await getDatabase().collection('chats').findOne({
+        type: 'direct',
+        participants: { $all: [mockUserId, targetId] },
+      });
+      expect(chat).toBeNull();
+    });
+
     it('blocks a new direct chat when the recipient allows messages from no one', async () => {
       const targetId = new ObjectId();
       await seedChatUsers([targetId]);

@@ -258,6 +258,61 @@ describe('GET /search - User Search', () => {
     expect(response.body.users.find((u: any) => u.username === 'test-search-alice')).toBeUndefined();
   });
 
+  it('requires a message request for an unknown user with no established relationship (conservative P0 default)', async () => {
+    const response = await request(app)
+      .get('/search')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .query({ q: 'alice' });
+
+    expect(response.status).toBe(200);
+    const aliceUser = response.body.users.find((u: any) => u.username === 'test-search-alice');
+    expect(aliceUser).toBeDefined();
+    expect(aliceUser.relationshipStatus).toBe('none');
+    expect(aliceUser.canMessage).toBe(false);
+    expect(aliceUser.requiresMessageRequest).toBe(true);
+  });
+
+  it('allows messaging a user with an existing accepted direct chat', async () => {
+    await getDatabase().collection('chats').insertOne({
+      type: 'direct',
+      participants: [viewerId, testUser1Id],
+      admins: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+
+    const response = await request(app)
+      .get('/search')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .query({ q: 'alice' });
+
+    expect(response.status).toBe(200);
+    const aliceUser = response.body.users.find((u: any) => u.username === 'test-search-alice');
+    expect(aliceUser).toBeDefined();
+    expect(aliceUser.relationshipStatus).toBe('accepted');
+    expect(aliceUser.canMessage).toBe(true);
+    expect(aliceUser.requiresMessageRequest).toBe(false);
+  });
+
+  it('allows messaging a user who explicitly opted into everyone', async () => {
+    await getDatabase().collection('userSettings').insertOne({
+      userId: testUser1Id,
+      messagePrivacy: 'everyone',
+    } as any);
+
+    const response = await request(app)
+      .get('/search')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .query({ q: 'alice' });
+
+    expect(response.status).toBe(200);
+    const aliceUser = response.body.users.find((u: any) => u.username === 'test-search-alice');
+    expect(aliceUser).toBeDefined();
+    expect(aliceUser.relationshipStatus).toBe('none');
+    expect(aliceUser.canMessage).toBe(true);
+    expect(aliceUser.requiresMessageRequest).toBe(false);
+  });
+
   it('caps the limit server-side', async () => {
     const response = await request(app)
       .get('/search')

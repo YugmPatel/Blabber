@@ -40,7 +40,7 @@ export const DEFAULT_USER_SETTINGS = {
   themePreference: 'system' as ThemePreference,
   chatIntelligenceEnabled: true,
   momentArchiveEnabled: true,
-  messagePrivacy: 'everyone' as ContactPrivacy,
+  messagePrivacy: 'followers' as ContactPrivacy,
   groupInvitePrivacy: 'everyone' as ContactPrivacy,
   emailDiscoverability: 'nobody' as EmailDiscoverability,
   timezone: 'UTC',
@@ -52,6 +52,31 @@ export function getUserSettingsCollection(): Collection<UserSettings> {
 
 export async function createUserSettingsIndexes(): Promise<void> {
   await getUserSettingsCollection().createIndex({ userId: 1 }, { unique: true });
+}
+
+const MESSAGE_PRIVACY_BACKFILL_ID = 'conservative-message-privacy-backfill-2026-07';
+
+/**
+ * One-time P0 backfill: existing users whose messagePrivacy is still the old
+ * 'everyone' default get moved to the new conservative 'followers' default.
+ * Guarded by a migrations marker (not a plain updateMany on every boot)
+ * because after this runs once, 'everyone' is a legitimate value a user can
+ * deliberately choose in their privacy settings — re-running unconditionally
+ * would silently overwrite that explicit choice back to 'followers'.
+ */
+export async function backfillConservativeMessagePrivacy(): Promise<void> {
+  const db = getDatabase();
+  try {
+    await db.collection('migrations').insertOne({ _id: MESSAGE_PRIVACY_BACKFILL_ID, runAt: new Date() } as any);
+  } catch (error: any) {
+    if (error?.code === 11000) return; // already ran
+    throw error;
+  }
+
+  await getUserSettingsCollection().updateMany(
+    { messagePrivacy: 'everyone' },
+    { $set: { messagePrivacy: 'followers', updatedAt: new Date() } }
+  );
 }
 
 export async function getOrCreateUserSettings(userId: ObjectId): Promise<UserSettings> {

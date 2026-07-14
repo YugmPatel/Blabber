@@ -67,7 +67,9 @@ describe('GET/PATCH /me/privacy', () => {
       profileVisibility: 'private',
       searchVisibility: 'everyone',
       emailDiscoverability: 'nobody',
-      messagePermission: 'everyone',
+      // Conservative P0 default: unlike the other permissions, new users
+      // default to message requests rather than open direct messaging.
+      messagePermission: 'followers',
       groupAddPermission: 'everyone',
       callPermission: 'everyone',
     });

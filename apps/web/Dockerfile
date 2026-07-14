@@ -37,6 +37,8 @@ ENV VITE_SOCKET_URL=$VITE_SOCKET_URL
 ENV VITE_LIVEKIT_WS_URL=$VITE_LIVEKIT_WS_URL
 ENV VITE_ALLOW_LOCAL_API_FALLBACK=$VITE_ALLOW_LOCAL_API_FALLBACK
 
+RUN pnpm --filter @repo/types build
+
 WORKDIR /app/apps/web
 # Production bundle uses the same TypeScript build path as the package script.
 RUN pnpm build

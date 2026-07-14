@@ -337,7 +337,7 @@ export async function unmuteUser(userId: string) {
 
 // ── Safe user discovery / New Convo ─────────────────────────────────────────
 
-export type RelationshipStatus = 'connected' | 'following' | 'pending_sent' | 'pending_received' | 'none';
+export type RelationshipStatus = 'none' | 'pending_sent' | 'pending_received' | 'accepted' | 'blocked';
 
 export interface UserSearchResult {
   id: string;

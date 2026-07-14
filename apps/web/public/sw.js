@@ -1,3 +1,14 @@
+// SERVICE_WORKER_VERSION: 2 (bump this comment to force browsers to fetch and
+// activate a new sw.js instead of continuing to run a cached copy)
+
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 self.addEventListener('push', (event) => {
   let payload = {};
 
@@ -14,8 +25,8 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'Blabber';
   const options = {
     body: payload.body || 'You have a new message',
-    icon: '/vite.svg',
-    badge: '/vite.svg',
+    icon: '/icons/blabber-192.png',
+    badge: '/icons/blabber-badge-72.png',
     tag: payload.data?.actionId || payload.data?.messageId || payload.data?.chatId || undefined,
     renotify: false,
     data: {

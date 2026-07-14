@@ -84,6 +84,23 @@ describe('Message requests', () => {
     expect(response.status).toBe(400);
   });
 
+  it('creates a pending request for a stranger with no privacy settings configured at all (conservative P0 default)', async () => {
+    await getDatabase().collection('userSettings').deleteMany({ userId: recipientId });
+
+    const response = await request(app)
+      .post('/message-requests')
+      .set('Authorization', `Bearer ${senderToken}`)
+      .send({ recipientId: recipientId.toString() });
+
+    expect(response.status).toBe(201);
+    expect(response.body.status).toBe('pending');
+    const chat = await getDatabase().collection('chats').findOne({
+      type: 'direct',
+      participants: { $all: [senderId, recipientId] },
+    });
+    expect(chat).toBeNull();
+  });
+
   it('creates a pending request when the recipient requires one', async () => {
     const response = await request(app)
       .post('/message-requests')

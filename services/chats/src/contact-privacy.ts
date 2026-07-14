@@ -5,15 +5,16 @@ import { getDatabase } from './db';
  * Contact-privacy enforcement for starting direct chats and adding people to
  * groups. Settings are written by the users service into the shared
  * `userSettings` collection; follower relationships live in
- * `profile_relationships`. Defaults to 'everyone' when a user has never
- * saved settings, matching the users service defaults.
+ * `profile_relationships`. Defaults to 'followers' when a user has never
+ * saved settings (conservative P0 posture), matching the users service
+ * defaults.
  */
 export type ContactPrivacy = 'everyone' | 'followers' | 'contacts' | 'no_one';
 
 const VALID_VALUES = new Set<ContactPrivacy>(['everyone', 'followers', 'contacts', 'no_one']);
 
-function normalize(value: unknown): ContactPrivacy {
-  return VALID_VALUES.has(value as ContactPrivacy) ? (value as ContactPrivacy) : 'everyone';
+function normalize(value: unknown, fallback: ContactPrivacy): ContactPrivacy {
+  return VALID_VALUES.has(value as ContactPrivacy) ? (value as ContactPrivacy) : fallback;
 }
 
 export async function getContactPrivacy(
@@ -21,8 +22,10 @@ export async function getContactPrivacy(
 ): Promise<{ messagePrivacy: ContactPrivacy; groupInvitePrivacy: ContactPrivacy }> {
   const settings = await getDatabase().collection('userSettings').findOne({ userId });
   return {
-    messagePrivacy: normalize(settings?.messagePrivacy),
-    groupInvitePrivacy: normalize(settings?.groupInvitePrivacy),
+    // Conservative P0 default: unknown/unset messaging policy must never
+    // resolve to 'everyone' — see services/users DEFAULT_USER_SETTINGS.
+    messagePrivacy: normalize(settings?.messagePrivacy, 'followers'),
+    groupInvitePrivacy: normalize(settings?.groupInvitePrivacy, 'everyone'),
   };
 }
 

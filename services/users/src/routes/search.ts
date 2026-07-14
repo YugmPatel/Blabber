@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { searchUsersByText, getUsersCollection } from '../models/user';
-import { listCounterpartBlockIds } from '../models/user-block';
+import { listCounterpartBlockIds, hasBlockBetween } from '../models/user-block';
 import { getDatabase } from '../db';
 import { logger } from '@repo/utils';
 
@@ -36,9 +36,19 @@ function bioPreview(about?: string) {
  * the enforcement in services/chats/src/contact-privacy.ts and
  * routes/message-requests.ts — kept in sync manually since the two services
  * do not share a code module, only the underlying collections.
+ *
+ * relationshipStatus is restricted to exactly five values: 'none',
+ * 'pending_sent', 'pending_received', 'accepted', 'blocked'. The frontend
+ * must never infer a security decision from this label alone — canMessage
+ * and requiresMessageRequest are the authority.
  */
 async function messagingState(viewerId: ObjectId, candidateId: ObjectId) {
   const db = getDatabase();
+
+  // Block wins over everything else, including an existing chat record.
+  if (await hasBlockBetween(viewerId, candidateId)) {
+    return { relationshipStatus: 'blocked' as const, canMessage: false, requiresMessageRequest: false };
+  }
 
   const sharedChat = await db.collection('chats').findOne({
     type: 'direct',
@@ -46,13 +56,15 @@ async function messagingState(viewerId: ObjectId, candidateId: ObjectId) {
     deletedAt: { $exists: false },
     endedAt: { $exists: false },
   });
-  if (sharedChat) return { relationshipStatus: 'connected', canMessage: true, requiresMessageRequest: false };
+  if (sharedChat) return { relationshipStatus: 'accepted' as const, canMessage: true, requiresMessageRequest: false };
 
   const settings = await db.collection('userSettings').findOne({ userId: candidateId });
-  const messagePrivacy = settings?.messagePrivacy || 'everyone';
+  // Conservative P0 default: unset/unknown policy must never resolve to
+  // 'everyone' — see services/users DEFAULT_USER_SETTINGS.
+  const messagePrivacy = settings?.messagePrivacy || 'followers';
 
   if (messagePrivacy === 'everyone') {
-    return { relationshipStatus: 'none', canMessage: true, requiresMessageRequest: false };
+    return { relationshipStatus: 'none' as const, canMessage: true, requiresMessageRequest: false };
   }
 
   if (messagePrivacy === 'followers') {
@@ -61,13 +73,16 @@ async function messagingState(viewerId: ObjectId, candidateId: ObjectId) {
       targetUserId: candidateId,
       state: 'following',
     });
-    if (isFollower) return { relationshipStatus: 'following', canMessage: true, requiresMessageRequest: false };
+    // Being an approved follower unlocks messaging directly, but the label
+    // stays 'none' (no pending/accepted relationship exists) — canMessage is
+    // what actually authorizes the action.
+    if (isFollower) return { relationshipStatus: 'none' as const, canMessage: true, requiresMessageRequest: false };
   }
 
   // messagePrivacy === 'no_one' never allows a request; 'followers' (for a
   // non-follower) routes through a message request instead of a hard block.
   if (messagePrivacy === 'no_one') {
-    return { relationshipStatus: 'none', canMessage: false, requiresMessageRequest: false };
+    return { relationshipStatus: 'none' as const, canMessage: false, requiresMessageRequest: false };
   }
 
   const pendingSent = await db.collection('message_requests').findOne({
@@ -75,7 +90,9 @@ async function messagingState(viewerId: ObjectId, candidateId: ObjectId) {
     recipientId: candidateId,
     status: 'pending',
   });
-  if (pendingSent) return { relationshipStatus: 'pending_sent', canMessage: false, requiresMessageRequest: false };
+  if (pendingSent) {
+    return { relationshipStatus: 'pending_sent' as const, canMessage: false, requiresMessageRequest: false };
+  }
 
   const pendingReceived = await db.collection('message_requests').findOne({
     senderId: candidateId,
@@ -83,10 +100,10 @@ async function messagingState(viewerId: ObjectId, candidateId: ObjectId) {
     status: 'pending',
   });
   if (pendingReceived) {
-    return { relationshipStatus: 'pending_received', canMessage: false, requiresMessageRequest: false };
+    return { relationshipStatus: 'pending_received' as const, canMessage: false, requiresMessageRequest: false };
   }
 
-  return { relationshipStatus: 'none', canMessage: false, requiresMessageRequest: true };
+  return { relationshipStatus: 'none' as const, canMessage: false, requiresMessageRequest: true };
 }
 
 export async function searchUsers(req: Request, res: Response, next: NextFunction): Promise<void> {

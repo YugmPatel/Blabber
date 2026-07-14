@@ -6,7 +6,7 @@ import { connectToRedis, closeRedis } from './redis';
 import { initPubSub, closePubSub } from './pubsub';
 import { createUserIndexes } from './models/user';
 import { createStatusIndexes } from './models/status';
-import { createUserSettingsIndexes } from './models/user-settings';
+import { createUserSettingsIndexes, backfillConservativeMessagePrivacy } from './models/user-settings';
 import { createUserBlockIndexes } from './models/user-block';
 import { createUserMuteIndexes } from './models/user-mute';
 import { createUserInviteIndexes } from './models/user-invite';
@@ -97,6 +97,7 @@ async function startServer() {
     await cleanupExpiredCommunityHandleReservations();
     await createCommunityModerationActivityIndexes();
     await createUserSettingsIndexes();
+    await backfillConservativeMessagePrivacy();
     await createDiscoveryPreferenceIndexes();
     await createDiscoveryFeedbackIndexes();
     await createDiscoveryEventIndexes();

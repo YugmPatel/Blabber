@@ -1,0 +1,107 @@
+name: Deploy Production
+
+# Manual trigger: Actions tab -> "Deploy Production" -> "Run workflow".
+# Auto trigger: every push to main.
+#
+# To disable auto-deploy-on-push WITHOUT editing this file: set the repository
+# variable AUTO_DEPLOY_ON_PUSH to "false" (Settings -> Secrets and variables ->
+# Actions -> Variables tab). workflow_dispatch keeps working either way.
+#
+# To disable it permanently: delete/comment out the `push:` block below and
+# keep only `workflow_dispatch`.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force_full_rebuild:
+        description: "Rebuild and recreate ALL app services regardless of changed files"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never let two production deploys run at once. A second push while one is in
+# flight waits in queue rather than cancelling the first mid-build/mid-recreate.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to production VM
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch' || vars.AUTO_DEPLOY_ON_PUSH != 'false'
+    steps:
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.PROD_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy over SSH
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          TARGET_SHA: ${{ github.sha }}
+          FORCE_FULL: ${{ github.event.inputs.force_full_rebuild || 'false' }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "$PROD_SSH_PORT" \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "$PROD_SSH_USER@$PROD_SSH_HOST" bash -s -- "$TARGET_SHA" "$FORCE_FULL" <<'REMOTE'
+            set -euo pipefail
+            SHA="$1"
+            FORCE="$2"
+            REPO_DIR=/opt/blabber
+
+            cd "$REPO_DIR"
+            echo "[bootstrap] fetching origin to locate scripts/production-deploy.sh @ $SHA"
+            git fetch origin --quiet
+            git cat-file -e "${SHA}^{commit}" 2>/dev/null || {
+              echo "[bootstrap][ERROR] commit $SHA not found on the VM after fetch" >&2
+              exit 1
+            }
+
+            TMP_SCRIPT="$(mktemp)"
+            git show "${SHA}:scripts/production-deploy.sh" > "$TMP_SCRIPT"
+            chmod +x "$TMP_SCRIPT"
+            "$TMP_SCRIPT" "$SHA" "$FORCE"
+          REMOTE
+
+      - name: Verify public endpoints
+        run: |
+          set -euo pipefail
+
+          echo "Checking https://api.blabber.dev/healthz"
+          curl -fsS --max-time 10 https://api.blabber.dev/healthz
+          echo
+
+          echo "Checking https://app.blabber.dev returns 200"
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://app.blabber.dev)
+          echo "app.blabber.dev -> $code"
+          if [ "$code" != "200" ]; then
+            echo "app.blabber.dev did not return 200" >&2
+            exit 1
+          fi
+
+          echo "Checking TLS handshake for https://livekit.blabber.dev"
+          # LiveKit is primarily a WebSocket/RTC endpoint, so a plain HTTP GET
+          # is not expected to return 200 — this only confirms TLS terminates
+          # correctly and serves a valid certificate.
+          if ! echo | openssl s_client -connect livekit.blabber.dev:443 -servername livekit.blabber.dev 2>/dev/null | openssl x509 -noout -dates; then
+            echo "livekit.blabber.dev TLS handshake failed" >&2
+            exit 1
+          fi
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
