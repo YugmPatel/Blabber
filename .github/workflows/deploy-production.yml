@@ -37,14 +37,29 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || vars.AUTO_DEPLOY_ON_PUSH != 'false'
     steps:
       - name: Configure SSH
+        shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+
           printf '%s\n' "${{ secrets.PROD_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
+
+          printf '%s' "${{ secrets.PROD_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+      # - name: Configure SSH
+      #   run: |
+      #     set -euo pipefail
+      #     mkdir -p ~/.ssh
+      #     chmod 700 ~/.ssh
+      #     printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/deploy_key
+      #     chmod 600 ~/.ssh/deploy_key
+      #     printf '%s\n' "${{ secrets.PROD_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      #     chmod 600 ~/.ssh/known_hosts
 
       - name: Deploy over SSH
         env:
