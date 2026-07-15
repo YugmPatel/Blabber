@@ -91,6 +91,32 @@ describe('Chat intelligence routes', () => {
     expect(response.body.summary).toBeNull();
   });
 
+  it('POST /intelligence/chats/:chatId/summarize handles empty chats without getting stuck', async () => {
+    const db = getDatabase();
+    const otherUserId = new ObjectId();
+
+    const chatResult = await db.collection('chats').insertOne({
+      type: 'direct',
+      participants: [mockUserId, otherUserId],
+      admins: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const response = await request(app)
+      .post(`/intelligence/chats/${chatResult.insertedId.toString()}/summarize`)
+      .send({ messageLimit: 200 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.summary.summary).toMatch(/No recent messages/i);
+    expect(response.body.summary.scope).toMatchObject({
+      label: 'Last 0 messages',
+      messageCount: 0,
+      mode: 'recent',
+    });
+    expect(response.body.summary.sourceMessageIds).toEqual([]);
+  });
+
   it('POST /intelligence/chats/:chatId/summarize returns structured JSON and persists', async () => {
     const chatId = await seedParticipantChat();
     const id = chatId.toString();

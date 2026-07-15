@@ -100,4 +100,76 @@ describe('GET /intelligence/actions/mine', () => {
     expect(byTitle.get('Active group task').chatEndedAt).toBeUndefined();
     expect(byTitle.get('Ended group task').chatEndedAt).toBeDefined();
   });
+
+  it('creates, lists, updates, and deletes standalone My Actions', async () => {
+    const createResponse = await request(app)
+      .post('/intelligence/actions/mine')
+      .send({
+        title: 'Finalize Xfinity WiFi',
+        description: 'Pick the apartment internet plan.',
+        sourceMessageIds: [],
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.action).toMatchObject({
+      title: 'Finalize Xfinity WiFi',
+      description: 'Pick the apartment internet plan.',
+      visibility: 'personal',
+      personalOwnerUserId: mockUserId.toString(),
+      chatTitle: 'My Actions',
+    });
+    expect(createResponse.body.action.permissions).toMatchObject({
+      canEdit: true,
+      canDelete: true,
+      canUpdateStatus: true,
+    });
+
+    const listResponse = await request(app).get('/intelligence/actions/mine');
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.actions.map((action: any) => action.title)).toContain('Finalize Xfinity WiFi');
+
+    const actionId = createResponse.body.action.id;
+    const updateResponse = await request(app)
+      .patch(`/intelligence/actions/${actionId}`)
+      .send({ title: 'Finalize Xfinity WiFi plan', status: 'completed' });
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.action).toMatchObject({
+      title: 'Finalize Xfinity WiFi plan',
+      status: 'completed',
+      chatTitle: 'My Actions',
+    });
+
+    const deleteResponse = await request(app)
+      .delete(`/intelligence/actions/${actionId}`)
+      .send({ reason: 'Demo cleanup' });
+
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteResponse.body.action.deletedAt).toBeTruthy();
+
+    const finalListResponse = await request(app).get('/intelligence/actions/mine');
+    expect(finalListResponse.status).toBe(200);
+    expect(finalListResponse.body.actions.map((action: any) => action.id)).not.toContain(actionId);
+  });
+
+  it('dedupes active standalone My Actions for fast repeated clicks', async () => {
+    const payload = { title: 'Upload lease document', sourceMessageIds: [] };
+
+    const firstResponse = await request(app).post('/intelligence/actions/mine').send(payload);
+    const secondResponse = await request(app).post('/intelligence/actions/mine').send(payload);
+
+    expect(firstResponse.status).toBe(201);
+    expect(secondResponse.status).toBe(200);
+    expect(secondResponse.body.duplicate).toBe(true);
+    expect(secondResponse.body.action.id).toBe(firstResponse.body.action.id);
+
+    const count = await getChatActionsCollection().countDocuments({
+      visibility: 'personal',
+      personalOwnerUserId: mockUserId,
+      'metadata.origin': 'manual_my_actions',
+      title: 'Upload lease document',
+      deletedAt: { $exists: false },
+    });
+    expect(count).toBe(1);
+  });
 });

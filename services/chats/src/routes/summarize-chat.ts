@@ -194,6 +194,35 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
     .limit(messageLimit)
     .toArray();
 
+  if (rawMessages.length === 0) {
+    const now = new Date();
+    const emptySummary = {
+      summary: 'No recent messages are available to summarize yet.',
+      overview: 'No recent messages are available to summarize yet.',
+      scope: {
+        label: 'Last 0 messages',
+        messageCount: 0,
+        mode: 'recent' as const,
+      },
+      decisions: [],
+      tasks: [],
+      questionsForMe: [],
+      importantLinks: [],
+      waitingOn: [],
+      noise: [],
+      sourceMessageIds: [],
+      sources: [],
+      generatedAt: now.toISOString(),
+    };
+
+    logger.info(
+      { chatId, userId, sourceMessages: 0, messageLimit, feature: 'catch_me_up' },
+      'Chat summary skipped because no messages were available'
+    );
+
+    return res.status(200).json({ summary: emptySummary });
+  }
+
   const participantIds = chat.participants.map((participantId) => participantId.toString());
   const senderIds = Array.from(
     new Set([userId, ...participantIds, ...rawMessages.map((message) => message.senderId.toString())])

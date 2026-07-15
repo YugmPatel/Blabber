@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ChatActionItem, ChatActionStatus, CreateChatActionDTO, ExtractChatActionsDTO, UpdateChatActionDTO } from '@repo/types';
-import { addChatActionUpdate, createChatAction, deleteChatAction, extractChatActions, fetchChatActions, fetchMyActions, updateChatAction } from '@/api/client';
+import { addChatActionUpdate, createChatAction, createMyAction, deleteChatAction, extractChatActions, fetchChatActions, fetchMyActions, updateChatAction } from '@/api/client';
 import { groupBrainKeys } from '@/hooks/useGroupBrain';
 
 export const chatActionKeys = {
@@ -67,6 +67,16 @@ export function useMyActions() {
     },
   });
 
+  const createMutation = useMutation({
+    mutationFn: async (payload: CreateChatActionDTO) => createMyAction(payload),
+    onSuccess: (data) => {
+      queryClient.setQueryData<{ actions: ChatActionItem[] }>(chatActionKeys.mine(), (current) => ({
+        actions: upsertOrRemoveAction(current?.actions, data.action),
+      }));
+      queryClient.invalidateQueries({ queryKey: chatActionKeys.mine() });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async ({ actionId, reason }: { actionId: string; reason?: string }) => deleteChatAction(actionId, reason),
     onSuccess: (data) => {
@@ -92,12 +102,14 @@ export function useMyActions() {
     isLoading: actionsQuery.isLoading,
     error: actionsQuery.error,
     updateAction: updateMutation.mutate,
+    createAction: createMutation.mutate,
     updateActionStatus: ({ actionId, status }: { actionId: string; status: ChatActionStatus }) =>
       updateMutation.mutate({ actionId, patch: { status: writableStatus(status) } }),
     addActionUpdate: addUpdateMutation.mutate,
     deleteAction: deleteMutation.mutate,
-    isUpdating: updateMutation.isPending || addUpdateMutation.isPending || deleteMutation.isPending,
-    updateError: updateMutation.error || addUpdateMutation.error || deleteMutation.error,
+    isCreatingAction: createMutation.isPending,
+    isUpdating: createMutation.isPending || updateMutation.isPending || addUpdateMutation.isPending || deleteMutation.isPending,
+    updateError: createMutation.error || updateMutation.error || addUpdateMutation.error || deleteMutation.error,
   };
 }
 

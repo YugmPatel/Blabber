@@ -77,6 +77,10 @@ function actionVisibility(doc: ChatActionDocument): 'chat' | 'personal' {
   return doc.visibility === 'personal' ? 'personal' : 'chat';
 }
 
+function isStandaloneMyAction(action: ChatActionDocument): boolean {
+  return actionVisibility(action) === 'personal' && action.metadata?.origin === 'manual_my_actions';
+}
+
 function isPersonalActionOwnedBy(action: ChatActionDocument, userObjectId: ObjectId): boolean {
   return actionVisibility(action) === 'personal' && Boolean(action.personalOwnerUserId?.equals(userObjectId));
 }
@@ -85,7 +89,7 @@ function permissionsForPersonalAction(action: ChatActionDocument, userObjectId: 
   const isOwner = isPersonalActionOwnedBy(action, userObjectId);
   return {
     canUpdateStatus: isOwner,
-    canEdit: false,
+    canEdit: isOwner && isStandaloneMyAction(action),
     canDelete: isOwner,
   };
 }
@@ -132,6 +136,14 @@ function toActionItem(doc: ChatActionDocument, permissions?: ChatActionItem['per
     deletedAt: serializeDate(doc.deletedAt),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
+  };
+}
+
+function withMyActionsContext(action: ChatActionItem) {
+  return {
+    ...action,
+    chatTitle: 'My Actions',
+    chatType: undefined,
   };
 }
 
@@ -544,6 +556,16 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
     .sort({ lastActivityAt: -1, updatedAt: -1 })
     .toArray();
 
+  const standalonePersonalActions = await getChatActionsCollection()
+    .find({
+      visibility: 'personal',
+      personalOwnerUserId: userObjectId,
+      deletedAt: { $exists: false },
+      'metadata.origin': 'manual_my_actions',
+    })
+    .sort({ lastActivityAt: -1, updatedAt: -1 })
+    .toArray();
+
   // Ended/expired temporary groups keep their historical actions visible
   // (consistent with old messages staying visible after a group ends) but
   // the "mine" aggregator must mark them so the frontend doesn't present
@@ -581,6 +603,10 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
     )
   ).flat();
 
+  const standaloneItems = standalonePersonalActions.map((action) =>
+    withMyActionsContext(toActionItem(action, permissionsForPersonalAction(action, userObjectId)))
+  );
+
   const plans = await getPlanThisCollection()
     .find({
       chatId: { $in: chatIds },
@@ -599,7 +625,111 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
     })
     .filter(Boolean) as Array<ChatActionItem & { chatTitle: string; chatAvatarUrl?: string; chatType?: 'direct' | 'group'; chatEndedAt?: string }>;
 
-  return res.status(200).json({ actions: [...planActions, ...sourcedActions] });
+  return res.status(200).json({ actions: [...standaloneItems, ...planActions, ...sourcedActions] });
+});
+
+export const createMyChatAction = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const userObjectId = assertObjectId(userId);
+  if (!userObjectId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
+  }
+
+  const bodyResult = CreateChatActionDTOSchema.safeParse(req.body ?? {});
+  if (!bodyResult.success) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'Invalid action payload',
+      details: bodyResult.error.errors,
+    });
+  }
+
+  const userNames = await loadUserNames([userId]);
+  const now = new Date();
+  const actor = actionPerson(userId, userNames);
+  const dueAt = parseDueAt(bodyResult.data.dueAt, bodyResult.data.dueDate);
+  const actionCandidate: ChatActionItem = {
+    chatId: userId,
+    type: 'task',
+    title: bodyResult.data.title,
+    description: bodyResult.data.description,
+    assignedTo: {
+      userId,
+      name: bodyResult.data.ownerName || userNames.get(userId),
+    },
+    createdBy: actor,
+    dueDate: bodyResult.data.dueDate,
+    dueAt: dueAt?.toISOString(),
+    status: 'open',
+    visibility: 'personal',
+    personalOwnerUserId: userId,
+    sourceMessageIds: [],
+    sourceText: bodyResult.data.sourceText,
+  };
+  const actionKey = buildActionKey(actionCandidate);
+  const collection = getChatActionsCollection();
+  const existing = await collection.findOne({
+    visibility: 'personal',
+    personalOwnerUserId: userObjectId,
+    actionKey,
+    deletedAt: { $exists: false },
+    status: { $nin: ['completed', 'dismissed'] as any },
+    'metadata.origin': 'manual_my_actions',
+  });
+  if (existing) {
+    return res.status(200).json({
+      action: withMyActionsContext(toActionItem(existing, permissionsForPersonalAction(existing, userObjectId))),
+      duplicate: true,
+    });
+  }
+
+  const document: ChatActionDocument = {
+    _id: new ObjectId(),
+    chatId: userObjectId,
+    actionKey,
+    type: 'task',
+    title: bodyResult.data.title,
+    description: bodyResult.data.description,
+    assignedTo: actionCandidate.assignedTo,
+    createdBy: actor,
+    dueDate: bodyResult.data.dueDate,
+    dueAt,
+    status: 'open',
+    visibility: 'personal',
+    personalOwnerUserId: userObjectId,
+    sourceMessageIds: [],
+    sourceText: bodyResult.data.sourceText,
+    metadata: { origin: 'manual_my_actions', privacy: 'private_personal_action' },
+    activity: [
+      {
+        id: new ObjectId().toString(),
+        type: 'created',
+        actor,
+        message: 'Created manually in My Actions',
+        createdAt: now.toISOString(),
+      },
+    ],
+    updates: [],
+    lastActivityAt: now,
+    generatedByUserId: userObjectId,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await collection.insertOne(document);
+
+  logger.info(
+    { feature: 'my_actions', userId, actionId: document._id.toString() },
+    'Manual My Action created'
+  );
+
+  return res.status(201).json({
+    action: withMyActionsContext(toActionItem(document, permissionsForPersonalAction(document, userObjectId))),
+  });
 });
 
 export const createChatAction = asyncHandler(async (req: Request, res: Response) => {
@@ -839,19 +969,30 @@ export const updateChatAction = asyncHandler(async (req: Request, res: Response)
     return res.status(404).json({ error: 'Not Found', message: 'Action not found' });
   }
 
-  const chatResult = await getChatForParticipant(action.chatId.toString(), userId);
-  if (chatResult.status !== 200) {
-    return errorForChatStatus(chatResult.status, res);
+  const userObjectId = assertObjectId(userId);
+  if (!userObjectId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
   }
-  if (!requireActiveActionChat(chatResult.chat, res)) return;
-  if (actionVisibility(action) === 'personal' && !isPersonalActionOwnedBy(action, chatResult.userObjectId!)) {
+  const standalonePersonal = isStandaloneMyAction(action) && isPersonalActionOwnedBy(action, userObjectId);
+  let chatResult: Awaited<ReturnType<typeof getChatForParticipant>> | null = null;
+
+  if (!standalonePersonal) {
+    chatResult = await getChatForParticipant(action.chatId.toString(), userId);
+    if (chatResult.status !== 200) {
+      return errorForChatStatus(chatResult.status, res);
+    }
+    if (!requireActiveActionChat(chatResult.chat, res)) return;
+  }
+  if (actionVisibility(action) === 'personal' && !isPersonalActionOwnedBy(action, userObjectId)) {
     return res.status(404).json({ error: 'Not Found', message: 'Action not found' });
   }
 
-  const canChangeStatus = canUpdateActionStatus(action, chatResult.chat, chatResult.userObjectId!);
+  const canChangeStatus = standalonePersonal
+    ? true
+    : canUpdateActionStatus(action, chatResult!.chat, chatResult!.userObjectId!);
   const canEditDetails = actionVisibility(action) === 'personal'
-    ? false
-    : canManageAction(action, chatResult.chat, chatResult.userObjectId!);
+    ? standalonePersonal
+    : canManageAction(action, chatResult!.chat, chatResult!.userObjectId!);
   const detailFields = ['title', 'description', 'ownerUserId', 'ownerName', 'dueDate', 'dueAt'] as const;
   const hasDetailEdit = detailFields.some((field) => Object.prototype.hasOwnProperty.call(bodyResult.data, field));
 
@@ -866,7 +1007,7 @@ export const updateChatAction = asyncHandler(async (req: Request, res: Response)
     return res.status(403).json({
       error: 'Forbidden',
       message: actionVisibility(action) === 'personal'
-        ? 'Private personal Actions cannot be reassigned or edited from shared Action controls.'
+        ? 'Private personal Actions from chats cannot be reassigned or edited from shared Action controls.'
         : "You don't have permission to edit this Action.",
     });
   }
@@ -894,7 +1035,13 @@ export const updateChatAction = asyncHandler(async (req: Request, res: Response)
   }
   if (bodyResult.data.ownerUserId !== undefined || bodyResult.data.ownerName !== undefined) {
     const ownerUserId = bodyResult.data.ownerUserId || action.assignedTo?.userId;
-    if (!isCurrentGroupParticipant(chatResult.chat, ownerUserId)) {
+    if (standalonePersonal && ownerUserId !== userId) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Standalone My Actions must stay assigned to you.',
+      });
+    }
+    if (!standalonePersonal && !isCurrentGroupParticipant(chatResult!.chat, ownerUserId)) {
       return res.status(400).json({
         error: 'Validation Error',
         message: 'Action owner must be a current group member',
@@ -960,13 +1107,20 @@ export const updateChatAction = asyncHandler(async (req: Request, res: Response)
     { returnDocument: 'after' }
   );
 
+  if (standalonePersonal) {
+    const updatedAction = withMyActionsContext(
+      toActionItem(updated!, permissionsForPersonalAction(updated!, userObjectId))
+    );
+    return res.status(200).json({ action: updatedAction });
+  }
+
   const [updatedAction] = await materializeItemSources({
-    items: [toActionItem(updated!, permissionsForVisibleAction(updated!, chatResult.chat, chatResult.userObjectId!))],
-    chatId: chatResult.chatObjectId!,
-    userId: chatResult.userObjectId!,
+    items: [toActionItem(updated!, permissionsForVisibleAction(updated!, chatResult!.chat, chatResult!.userObjectId!))],
+    chatId: chatResult!.chatObjectId!,
+    userId: chatResult!.userObjectId!,
     label: 'Action',
   });
-  await publishActionUpdate(updatedAction.chatId, chatResult.chat.participants, updatedAction, actionId);
+  await publishActionUpdate(updatedAction.chatId, chatResult!.chat.participants, updatedAction, actionId);
 
   return res.status(200).json({ action: updatedAction });
 });
@@ -1078,15 +1232,24 @@ export const deleteChatAction = asyncHandler(async (req: Request, res: Response)
     return res.status(404).json({ error: 'Not Found', message: 'Action not found' });
   }
 
-  const chatResult = await getChatForParticipant(action.chatId.toString(), userId);
-  if (chatResult.status !== 200) {
-    return errorForChatStatus(chatResult.status, res);
+  const userObjectId = assertObjectId(userId);
+  if (!userObjectId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
   }
-  if (!requireActiveActionChat(chatResult.chat, res)) return;
-  if (actionVisibility(action) === 'personal' && !isPersonalActionOwnedBy(action, chatResult.userObjectId!)) {
+  const standalonePersonal = isStandaloneMyAction(action) && isPersonalActionOwnedBy(action, userObjectId);
+  let chatResult: Awaited<ReturnType<typeof getChatForParticipant>> | null = null;
+
+  if (!standalonePersonal) {
+    chatResult = await getChatForParticipant(action.chatId.toString(), userId);
+    if (chatResult.status !== 200) {
+      return errorForChatStatus(chatResult.status, res);
+    }
+    if (!requireActiveActionChat(chatResult.chat, res)) return;
+  }
+  if (actionVisibility(action) === 'personal' && !isPersonalActionOwnedBy(action, userObjectId)) {
     return res.status(404).json({ error: 'Not Found', message: 'Action not found' });
   }
-  if (!canDeleteAction(action, chatResult.chat, chatResult.userObjectId!)) {
+  if (!standalonePersonal && !canDeleteAction(action, chatResult!.chat, chatResult!.userObjectId!)) {
     return res.status(403).json({
       error: 'Forbidden',
       message: "You don't have permission to delete this Action.",
@@ -1124,9 +1287,14 @@ export const deleteChatAction = asyncHandler(async (req: Request, res: Response)
 
   const deletedAction = toActionItem(
     updated!,
-    permissionsForVisibleAction(updated!, chatResult.chat, chatResult.userObjectId!)
+    standalonePersonal
+      ? permissionsForPersonalAction(updated!, userObjectId)
+      : permissionsForVisibleAction(updated!, chatResult!.chat, chatResult!.userObjectId!)
   );
-  await publishActionUpdate(deletedAction.chatId, chatResult.chat.participants, deletedAction, actionId);
+  if (standalonePersonal) {
+    return res.status(200).json({ action: withMyActionsContext(deletedAction) });
+  }
+  await publishActionUpdate(deletedAction.chatId, chatResult!.chat.participants, deletedAction, actionId);
 
   return res.status(200).json({ action: deletedAction });
 });

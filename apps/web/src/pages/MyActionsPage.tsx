@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Circle, Clock3, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, Clock3, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import AppShell from '@/components/ui/AppShell';
 import PageHeader from '@/components/ui/PageHeader';
 import SegmentedTabs from '@/components/ui/SegmentedTabs';
 import BrandBadge from '@/components/ui/BrandBadge';
 import SourceEvidence from '@/components/SourceEvidence';
+import { ActionForm, type ActionOwnerOption } from '@/components/ChatActionsPanel';
 import { respondPlanThisAssignment } from '@/api/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { chatActionKeys, useMyActions } from '@/hooks/useChatActions';
@@ -103,6 +104,10 @@ function isPrivatePersonalAction(action: ChatActionItem) {
   return action.visibility === 'personal';
 }
 
+function isStandaloneMyAction(action: ChatActionItem) {
+  return action.visibility === 'personal' && action.metadata?.origin === 'manual_my_actions';
+}
+
 export default function MyActionsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -113,17 +118,24 @@ export default function MyActionsPage() {
   const [dueFilter, setDueFilter] = useState<DueFilter>('any');
   const [groupFilter, setGroupFilter] = useState('all');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [isCreatingActionForm, setIsCreatingActionForm] = useState(false);
+  const [editingActionId, setEditingActionId] = useState<string | null>(null);
   const [highlightedActionId, setHighlightedActionId] = useState<string | null>(null);
   const [actionUnavailable, setActionUnavailable] = useState(false);
   const pendingRevealActionIdRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
-  const { actions, isLoading, error, updateActionStatus, deleteAction, isUpdating } = useMyActions();
+  const { actions, isLoading, error, createAction, updateAction, updateActionStatus, deleteAction, isCreatingAction, isUpdating, updateError } = useMyActions();
   const respondAssignment = useMutation({
     mutationFn: ({ planId, assignmentId, status }: { planId: string; assignmentId: string; status: 'accepted' | 'declined' }) =>
       respondPlanThisAssignment(planId, assignmentId, status),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: chatActionKeys.mine() }),
   });
   const targetActionId = searchParams.get('actionId');
+
+  const myActionOwnerOptions = useMemo<ActionOwnerOption[]>(() => {
+    if (!user?._id) return [];
+    return [{ userId: user._id, name: user.name || user.username || user.email || 'You' }];
+  }, [user?._id, user?.email, user?.name, user?.username]);
 
   const groupOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -248,6 +260,12 @@ export default function MyActionsPage() {
           </div>
         )}
 
+        {updateError && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+            {updateError.message || 'Unable to save this Action right now.'}
+          </div>
+        )}
+
         <SegmentedTabs
           aria-label="Action ownership"
           value={ownership}
@@ -257,6 +275,42 @@ export default function MyActionsPage() {
             { value: 'created', label: 'Created by Me' },
           ]}
         />
+
+        <div className="rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-[color:var(--bl-text)]">Quick add</h2>
+              <p className="mt-1 text-xs text-[color:var(--bl-text-muted)]">Create a private Action that stays in My Actions.</p>
+            </div>
+            <button
+              type="button"
+              disabled={isCreatingAction || isUpdating}
+              onClick={() => setIsCreatingActionForm((current) => !current)}
+              className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={16} />
+              New Action
+            </button>
+          </div>
+          {isCreatingActionForm && (
+            <div className="mt-3">
+              <ActionForm
+                ownerOptions={myActionOwnerOptions}
+                defaultOwnerUserId={user?._id}
+                ownerLocked
+                existingActions={actions}
+                isSaving={isCreatingAction || isUpdating}
+                onCancel={() => setIsCreatingActionForm(false)}
+                onCreate={(payload) => {
+                  createAction(payload);
+                  setStatusFilter('active');
+                  setOwnership('mine');
+                }}
+                ownerRequiredMessage="Sign in again before creating a private Action."
+              />
+            </div>
+          )}
+        </div>
 
           <div className="grid gap-4 rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-4 shadow-sm sm:grid-cols-3">
             <label className="text-xs font-semibold text-[color:var(--bl-text-muted)]">
@@ -297,6 +351,7 @@ export default function MyActionsPage() {
                 const due = dueDateFor(action);
                 const snippet = latestSnippet(action);
                 const isPersonal = isPrivatePersonalAction(action);
+                const standalone = isStandaloneMyAction(action);
                 const chatLabel = action.chatTitle || (action.chatType === 'direct' ? 'Direct chat' : 'Group chat');
                 const assignmentLabel = planAssignmentLabel(action);
                 const planId = typeof action.metadata?.planId === 'string' ? action.metadata.planId : '';
@@ -327,11 +382,31 @@ export default function MyActionsPage() {
                         </div>
                         <h2 className="mt-1 text-base font-semibold text-[color:var(--bl-text)]">{action.title}</h2>
                         {action.description && <p className="mt-1 text-sm text-[color:var(--bl-text-secondary)]">{action.description}</p>}
+                        {editingActionId === action.id && (
+                          <div className="mt-3">
+                            <ActionForm
+                              action={action}
+                              ownerOptions={standalone ? myActionOwnerOptions : []}
+                              defaultOwnerUserId={standalone ? user?._id : action.assignedTo?.userId}
+                              ownerLocked={standalone}
+                              existingActions={actions}
+                              isSaving={isUpdating}
+                              onCancel={() => setEditingActionId(null)}
+                              onUpdate={(actionId, patch) => {
+                                updateAction({ actionId, patch });
+                                setEditingActionId(null);
+                              }}
+                              ownerRequiredMessage="This Action needs an owner before it can be saved."
+                            />
+                          </div>
+                        )}
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-[color:var(--bl-text-muted)]">
                           <span>Owner: {action.assignedTo?.name || 'Unassigned'}</span>
                           {due && <span>Due {due.toLocaleDateString()}</span>}
                           {snippet && <span className="max-w-full truncate">Latest: {snippet}</span>}
-                          <button type="button" onClick={() => navigate(`/chats/${action.chatId}`)} className="font-semibold text-teal-700 hover:underline dark:text-teal-300">{action.metadata?.origin === 'plan_this' ? 'Open plan' : 'Open chat'}</button>
+                          {!standalone && (
+                            <button type="button" onClick={() => navigate(`/chats/${action.chatId}`)} className="font-semibold text-teal-700 hover:underline dark:text-teal-300">{action.metadata?.origin === 'plan_this' ? 'Open plan' : 'Open chat'}</button>
+                          )}
                         </div>
                         {(assignmentLabel === 'Assignment requested' || assignmentLabel === 'Requested') && planId && assignmentId && action.assignedTo?.userId === user?._id && (
                           <div className="mt-3 flex flex-wrap gap-2">
@@ -367,18 +442,31 @@ export default function MyActionsPage() {
                             {status === 'open' ? <Circle size={16} /> : status === 'in_progress' ? <Clock3 size={16} /> : <CheckCircle2 size={16} />}
                           </button>
                         ))}
-                        {(!isPersonal && (action.permissions?.canEdit || action.permissions?.canDelete)) && (
+                        {(action.permissions?.canEdit || action.permissions?.canDelete) && (
                           <div className="relative">
                             <button type="button" onClick={() => setOpenMenuId(openMenuId === action.id ? null : action.id || null)} className="rounded-lg p-2 text-[color:var(--bl-text-muted)] transition hover:bg-[color:var(--bl-hover)]" aria-label="Action menu">
                               <MoreHorizontal size={16} />
                             </button>
                             {openMenuId === action.id && (
                               <div className="absolute right-0 z-10 mt-1 w-40 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-1 shadow-lg">
-                                <button type="button" onClick={() => navigate(`/chats/${action.chatId}`)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]">
-                                  <Pencil size={13} /> Edit / Reassign
-                                </button>
+                                {action.permissions?.canEdit && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (standalone) {
+                                        setEditingActionId(action.id || null);
+                                      } else {
+                                        navigate(`/chats/${action.chatId}`);
+                                      }
+                                      setOpenMenuId(null);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)]"
+                                  >
+                                    <Pencil size={13} /> {standalone ? 'Edit Action' : 'Edit / Reassign'}
+                                  </button>
+                                )}
                                 {action.permissions?.canDelete && (
-                                  <button type="button" onClick={() => deleteSelectedAction(action)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-rose-600 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/30">
+                                  <button type="button" disabled={isUpdating} onClick={() => deleteSelectedAction(action)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-rose-600 transition hover:bg-rose-50 disabled:opacity-50 dark:text-rose-300 dark:hover:bg-rose-950/30">
                                     <Trash2 size={13} /> Delete Action
                                   </button>
                                 )}

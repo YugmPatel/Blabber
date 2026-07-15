@@ -33,7 +33,7 @@ const STOPWORDS = new Set([
   'decided', 'decision', 'group', 'brain', 'tell', 'show', 'there', 'were', 'have', 'has',
   'the', 'and', 'are', 'was', 'for', 'with', 'that', 'this', 'from', 'into', 'onto', 'still',
   'current', 'everyone', 'anything', 'something', 'week', 'today', 'yesterday', 'last', 'since',
-  'is', 'are', 'to', 'of', 'in', 'on', 'at', 'we', 'our', 'you', 'they', 'it',
+  'is', 'are', 'to', 'of', 'in', 'on', 'at', 'we', 'our', 'you', 'they', 'it', 'tasks', 'task',
 ]);
 
 const EXPANSIONS: Record<string, string[]> = {
@@ -43,8 +43,11 @@ const EXPANSIONS: Record<string, string[]> = {
   decorations: ['decorations', 'decor', 'decorate'],
   decoration: ['decorations', 'decor', 'decorate'],
   links: ['link', 'links', 'url', 'document', 'doc', 'notion', 'sheet'],
-  document: ['link', 'url', 'document', 'doc', 'notion', 'sheet'],
-  pending: ['waiting', 'pending', 'blocked', 'confirm', 'confirmation', 'need', 'needs'],
+  document: ['link', 'url', 'document', 'doc', 'notion', 'sheet', 'lease'],
+  pending: ['waiting', 'pending', 'blocked', 'confirm', 'confirmation', 'need', 'needs', 'finalize', 'check'],
+  move: ['move', 'move-in', 'id', 'parking', 'mailbox', 'lease', 'utilities', 'wifi', 'xfinity', 'insurance'],
+  'move-in': ['move-in', 'id', 'parking', 'mailbox', 'lease', 'utilities', 'wifi', 'xfinity', 'insurance'],
+  apartment: ['apartment', 'lease', 'utilities', 'wifi', 'xfinity', 'insurance', 'parking', 'mailbox'],
 };
 
 function normalize(value: string) {
@@ -58,7 +61,7 @@ function tokenize(value: string) {
 export function classifyQuestion(question: string): GroupBrainAnswerCategory {
   const text = normalize(question);
   if (/\b(who|owner|owns|responsible|bringing|arranging|handling)\b/.test(text)) return 'ownership';
-  if (/\b(waiting|pending|blocked|not confirmed|still need|open)\b/.test(text)) return 'pending';
+  if (/\b(waiting|pending|blocked|not confirmed|still need|open|tasks?|to do|todo|before|move[- ]?in|should we do)\b/.test(text)) return 'pending';
   if (/\b(link|links|url|document|doc|notion|sheet)\b/.test(text)) return 'link';
   if (/\b(changed|new|since|today|yesterday|last week|this week)\b/.test(text)) return 'change_summary';
   if (/\b(decide|decided|finalize|finalized|choose|chose|agreed)\b/.test(text)) return 'decision';
@@ -85,7 +88,7 @@ function phraseIncludes(text: string, term: string) {
 }
 
 function hasDecisionSignal(text: string) {
-  return /\b(final|finalized|confirmed|locked|lock|decided|agreed|we'll|we will|switching to|switch to|is at|will be at)\b/.test(text);
+  return /\b(final|finalize|finalized|finalizing|confirmed|locked|lock|decided|agreed|we'll|we will|switching to|switch to|is at|will be at)\b/.test(text);
 }
 
 function hasProposalSignal(text: string) {
@@ -98,7 +101,7 @@ function hasCommitmentSignal(text: string) {
 }
 
 function hasPendingSignal(text: string) {
-  return /\b(waiting|pending|blocked|still need|need confirmation|needs confirmation|not confirmed|confirm)\b/.test(text);
+  return /\b(waiting|pending|blocked|still need|need|needs|need confirmation|needs confirmation|not confirmed|confirm|finalize|check|upload|split|remind|bring|can someone|by friday|tomorrow|tonight|before move-in)\b/.test(text);
 }
 
 function scoreMessage(message: GroupBrainEvidenceMessage, terms: string[], category: GroupBrainAnswerCategory) {
@@ -112,6 +115,7 @@ function scoreMessage(message: GroupBrainEvidenceMessage, terms: string[], categ
   if (category === 'factual_lookup' && hasDecisionSignal(text)) score += 4;
   if (category === 'ownership' && hasCommitmentSignal(text)) score += 5;
   if (category === 'pending' && hasPendingSignal(text)) score += 5;
+  if (category === 'pending' && hasCommitmentSignal(text)) score += 4;
   if (category === 'link' && /https?:\/\//i.test(message.body)) score += 8;
   if (category === 'change_summary') score += 1;
   return score;
@@ -126,7 +130,7 @@ function retrieve(messages: GroupBrainEvidenceMessage[], question: string, categ
     .map((message) => ({ message, score: scoreMessage(message, terms, category) }))
     .filter(({ message, score }) => {
       const text = normalize(message.body);
-      if (category === 'pending') return isGeneralPending ? hasPendingSignal(normalize(message.body)) : score >= 5;
+      if (category === 'pending') return isGeneralPending ? hasPendingSignal(text) : score >= 5;
       if (category === 'link') return score >= 8 && /https?:\/\//i.test(message.body);
       if (category === 'change_summary') return true;
       if (category === 'decision' && isBroadDecision) return hasDecisionSignal(text) || hasProposalSignal(text);
@@ -222,32 +226,35 @@ function answerDecision(question: string, entries: Array<{ message: GroupBrainEv
 }
 
 function answerOwnership(question: string, entries: Array<{ message: GroupBrainEvidenceMessage; score: number }>) {
-  const commitments = entries.filter((entry) => hasCommitmentSignal(normalize(entry.message.body)));
+  const commitments = entries
+    .filter((entry) => hasCommitmentSignal(normalize(entry.message.body)))
+    .sort((a, b) => b.score - a.score || b.message.createdAt.getTime() - a.message.createdAt.getTime())
+    .slice(0, 6);
   if (commitments.length === 0) return noEvidence(question, 'ownership');
-  const latest = commitments.sort((a, b) => b.message.createdAt.getTime() - a.message.createdAt.getTime())[0];
-  const actor = latest.message.senderName || 'Someone';
   return {
     question,
-    answer: `${actor} is the clearest owner based on this message: ${latest.message.body}`,
+    answer: `Responsibilities I found:\n${commitments.map((entry) => `- ${entry.message.senderName || 'Someone'}: ${entry.message.body}`).join('\n')}`,
     answerState: 'grounded' as const,
     answerCategory: 'ownership' as const,
     confidence: 'grounded' as const,
-    sourceMessageIds: [latest.message.id],
-    sourceDates: [latest.message.createdAt.toISOString()],
+    sourceMessageIds: sourceIds(commitments),
+    sourceDates: sourceDates(commitments),
   };
 }
 
 function answerPending(question: string, entries: Array<{ message: GroupBrainEvidenceMessage; score: number }>) {
   if (entries.length === 0) return noEvidence(question, 'pending', 'pending items');
-  const latest = entries.sort((a, b) => b.message.createdAt.getTime() - a.message.createdAt.getTime())[0];
+  const ranked = [...entries]
+    .sort((a, b) => b.score - a.score || b.message.createdAt.getTime() - a.message.createdAt.getTime())
+    .slice(0, 6);
   return {
     question,
-    answer: `The clearest pending item is: ${latest.message.body}`,
+    answer: `Pending items I found:\n${ranked.map((entry) => `- ${entry.message.body}`).join('\n')}`,
     answerState: 'grounded' as const,
     answerCategory: 'pending' as const,
     confidence: 'grounded' as const,
-    sourceMessageIds: sourceIds(entries.slice(0, 3)),
-    sourceDates: sourceDates(entries.slice(0, 3)),
+    sourceMessageIds: sourceIds(ranked),
+    sourceDates: sourceDates(ranked),
   };
 }
 

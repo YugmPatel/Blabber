@@ -104,4 +104,57 @@ describe('Group Brain answer engine', () => {
     expect(answer.answer).not.toMatch(/Riya owns every task/i);
     expect(answer.sourceMessageIds).toEqual(['m2']);
   });
+
+  it('lists Apartment Planning pending tasks from broad demo questions', () => {
+    const messages = [
+      msg('m1', 'We need to finalize WiFi by tomorrow.', 'Yugm', 1),
+      msg('m2', 'I can handle Xfinity, but someone needs to check renters insurance.', 'Ari', 2),
+      msg('m3', 'I will upload the lease document tonight.', 'Sam', 3),
+      msg('m4', "Let's split utilities by Friday.", 'Maya', 4),
+      msg('m5', 'Remind everyone to bring ID for move-in.', 'Yugm', 5),
+      msg('m6', 'Can someone confirm parking and mailbox access?', 'Ari', 6),
+    ];
+
+    const answer = answerGroupBrainQuestion('What are the pending tasks?', messages);
+
+    expect(answer.answerState).toBe('grounded');
+    expect(answer.answerCategory).toBe('pending');
+    expect(answer.answer).toMatch(/WiFi|Xfinity/i);
+    expect(answer.answer).toMatch(/renters insurance/i);
+    expect(answer.answer).toMatch(/lease document/i);
+    expect(answer.answer).toMatch(/utilities/i);
+    expect(answer.answer).toMatch(/ID.*move-in/i);
+    expect(answer.answer).toMatch(/parking.*mailbox/i);
+    expect(answer.sourceMessageIds).toEqual(expect.arrayContaining(['m1', 'm2', 'm3', 'm4', 'm5', 'm6']));
+  });
+
+  it('answers before move-in using Apartment Planning context', () => {
+    const answer = answerGroupBrainQuestion('What should we do before move-in?', [
+      msg('m1', 'We need to finalize WiFi by tomorrow.', 'Yugm', 1),
+      msg('m2', 'I can handle Xfinity, but someone needs to check renters insurance.', 'Ari', 2),
+      msg('m3', 'I will upload the lease document tonight.', 'Sam', 3),
+      msg('m4', "Let's split utilities by Friday.", 'Maya', 4),
+      msg('m5', 'Remind everyone to bring ID for move-in.', 'Yugm', 5),
+      msg('m6', 'Can someone confirm parking and mailbox access?', 'Ari', 6),
+    ]);
+
+    expect(answer.answerState).toBe('grounded');
+    expect(answer.answerCategory).toBe('pending');
+    expect(answer.answer).toMatch(/WiFi|Xfinity/i);
+    expect(answer.answer).toMatch(/renters insurance|lease document|utilities|ID|parking|mailbox/i);
+  });
+
+  it('lists multiple owners for Apartment Planning responsibilities', () => {
+    const answer = answerGroupBrainQuestion('Who is responsible for what?', [
+      msg('m1', 'I can handle Xfinity, but someone needs to check renters insurance.', 'Ari', 1),
+      msg('m2', 'I will upload the lease document tonight.', 'Sam', 2),
+      msg('m3', 'Can someone confirm parking and mailbox access?', 'Maya', 3),
+    ]);
+
+    expect(answer.answerState).toBe('grounded');
+    expect(answer.answerCategory).toBe('ownership');
+    expect(answer.answer).toMatch(/Ari:.*Xfinity/i);
+    expect(answer.answer).toMatch(/Sam:.*lease document/i);
+    expect(answer.answer).not.toMatch(/Maya:.*parking/i);
+  });
 });

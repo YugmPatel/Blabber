@@ -1876,6 +1876,16 @@ export async function fetchMyActions(): Promise<ChatActionsResponse> {
   return data;
 }
 
+export async function createMyAction(
+  payload: CreateChatActionDTO
+): Promise<{ action: ChatActionItem; duplicate?: boolean }> {
+  const { data } = await apiClient.post<{ action: ChatActionItem; duplicate?: boolean }>(
+    '/api/intelligence/actions/mine',
+    payload
+  );
+  return data;
+}
+
 export async function extractChatActions(
   chatId: string,
   payload?: ExtractChatActionsDTO

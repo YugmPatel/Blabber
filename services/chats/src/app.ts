@@ -117,6 +117,7 @@ import { getChatSummary } from './routes/get-chat-summary';
 import {
   addChatActionUpdate,
   createChatAction,
+  createMyChatAction,
   deleteChatAction,
   extractChatActions,
   getChatActions,
@@ -202,6 +203,7 @@ app.post('/intelligence/chats/:chatId/actions/extract', authMiddleware, requireC
 app.post('/intelligence/chats/:chatId/actions', authMiddleware, requireChatIntelligenceEnabled, createChatAction);
 app.get('/intelligence/chats/:chatId/actions', authMiddleware, requireChatIntelligenceEnabled, getChatActions);
 app.get('/intelligence/actions/mine', authMiddleware, requireChatIntelligenceEnabled, getMyChatActions);
+app.post('/intelligence/actions/mine', authMiddleware, requireChatIntelligenceEnabled, createMyChatAction);
 app.patch('/intelligence/actions/:actionId', authMiddleware, requireChatIntelligenceEnabled, updateChatAction);
 app.post('/intelligence/actions/:actionId/updates', authMiddleware, requireChatIntelligenceEnabled, addChatActionUpdate);
 app.delete('/intelligence/actions/:actionId', authMiddleware, requireChatIntelligenceEnabled, deleteChatAction);
