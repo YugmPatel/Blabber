@@ -19,7 +19,7 @@ function BrandFeature({ icon: Icon, label }: { icon: typeof MessageSquare; label
 function BrandPanel() {
   return (
     <aside
-      className="relative flex flex-col overflow-hidden p-8 md:p-12 md:pb-8"
+      className="relative hidden flex-col overflow-hidden p-8 md:flex md:p-12 md:pb-8"
       style={{
         background: 'linear-gradient(170deg, #c084fc 0%, #9333ea 18%, #7c3aed 36%, #5b21b6 56%, #1e1b4b 78%, #0d1f2d 100%)',
       }}
@@ -186,7 +186,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f7f8fb] px-4 py-10">
+    <div className="flex min-h-dvh items-center justify-center bg-[#f7f8fb] px-3 py-6 sm:px-4 sm:py-10">
       <div
         className="grid w-full overflow-hidden rounded-[28px] bg-white md:grid-cols-2"
         style={{
@@ -197,7 +197,7 @@ export default function LoginPage() {
         <BrandPanel />
 
         {/* Right form panel */}
-        <section className="flex items-center justify-center px-8 py-12 sm:px-12 md:px-14">
+        <section className="flex items-center justify-center px-5 py-8 sm:px-12 sm:py-12 md:px-14">
           <div className="w-full max-w-[380px]">
             {/* Logo */}
             <div className="mb-8 flex flex-col items-center gap-1">

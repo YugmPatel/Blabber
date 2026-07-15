@@ -43,7 +43,7 @@ export default function PostViewPage() {
   });
 
   return (
-    <div className="min-h-screen bg-[#f4f5f7] text-slate-900 dark:bg-slate-950 dark:text-white">
+    <div className="min-h-dvh bg-[#f4f5f7] text-slate-900 dark:bg-slate-950 dark:text-white">
       <div className="mx-auto max-w-2xl px-4 py-6">
         <button
           type="button"

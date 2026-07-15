@@ -147,7 +147,7 @@ export default function GroupBrainPanel({
   };
 
   return (
-    <section className="flex min-h-[calc(100vh-8rem)] flex-col rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+    <section className="flex min-h-[calc(100dvh-8rem)] flex-col rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-700">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300">

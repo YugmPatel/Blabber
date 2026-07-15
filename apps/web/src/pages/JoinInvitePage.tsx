@@ -19,7 +19,7 @@ export default function JoinInvitePage() {
 
   if (isLoading || !isAuthenticated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+      <div className="flex min-h-dvh items-center justify-center bg-slate-50 dark:bg-slate-950">
         <Loader2 className="animate-spin text-slate-500" />
       </div>
     );
@@ -40,7 +40,7 @@ export default function JoinInvitePage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
+    <div className="flex min-h-dvh items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
       <main className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 text-center shadow-xl dark:border-slate-800 dark:bg-slate-900">
         {preview.isLoading ? (
           <div className="flex justify-center py-12">

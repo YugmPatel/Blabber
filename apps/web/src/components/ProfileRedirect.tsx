@@ -28,7 +28,7 @@ export default function ProfileRedirect() {
   }, [data, isError, navigate]);
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[color:var(--bl-bg)]">
+    <div className="flex h-dvh items-center justify-center bg-[color:var(--bl-bg)]">
       <Loader2 size={22} className="animate-spin text-teal-600 dark:text-teal-300" />
     </div>
   );

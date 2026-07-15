@@ -48,7 +48,7 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f7f8fb] px-4 py-10">
+    <div className="flex min-h-dvh items-center justify-center bg-[#f7f8fb] px-3 py-6 sm:px-4 sm:py-10">
       <section
         className="w-full max-w-[430px] rounded-[28px] bg-white px-8 py-10 shadow-[0_24px_80px_-20px_rgba(15,23,42,0.22)] ring-1 ring-slate-900/5 sm:px-10"
         aria-labelledby="forgot-password-title"

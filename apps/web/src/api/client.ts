@@ -484,6 +484,7 @@ export interface SocialProfile {
   displayHandle: string | null;
   avatarUrl: string | null;
   profileBannerUrl?: string | null;
+  profileBannerPositionY?: number;
   bio?: string;
   website?: string | null;
   visibility?: 'private' | 'public';
@@ -573,6 +574,7 @@ export async function updateSocialProfile(payload: {
   bio?: string;
   website?: string;
   profileBannerUrl?: string;
+  profileBannerPositionY?: number;
   visibility?: 'private' | 'public';
 }): Promise<SocialProfile> {
   const { data } = await apiClient.patch<{ profile: SocialProfile }>('/api/profiles/me', payload);

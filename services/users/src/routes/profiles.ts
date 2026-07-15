@@ -72,6 +72,7 @@ const UpdateProfileSchema = z.object({
   bio: z.string().trim().max(160).optional(),
   website: z.string().trim().max(2048).optional(),
   profileBannerUrl: z.string().trim().max(2048).optional(),
+  profileBannerPositionY: z.number().min(0).max(100).optional(),
   visibility: z.enum(['private', 'public']).optional(),
   avatarMediaId: z.string().trim().optional(),
 });
@@ -184,6 +185,7 @@ function userIdentity(user: User) {
     displayHandle: user.profileHandle ? `@${user.profileHandle}` : null,
     avatarUrl: user.avatarUrl || null,
     profileBannerUrl: user.profileBannerUrl || null,
+    profileBannerPositionY: user.profileBannerPositionY ?? 50,
   };
 }
 
@@ -336,7 +338,11 @@ export const getMyProfile = asyncHandler(async (req: Request, res: Response) => 
 export const updateMyProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = requireUserId(req);
   await requireActiveUser(userId);
-  const parsed = UpdateProfileSchema.parse(req.body);
+  const profileUpdate = UpdateProfileSchema.safeParse(req.body);
+  if (!profileUpdate.success) {
+    throw new ValidationError(profileUpdate.error.errors[0]?.message || 'Invalid profile update.');
+  }
+  const parsed = profileUpdate.data;
   const now = new Date();
   const update = createProfileUpdateOps({ updatedAt: now, profileUpdatedAt: now });
   if (parsed.name !== undefined) update.setField('name', parsed.name);
@@ -348,8 +354,15 @@ export const updateMyProfile = asyncHandler(async (req: Request, res: Response) 
   }
   if (parsed.profileBannerUrl !== undefined) {
     const profileBannerUrl = validateProfileImageUrl(parsed.profileBannerUrl);
-    if (profileBannerUrl) update.setField('profileBannerUrl', profileBannerUrl);
-    else update.unsetField('profileBannerUrl');
+    if (profileBannerUrl) {
+      update.setField('profileBannerUrl', profileBannerUrl);
+      update.setField('profileBannerPositionY', parsed.profileBannerPositionY ?? 50);
+    } else {
+      update.unsetField('profileBannerUrl');
+      update.setField('profileBannerPositionY', 50);
+    }
+  } else if (parsed.profileBannerPositionY !== undefined) {
+    update.setField('profileBannerPositionY', parsed.profileBannerPositionY);
   }
   if (parsed.visibility !== undefined) update.setField('profileVisibility', parsed.visibility);
   const avatarUrl = await avatarUrlFromApprovedMedia(userId, parsed.avatarMediaId);

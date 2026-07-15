@@ -145,8 +145,8 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f4f5f7] p-4 md:p-6">
-      <div className="mx-auto flex h-[calc(100vh-2rem)] max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_40px_-25px_rgba(15,23,42,0.25)] md:h-[calc(100vh-3rem)]">
+    <div className="min-h-dvh bg-[#f4f5f7] p-4 md:p-6">
+      <div className="mx-auto flex h-[calc(100dvh-2rem)] max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_40px_-25px_rgba(15,23,42,0.25)] md:h-[calc(100dvh-3rem)]">
         <aside className="hidden w-[260px] flex-col border-r border-slate-200 bg-[#f8faf9] p-4 md:flex">
           <p className="mb-4 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Settings</p>
           <button className="flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white">

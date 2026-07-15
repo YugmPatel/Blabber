@@ -106,7 +106,7 @@ export default function ReelPage() {
   }, [playback]);
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white">
+    <main className="min-h-dvh bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white">
       <div className="mx-auto max-w-3xl">
         <button onClick={() => navigate(-1)} className="mb-5 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900">
           <ArrowLeft size={16} /> Back

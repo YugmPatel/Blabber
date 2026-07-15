@@ -160,11 +160,11 @@ export default function CommunityPage() {
   };
 
   if (community.isError) {
-    return <div className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-500 dark:bg-slate-950">Community unavailable</div>;
+    return <div className="flex h-dvh items-center justify-center bg-slate-50 text-sm text-slate-500 dark:bg-slate-950">Community unavailable</div>;
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+    <div className="flex h-dvh bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
       <div className="hidden md:block"><Sidebar /></div>
       {sidebarOpen && <div className="fixed inset-0 z-40 flex md:hidden"><div className="absolute inset-0 bg-slate-950/40" onClick={() => setSidebarOpen(false)} /><Sidebar onNavigateMobile={() => setSidebarOpen(false)} /></div>}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">

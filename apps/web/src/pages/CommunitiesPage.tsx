@@ -65,7 +65,7 @@ export default function CommunitiesPage() {
     : allCommunities;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
+    <div className="flex h-dvh overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
       <div
         className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${showSidebar ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
         onClick={() => setShowSidebar(false)}
@@ -176,7 +176,7 @@ export default function CommunitiesPage() {
       {showCreateModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]">
           <div
-            className="max-h-[90vh] w-full max-w-[560px] overflow-y-auto rounded-3xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)]"
+            className="max-h-[90dvh] w-full max-w-[560px] overflow-y-auto rounded-3xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)]"
             style={{ boxShadow: 'var(--bl-glow-md), 0 24px 60px -12px rgba(2, 20, 18, 0.45)' }}
           >
             <div className="flex items-center justify-between border-b border-[color:var(--bl-border)] px-5 py-4">

@@ -106,6 +106,7 @@ describe('VeyraPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    localStorage.clear();
     // jsdom does not implement scrollIntoView; VeyraPage calls it to keep the
     // newest turn in view, which is not itself under test here.
     Element.prototype.scrollIntoView = vi.fn();
@@ -142,7 +143,7 @@ describe('VeyraPage', () => {
 
   it('does not insert recognized speech into the text composer', async () => {
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeEnabled());
     mockAskVeyra.mockReturnValue(new Promise(() => {})); // never resolves during this assertion
 
     fireEvent.click(screen.getByLabelText('Start listening'));
@@ -159,7 +160,7 @@ describe('VeyraPage', () => {
   it('auto-submits the final recognized utterance exactly once, even if recognition ends twice', async () => {
     mockAskVeyra.mockResolvedValue({ answer: 'Here is what I found.', intent: 'general_help', scope: null });
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeEnabled());
 
     fireEvent.click(screen.getByLabelText('Start listening'));
     act(() => {
@@ -177,14 +178,22 @@ describe('VeyraPage', () => {
   });
 
   it('transitions Thinking → Speaking → ready after a real response, and reads it aloud', async () => {
-    mockAskVeyra.mockResolvedValue({ answer: 'Here is what I found.', intent: 'general_help', scope: null });
+    let resolveAnswer: (value: { answer: string; intent: string; scope: null }) => void = () => {};
+    mockAskVeyra.mockReturnValue(
+      new Promise((resolve) => {
+        resolveAnswer = resolve;
+      })
+    );
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
 
     fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'what can you help with' } });
     fireEvent.click(screen.getByLabelText('Send to Veyra'));
 
     expect(await screen.findByText('Thinking…')).toBeInTheDocument();
+    act(() => {
+      resolveAnswer({ answer: 'Here is what I found.', intent: 'general_help', scope: null });
+    });
     await waitFor(() => expect(speechSynthesisMock.speak).toHaveBeenCalled());
     expect(await screen.findByText('Here is what I found.')).toBeInTheDocument();
   });
@@ -195,7 +204,7 @@ describe('VeyraPage', () => {
       response: { data: { message: 'To answer that, Veyra needs access to an approved space.', code: 'scope_required' } },
     });
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
 
     fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'What did my group decide?' } });
     fireEvent.click(screen.getByLabelText('Send to Veyra'));
@@ -206,18 +215,19 @@ describe('VeyraPage', () => {
 
   it('stop listening calls recognition.stop() and returns to the ready state', async () => {
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeEnabled());
     fireEvent.click(screen.getByLabelText('Start listening'));
-    expect(await screen.findByLabelText('Stop listening')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByLabelText('Stop listening').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByLabelText('Stop listening'));
+    const stopButtons = screen.getAllByLabelText('Stop listening');
+    fireEvent.click(stopButtons[stopButtons.length - 1]);
     expect(lastRecognitionInstance!.stop).toHaveBeenCalledTimes(1);
   });
 
   it('stop speaking calls speechSynthesis.cancel()', async () => {
     mockAskVeyra.mockResolvedValue({ answer: 'Here is what I found.', intent: 'general_help', scope: null });
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'hi' } });
     fireEvent.click(screen.getByLabelText('Send to Veyra'));
 
@@ -228,7 +238,7 @@ describe('VeyraPage', () => {
 
   it('cancels recognition and speech on unmount', async () => {
     const { unmount } = renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeEnabled());
     fireEvent.click(screen.getByLabelText('Start listening'));
     const recognition = lastRecognitionInstance!;
 
@@ -240,7 +250,7 @@ describe('VeyraPage', () => {
   it('does not persist raw transcript text to storage', async () => {
     mockAskVeyra.mockResolvedValue({ answer: 'Here is what I found.', intent: 'general_help', scope: null });
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'what can you help with' } });
     fireEvent.click(screen.getByLabelText('Send to Veyra'));
     await screen.findByText('Here is what I found.');
@@ -250,7 +260,11 @@ describe('VeyraPage', () => {
       expect(sessionStorage.getItem(key)).not.toContain('what can you help with');
       expect(sessionStorage.getItem(key)).not.toContain('Here is what I found.');
     }
-    expect(localStorage.length).toBe(0);
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)!;
+      expect(localStorage.getItem(key)).not.toContain('what can you help with');
+      expect(localStorage.getItem(key)).not.toContain('Here is what I found.');
+    }
   });
 
   it('renders authorized result cards and reauthorizes via the normal chat route when opened', async () => {
@@ -273,7 +287,7 @@ describe('VeyraPage', () => {
       ],
     });
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
 
     fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: "show me photos from Yugm's chat" } });
     fireEvent.click(screen.getByLabelText('Send to Veyra'));
@@ -308,7 +322,7 @@ describe('VeyraPage', () => {
       });
 
     renderVeyraPage();
-    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'show me photos from Yugm' } });
     fireEvent.click(screen.getByLabelText('Send to Veyra'));
 

@@ -17,6 +17,7 @@ export interface User {
   profileBio?: string;
   profileWebsite?: string;
   profileBannerUrl?: string;
+  profileBannerPositionY?: number;
   profileVisibility?: 'private' | 'public';
   profileHandleChangedAt?: Date;
   profileUpdatedAt?: Date;

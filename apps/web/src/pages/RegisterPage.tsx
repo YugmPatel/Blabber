@@ -162,7 +162,7 @@ export default function RegisterPage() {
     'block h-12 w-full rounded-[13px] border border-slate-200 bg-[#f5f6f8] px-3.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:opacity-50';
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f7f8fb] px-4 py-10">
+    <div className="flex min-h-dvh items-center justify-center bg-[#f7f8fb] px-3 py-6 sm:px-4 sm:py-10">
       <div
         className="grid w-full overflow-hidden rounded-[28px] bg-white md:grid-cols-2"
         style={{
@@ -173,7 +173,7 @@ export default function RegisterPage() {
         <BrandPanel />
 
         {/* Right form panel */}
-        <section className="flex items-center justify-center px-8 py-10 sm:px-12 md:px-14">
+        <section className="flex items-center justify-center px-5 py-8 sm:px-12 sm:py-10 md:px-14">
           <div className="w-full max-w-[380px]">
             {/* Logo */}
             <div className="mb-7 flex flex-col items-center gap-1">

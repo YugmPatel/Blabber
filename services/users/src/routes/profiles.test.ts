@@ -253,18 +253,28 @@ describe('Release D profiles', () => {
       .set('Authorization', `Bearer ${viewerToken}`)
       .send({
         profileBannerUrl: bannerUrl,
+        profileBannerPositionY: 28,
         bio: '',
         website: '',
         visibility: 'public',
       });
     expect(savedBanner.status).toBe(200);
     expect(savedBanner.body.profile.profileBannerUrl).toBe(bannerUrl);
+    expect(savedBanner.body.profile.profileBannerPositionY).toBe(28);
 
     const publicProfile = await request(app)
       .get('/profiles/viewer_test')
       .set('Authorization', `Bearer ${otherToken}`)
       .expect(200);
     expect(publicProfile.body.profile.profileBannerUrl).toBe(bannerUrl);
+    expect(publicProfile.body.profile.profileBannerPositionY).toBe(28);
+
+    const movedBanner = await request(app)
+      .patch('/profiles/me')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ profileBannerPositionY: 72 });
+    expect(movedBanner.status).toBe(200);
+    expect(movedBanner.body.profile.profileBannerPositionY).toBe(72);
 
     const removedBanner = await request(app)
       .patch('/profiles/me')
@@ -272,9 +282,11 @@ describe('Release D profiles', () => {
       .send({ profileBannerUrl: '' });
     expect(removedBanner.status).toBe(200);
     expect(removedBanner.body.profile.profileBannerUrl).toBeNull();
+    expect(removedBanner.body.profile.profileBannerPositionY).toBe(50);
 
     const user = await getDatabase().collection<User>('users').findOne({ _id: viewerId });
     expect(user?.profileBannerUrl).toBeUndefined();
+    expect(user?.profileBannerPositionY).toBe(50);
   });
 
   it('rejects invalid profile banner URLs with validation errors', async () => {
@@ -282,6 +294,14 @@ describe('Release D profiles', () => {
       .patch('/profiles/me')
       .set('Authorization', `Bearer ${viewerToken}`)
       .send({ profileBannerUrl: 'javascript:alert(1)' });
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects invalid profile banner positions with validation errors', async () => {
+    const response = await request(app)
+      .patch('/profiles/me')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ profileBannerPositionY: 101 });
     expect(response.status).toBe(400);
   });
 

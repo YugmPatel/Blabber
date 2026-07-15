@@ -158,7 +158,7 @@ export function SavedContentSection({ embedded = false }: { embedded?: boolean }
   return (
     <div
       className={
-        embedded ? 'space-y-5' : 'flex h-screen flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white'
+        embedded ? 'space-y-5' : 'flex h-dvh flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white'
       }
     >
       <header className={embedded ? '' : 'border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900'}>

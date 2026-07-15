@@ -12,6 +12,7 @@ vi.mock('@/api/client', () => ({
     post: vi.fn(),
     get: vi.fn(),
   },
+  refreshAccessToken: vi.fn(),
   setAccessToken: vi.fn(),
   getAccessToken: vi.fn(),
 }));
@@ -39,8 +40,7 @@ const renderRegisterPage = () => {
 describe('RegisterPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock initial auth check to fail (not authenticated)
-    vi.mocked(apiClient.apiClient.post).mockRejectedValueOnce(new Error('Not authenticated'));
+    window.history.pushState({}, '', '/register');
   });
 
   it('renders register form', async () => {

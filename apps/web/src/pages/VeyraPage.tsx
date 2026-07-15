@@ -452,7 +452,7 @@ export default function VeyraPage() {
   ] as const;
 
   return (
-    <div className="flex h-screen bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
+    <div className="flex h-dvh bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
       <Sidebar onNewConversation={() => navigate('/chats')} onChatFilterChange={() => navigate('/chats')} />
 
       <main className="relative min-w-0 flex-1 overflow-hidden">

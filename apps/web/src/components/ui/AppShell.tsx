@@ -15,7 +15,7 @@ interface AppShellProps extends SidebarProps {
  */
 export default function AppShell({ children, ambient = false, mainClassName = '', ...sidebarProps }: AppShellProps) {
   return (
-    <div className="flex h-screen bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
+    <div className="flex h-dvh bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
       <Sidebar {...sidebarProps} />
       <main className={`relative min-w-0 flex-1 overflow-y-auto bg-[color:var(--bl-bg)] ${mainClassName}`.trim()}>
         {ambient && (

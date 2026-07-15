@@ -197,9 +197,9 @@ function ReelCard({
   const report = useMutation({ mutationFn: () => reportReel(reel.id, { reason: 'Inappropriate Reel' }) });
 
   return (
-    <article ref={stageRef} className="mx-auto flex min-h-[calc(100vh-140px)] w-full max-w-4xl snap-start items-center justify-center py-6">
+    <article ref={stageRef} className="mx-auto flex min-h-[calc(100dvh-140px)] w-full max-w-4xl snap-start items-center justify-center py-6">
       <div
-        className="relative aspect-[9/16] max-h-[calc(100vh-180px)] w-full max-w-[430px] overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-black shadow-2xl"
+        className="relative aspect-[9/16] max-h-[calc(100dvh-160px)] w-full max-w-[430px] overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-black shadow-2xl"
         style={{ boxShadow: 'var(--bl-glow-md), 0 25px 50px -12px rgba(0,0,0,0.5)' }}
       >
         {videoUrl ? (
@@ -460,7 +460,7 @@ export default function ReelsPage() {
   );
 
   return (
-    <main className="flex h-screen overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
+    <main className="flex h-dvh overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
       <div
         className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${sidebarOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
         onClick={() => setSidebarOpen(false)}
@@ -529,7 +529,7 @@ export default function ReelsPage() {
               </p>
             )}
             <div
-              className="h-[calc(100vh-200px)] snap-y snap-mandatory overflow-y-auto rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4"
+              className="h-[calc(100dvh-200px)] snap-y snap-mandatory overflow-y-auto rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4"
               style={{ boxShadow: 'var(--bl-glow-sm)' }}
             >
               {active.isLoading && (

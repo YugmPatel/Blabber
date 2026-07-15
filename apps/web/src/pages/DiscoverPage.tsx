@@ -467,7 +467,7 @@ function PostDetailDialog({ postId, onClose }: { postId: string; onClose: () => 
   });
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
-      <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-xl">
+      <div className="max-h-[90dvh] w-full max-w-3xl overflow-auto rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4 py-3">
           <p className="text-sm font-semibold text-[color:var(--bl-text)]">Post</p>
           <button onClick={onClose} className="rounded-md p-2 text-[color:var(--bl-text-muted)] transition hover:bg-[color:var(--bl-hover)]" aria-label="Close post detail"><X size={17} /></button>
@@ -592,10 +592,10 @@ function ReelDetailDialog({ reelId, onClose }: { reelId: string; onClose: () => 
   const muteCreator = useMutation({ mutationFn: () => muteReelCreator(reelId), onSuccess: onClose });
   const report = useMutation({ mutationFn: () => reportReel(reelId, { reason: 'Inappropriate Reel' }) });
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" role="dialog" aria-modal="true">
-      <div className="relative flex max-h-[92vh] w-full max-w-4xl gap-4 overflow-hidden rounded-lg bg-black p-3 text-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-3 sm:p-4" role="dialog" aria-modal="true">
+      <div className="relative flex max-h-[92dvh] w-full max-w-4xl flex-col gap-3 overflow-hidden rounded-lg bg-black p-3 text-white shadow-xl md:flex-row md:gap-4">
         <button onClick={onClose} className="absolute right-3 top-3 z-10 rounded-full bg-black/60 p-2" aria-label="Close Reel detail"><X size={17} /></button>
-        <div className="relative aspect-[9/16] max-h-[88vh] flex-1 overflow-hidden rounded-lg bg-black">
+        <div className="relative mx-auto aspect-[9/16] max-h-[74dvh] w-full max-w-[420px] overflow-hidden rounded-lg bg-black md:max-h-[88dvh] md:flex-1">
           {videoUrl ? (
             <video ref={videoRef} src={videoUrl} poster={posterUrl} muted={muted} playsInline controls className="h-full w-full object-contain" />
           ) : (
@@ -793,7 +793,7 @@ export default function DiscoverPage() {
   const topicsForFilter = useQuery({ queryKey: ['discovery-topics'], queryFn: fetchDiscoveryTopics });
 
   return (
-    <main className="flex h-screen overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
+    <main className="flex h-dvh overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
       <div
         className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${sidebarOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
         onClick={() => setSidebarOpen(false)}

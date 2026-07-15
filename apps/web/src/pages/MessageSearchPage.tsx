@@ -57,7 +57,7 @@ export default function MessageSearchPage() {
   const results = search.data?.results || [];
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
+    <div className="flex h-dvh flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
       <header className="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
         <div className="mx-auto flex max-w-4xl items-center gap-3">
           <button

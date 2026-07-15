@@ -319,6 +319,7 @@ function CloseFriendsSettings() {
 function ProfileSection() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   // Set when another surface (account menu, /profile) wanted the public
   // profile but the account has no handle yet.
@@ -339,6 +340,7 @@ function ProfileSection() {
   const [uploadError, setUploadError] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [savedBannerUrl, setSavedBannerUrl] = useState('');
+  const [profileBannerPositionY, setProfileBannerPositionY] = useState(50);
   const [localBannerPreview, setLocalBannerPreview] = useState('');
   const [bannerUploadError, setBannerUploadError] = useState('');
   const [isUploadingBanner, setIsUploadingBanner] = useState(false);
@@ -356,6 +358,7 @@ function ProfileSection() {
 
   const displayedAvatar = normalizeMediaUrl(localPreview || savedAvatarUrl);
   const displayedBanner = normalizeMediaUrl(localBannerPreview || savedBannerUrl);
+  const bannerObjectPosition = `center ${profileBannerPositionY}%`;
   const socialProfileQuery = useQuery({
     queryKey: ['profiles', 'me'],
     queryFn: fetchMyProfile,
@@ -374,9 +377,12 @@ function ProfileSection() {
       setProfileBio(profile.bio || '');
       setProfileWebsite(profile.website || '');
       setSavedBannerUrl(profile.profileBannerUrl || '');
+      setProfileBannerPositionY(profile.profileBannerPositionY ?? 50);
       setProfileVisibility(profile.visibility || 'private');
       setProfileNotice('Profile saved.');
       setProfileError('');
+      queryClient.setQueryData(['profiles', 'me'], profile);
+      if (profile.handle) queryClient.setQueryData(['profiles', profile.handle], profile);
       await socialProfileQuery.refetch();
       if (refreshUser) refreshUser();
     },
@@ -392,6 +398,8 @@ function ProfileSection() {
       setProfileHandle(profile.handle || '');
       setProfileNotice('Handle saved.');
       setProfileError('');
+      queryClient.setQueryData(['profiles', 'me'], profile);
+      if (profile.handle) queryClient.setQueryData(['profiles', profile.handle], profile);
       await socialProfileQuery.refetch();
     },
     onError: (err) => {
@@ -442,6 +450,7 @@ function ProfileSection() {
     setProfileBio(profile.bio || '');
     setProfileWebsite(profile.website || '');
     setSavedBannerUrl(profile.profileBannerUrl || '');
+    setProfileBannerPositionY(profile.profileBannerPositionY ?? 50);
     setProfileVisibility(profile.visibility || 'private');
   }, [socialProfileQuery.data]);
 
@@ -540,6 +549,7 @@ function ProfileSection() {
     setProfileBio(profile?.bio || '');
     setProfileWebsite(profile?.website || '');
     setSavedBannerUrl(profile?.profileBannerUrl || '');
+    setProfileBannerPositionY(profile?.profileBannerPositionY ?? 50);
     setLocalBannerPreview('');
     setBannerUploadError('');
     setProfileVisibility(profile?.visibility || 'private');
@@ -554,21 +564,43 @@ function ProfileSection() {
     setIsSavingAll(true);
     setProfileError('');
     setProfileNotice('');
+    const oldHandle = (socialProfileQuery.data?.handle || '').replace(/^@/, '').toLowerCase();
     try {
       await updateProfile.mutateAsync({ name, about, role, department, avatarUrl: savedAvatarUrl });
-      await saveSocialProfile.mutateAsync({
+      const socialProfile = await saveSocialProfile.mutateAsync({
         name,
         bio: profileBio,
         website: profileWebsite,
         profileBannerUrl: savedBannerUrl,
+        profileBannerPositionY,
         visibility: profileVisibility,
       });
-      const currentHandle = (socialProfileQuery.data?.handle || '').replace(/^@/, '').toLowerCase();
+      let finalProfile = socialProfile;
+      const currentHandle = (socialProfile.handle || oldHandle).replace(/^@/, '').toLowerCase();
       const nextHandle = profileHandle.trim().replace(/^@/, '').toLowerCase();
       if (nextHandle && nextHandle !== currentHandle) {
-        await saveHandle.mutateAsync(nextHandle);
+        finalProfile = await saveHandle.mutateAsync(nextHandle);
       }
-      if (refreshUser) refreshUser();
+      const finalHandle = (finalProfile.handle || nextHandle || currentHandle).replace(/^@/, '').toLowerCase();
+      setProfileHandle(finalHandle);
+      setProfileBio(finalProfile.bio || profileBio);
+      setProfileWebsite(finalProfile.website || profileWebsite);
+      setSavedBannerUrl(finalProfile.profileBannerUrl || '');
+      setProfileBannerPositionY(finalProfile.profileBannerPositionY ?? profileBannerPositionY ?? 50);
+      queryClient.setQueryData(['profiles', 'me'], finalProfile);
+      if (oldHandle) queryClient.invalidateQueries({ queryKey: ['profiles', oldHandle] });
+      if (finalHandle) {
+        queryClient.setQueryData(['profiles', finalHandle], finalProfile);
+        await queryClient.invalidateQueries({ queryKey: ['profiles', finalHandle] });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['profile-posts', finalHandle] }),
+          queryClient.invalidateQueries({ queryKey: ['profile-reels', finalHandle] }),
+          queryClient.invalidateQueries({ queryKey: ['profile-followers', finalHandle] }),
+          queryClient.invalidateQueries({ queryKey: ['profile-following', finalHandle] }),
+        ]);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['profiles', 'me'] });
+      await refreshUser?.();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -636,6 +668,7 @@ function ProfileSection() {
     const uploadResult = await uploadBanner(file);
     if (uploadResult.mediaUrl) {
       setSavedBannerUrl(uploadResult.mediaUrl);
+      setProfileBannerPositionY(50);
       setLocalBannerPreview('');
     } else {
       setBannerUploadError(
@@ -653,7 +686,7 @@ function ProfileSection() {
     await handleBannerFile(file);
   };
 
-  const publicHandle = socialProfileQuery.data?.handle?.replace(/^@/, '') || '';
+  const publicHandle = (profileHandle || socialProfileQuery.data?.handle || '').replace(/^@/, '');
   const profileLoaded = Boolean(socialProfileQuery.data);
 
   return (
@@ -708,11 +741,35 @@ function ProfileSection() {
           <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Shown at the top of your public profile.</p>
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-r from-teal-100 via-sky-100 to-cyan-50 dark:border-slate-700 dark:from-teal-950 dark:via-slate-900 dark:to-sky-950">
             {displayedBanner ? (
-              <img src={displayedBanner} alt="Profile banner preview" className="h-36 w-full object-cover sm:h-44" />
+              <img
+                src={displayedBanner}
+                alt="Profile banner preview"
+                className="h-36 w-full object-cover sm:h-44"
+                style={{ objectPosition: bannerObjectPosition }}
+              />
             ) : (
               <div className="h-36 w-full sm:h-44" />
             )}
           </div>
+          {displayedBanner && (
+            <div className="mt-4">
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label htmlFor="profile-banner-position" className="text-[13px] font-medium text-slate-700 dark:text-slate-300">
+                  Banner position
+                </label>
+                <span className="text-xs text-slate-400 dark:text-slate-500">{profileBannerPositionY}%</span>
+              </div>
+              <input
+                id="profile-banner-position"
+                type="range"
+                min={0}
+                max={100}
+                value={profileBannerPositionY}
+                onChange={(event) => setProfileBannerPositionY(Number(event.target.value))}
+                className="w-full accent-teal-600"
+              />
+            </div>
+          )}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
               onClick={() => bannerInputRef.current?.click()}
@@ -727,6 +784,7 @@ function ProfileSection() {
                 onClick={() => {
                   setSavedBannerUrl('');
                   setLocalBannerPreview('');
+                  setProfileBannerPositionY(50);
                   setBannerUploadError('');
                 }}
                 className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-600 dark:border-slate-600 dark:text-slate-200 dark:hover:border-rose-500/50 dark:hover:text-rose-300"
@@ -3964,13 +4022,13 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f4f5f7] p-4 dark:bg-slate-950 md:p-6">
+    <div className="min-h-dvh bg-[#f4f5f7] p-2 dark:bg-slate-950 md:p-6">
       <div
-        className="mx-auto flex overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_40px_-25px_rgba(15,23,42,0.2)] dark:border-slate-800 dark:bg-slate-900"
-        style={{ height: 'calc(100vh - 3rem)', maxWidth: '1100px' }}
+        className="mx-auto flex min-h-[calc(100dvh-1rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_40px_-25px_rgba(15,23,42,0.2)] dark:border-slate-800 dark:bg-slate-900 md:h-[calc(100dvh-3rem)] md:min-h-0 md:flex-row"
+        style={{ maxWidth: '1100px' }}
       >
         {/* ── Left sub-nav ── */}
-        <aside className="flex w-[240px] flex-shrink-0 flex-col border-r border-slate-200 bg-[#f8faf9] dark:border-slate-800 dark:bg-slate-900/60">
+        <aside className="flex flex-shrink-0 flex-col border-b border-slate-200 bg-[#f8faf9] dark:border-slate-800 dark:bg-slate-900/60 md:w-[240px] md:border-b-0 md:border-r">
           {/* Back to chats */}
           <div className="border-b border-slate-200 p-3 dark:border-slate-800">
             <button
@@ -3983,15 +4041,15 @@ export default function SettingsPage() {
           </div>
 
           {/* Section nav */}
-          <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
-            <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+          <nav className="flex gap-1 overflow-x-auto p-3 md:block md:flex-1 md:space-y-0.5 md:overflow-y-auto">
+            <p className="hidden mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400 md:block">
               Settings
             </p>
             {SECTIONS.map((s) => (
               <button
                 key={s.key}
                 onClick={() => setSection(s.key)}
-                className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition ${
+                className={`flex flex-shrink-0 items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition md:w-full ${
                   activeKey === s.key
                     ? 'bg-teal-50 font-semibold text-teal-700 dark:bg-teal-500/15 dark:text-teal-300'
                     : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
@@ -4004,7 +4062,7 @@ export default function SettingsPage() {
           </nav>
 
           {/* User card at bottom */}
-          <div className="border-t border-slate-200 p-3 dark:border-slate-800">
+          <div className="hidden border-t border-slate-200 p-3 dark:border-slate-800 md:block">
             <div className="flex items-center gap-2.5 rounded-xl p-2">
               <Avatar
                 src={(user as typeof user & { avatarUrl?: string; avatar?: string })?.avatarUrl || user?.avatar}
@@ -4023,7 +4081,7 @@ export default function SettingsPage() {
         </aside>
 
         {/* ── Right content ── */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-6 md:p-8">
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-8">
           {sectionContent[activeKey]}
         </main>
       </div>

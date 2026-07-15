@@ -179,7 +179,7 @@ export default function MomentsPage() {
   ];
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
+    <div className="flex h-dvh overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
       <div className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${showSidebar ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`} onClick={() => setShowSidebar(false)} aria-hidden="true" />
       <div className={`fixed inset-y-0 left-0 z-50 transition-transform md:static md:translate-x-0 ${showSidebar ? 'translate-x-0' : '-translate-x-full'}`}>
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((value) => !value)} onNewConversation={() => navigate('/chats')} onChatFilterChange={() => navigate('/chats')} onNavigateMobile={() => setShowSidebar(false)} taskCount={0} />
@@ -878,7 +878,7 @@ function CreateMomentModal({ onClose, onCreated, initialMode = 'text' }: { onClo
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
       <div
-        className="max-h-[90vh] w-full max-w-[540px] overflow-y-auto rounded-3xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)]"
+        className="max-h-[90dvh] w-full max-w-[540px] overflow-y-auto rounded-3xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)]"
         style={{ boxShadow: 'var(--bl-glow-md), 0 24px 60px -12px rgba(2, 20, 18, 0.45)' }}
       >
         {/* Header */}

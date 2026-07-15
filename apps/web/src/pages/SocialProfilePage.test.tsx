@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import SocialProfilePage, { ProfileReelCard } from './SocialProfilePage';
+import SocialProfilePage, { ProfileCover, ProfileReelCard } from './SocialProfilePage';
 import * as api from '@/api/client';
 import type { ReelItem } from '@/api/client';
 import { createTestQueryClient } from '@/test/query-test-utils';
@@ -83,6 +83,7 @@ function mockProfilePageData() {
     displayHandle: '@studyhub',
     avatarUrl: null,
     profileBannerUrl: null,
+    profileBannerPositionY: 50,
     bio: 'Demo profile',
     website: null,
     visibility: 'public',
@@ -143,6 +144,28 @@ describe('ProfileReelCard', () => {
     await waitFor(() => expect(api.fetchAuthorizedObjectUrl).toHaveBeenCalledWith('/api/reels/reel_1/poster'));
     expect(container.querySelector('img')).toBeNull();
     expect(screen.getByText('Demo reel')).toBeInTheDocument();
+  });
+});
+
+describe('ProfileCover', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      value: vi.fn(),
+      configurable: true,
+    });
+  });
+
+  it('renders the saved vertical banner position', async () => {
+    vi.mocked(api.fetchAuthorizedObjectUrl).mockResolvedValue('blob:banner');
+    const { container } = render(<ProfileCover coverUrl="/api/media/local/banner" positionY={72} />);
+
+    const image = await waitFor(() => {
+      const img = container.querySelector('img');
+      expect(img).toHaveAttribute('src', 'blob:banner');
+      return img as HTMLImageElement;
+    });
+    expect(image.style.objectPosition).toBe('center 72%');
   });
 });
 

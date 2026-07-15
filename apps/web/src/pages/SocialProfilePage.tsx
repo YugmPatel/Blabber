@@ -57,7 +57,7 @@ function formatCount(loaded: number, hasMore: boolean) {
   return hasMore ? `${loaded}+` : String(loaded);
 }
 
-function ProfileCover({ coverUrl }: { coverUrl?: string | null }) {
+export function ProfileCover({ coverUrl, positionY = 50 }: { coverUrl?: string | null; positionY?: number }) {
   const normalizedCoverUrl = normalizeMediaUrl(coverUrl);
   const [imageUrl, setImageUrl] = useState<string | undefined>();
   const [failed, setFailed] = useState(false);
@@ -109,7 +109,12 @@ function ProfileCover({ coverUrl }: { coverUrl?: string | null }) {
       />
       {imageUrl && !failed && (
         <>
-          <img src={imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          <img
+            src={imageUrl}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ objectPosition: `center ${positionY}%` }}
+          />
           <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/5 to-transparent" />
         </>
       )}
@@ -597,7 +602,7 @@ export default function SocialProfilePage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
+    <div className="flex h-dvh overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
       <div
         className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${sidebarOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
         onClick={() => setSidebarOpen(false)}
@@ -653,7 +658,7 @@ export default function SocialProfilePage() {
                 className="overflow-hidden rounded-3xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm"
                 style={{ boxShadow: 'var(--bl-glow-sm)' }}
               >
-                <ProfileCover coverUrl={profile.profileBannerUrl} />
+                <ProfileCover coverUrl={profile.profileBannerUrl} positionY={profile.profileBannerPositionY ?? 50} />
 
                 <div className="px-5 pb-5 sm:px-6">
                   {/* Avatar + identity + actions */}
@@ -700,7 +705,7 @@ export default function SocialProfilePage() {
                   ) : (
                     <>
                       {/* Stats — real counts only (loaded counts get a “+” when more pages exist) */}
-                      <div className="mt-5 grid grid-cols-4 gap-2 sm:gap-3">
+                      <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                         <StatCard
                           icon={Newspaper}
                           value={postsQuery.isLoading ? '…' : formatCount(posts.length, Boolean(postsQuery.data?.nextCursor))}

@@ -162,7 +162,7 @@ export default function ChatsLayout() {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen overflow-hidden bg-[#f6faf8] text-slate-900 dark:bg-[#071315] dark:text-white">
+      <div className="flex h-dvh overflow-hidden bg-[#f6faf8] text-slate-900 dark:bg-[#071315] dark:text-white">
         {/* Mobile backdrop */}
         <div
           className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${
@@ -192,9 +192,9 @@ export default function ChatsLayout() {
         </div>
 
         {/* Main content column */}
-        <div className="flex min-w-0 flex-1 gap-3 p-3">
+        <div className="flex min-w-0 flex-1 gap-0 p-0 md:gap-3 md:p-3">
           {/* Chat list panel */}
-          <section className="flex w-full max-w-[340px] flex-col overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:w-[340px]">
+          <section className={`${id ? 'hidden md:flex' : 'flex'} w-full flex-col overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:max-w-[340px] md:rounded-2xl md:w-[340px]`}>
             <div className="space-y-3 border-b border-[color:var(--bl-border)] p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -303,7 +303,7 @@ export default function ChatsLayout() {
           </section>
 
           {/* Chat view / empty state */}
-          <section className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm">
+          <section className={`${id ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:rounded-2xl`}>
             {id ? (
               <Outlet />
             ) : (
