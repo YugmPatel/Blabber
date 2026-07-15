@@ -171,6 +171,120 @@ describe('Release D profiles', () => {
     expect(cooldown.status).toBe(429);
   });
 
+  it('allows an OAuth-style user without an existing handle to save their first username and rejects duplicates', async () => {
+    await getDatabase().collection('users').updateOne(
+      { _id: viewerId },
+      {
+        $unset: { profileHandle: '' },
+        $set: { googleId: 'google-viewer', profileHandleChangedAt: new Date(), updatedAt: new Date() },
+      } as any
+    );
+
+    const firstHandle = await request(app)
+      .patch('/profiles/me/handle')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ handle: '@viewer_first' });
+    expect(firstHandle.status).toBe(200);
+    expect(firstHandle.body.profile.handle).toBe('viewer_first');
+
+    const duplicate = await request(app)
+      .patch('/profiles/me/handle')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ handle: 'owner_test' });
+    expect(duplicate.status).toBe(409);
+
+    const cooldown = await request(app)
+      .patch('/profiles/me/handle')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ handle: 'other_test' });
+    expect(cooldown.status).toBe(429);
+
+    const invalid = await request(app)
+      .patch('/profiles/me/handle')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ handle: '1_bad' });
+    expect(invalid.status).toBe(400);
+  });
+
+  it('saves profile fields used by Edit Profile, including relative local avatar URLs', async () => {
+    const basic = await request(app)
+      .patch('/me')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        name: 'Updated Viewer',
+        about: 'Demo-ready note',
+        role: 'Designer',
+        department: 'Product',
+        avatarUrl: '/api/media/local/507f1f77bcf86cd799439011',
+      });
+    expect(basic.status).toBe(200);
+    expect(basic.body.user).toMatchObject({
+      name: 'Updated Viewer',
+      about: 'Demo-ready note',
+      role: 'Designer',
+      department: 'Product',
+      avatarUrl: '/api/media/local/507f1f77bcf86cd799439011',
+    });
+
+    const social = await request(app)
+      .patch('/profiles/me')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        name: 'Updated Viewer',
+        bio: 'Public demo bio',
+        website: 'https://example.com/profile',
+        visibility: 'public',
+      });
+    expect(social.status).toBe(200);
+    expect(social.body.profile).toMatchObject({
+      name: 'Updated Viewer',
+      bio: 'Public demo bio',
+      website: 'https://example.com/profile',
+      visibility: 'public',
+    });
+  });
+
+  it('approves and declines follow requests by requester id when requester has no handle', async () => {
+    await getDatabase().collection('users').updateOne({ _id: viewerId }, { $unset: { profileHandle: '' } } as any);
+
+    const requested = await request(app).post('/profiles/owner_test/follow').set('Authorization', `Bearer ${viewerToken}`);
+    expect(requested.status).toBe(200);
+    expect(requested.body.profile.relationship).toBe('requested_outgoing');
+
+    const incoming = await request(app).get('/profiles/requests/incoming').set('Authorization', `Bearer ${ownerToken}`);
+    expect(incoming.body.requests).toHaveLength(1);
+    expect(incoming.body.requests[0].requester.id).toBe(viewerId.toString());
+    expect(incoming.body.requests[0].requester.handle).toBeNull();
+
+    const approved = await request(app)
+      .post(`/profiles/requests/${viewerId.toString()}/approve`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(approved.status).toBe(200);
+
+    const duplicateApprove = await request(app)
+      .post(`/profiles/requests/${viewerId.toString()}/approve`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(duplicateApprove.status).toBe(200);
+
+    const afterApprove = await getDatabase().collection('profile_relationships').findOne({ followerUserId: viewerId, targetUserId: ownerId });
+    expect(afterApprove?.state).toBe('following');
+    expect(await getDatabase().collection('profile_relationships').countDocuments({ targetUserId: ownerId, state: 'following' })).toBe(1);
+
+    await getDatabase().collection('profile_relationships').updateOne(
+      { followerUserId: viewerId, targetUserId: ownerId },
+      { $set: { state: 'requested', updatedAt: new Date() }, $unset: { approvedAt: '' } }
+    );
+    const declined = await request(app)
+      .post(`/profiles/requests/${viewerId.toString()}/decline`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(declined.status).toBe(200);
+    const duplicateDecline = await request(app)
+      .post(`/profiles/requests/${viewerId.toString()}/decline`)
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(duplicateDecline.status).toBe(200);
+    expect(await getDatabase().collection('profile_relationships').findOne({ followerUserId: viewerId, targetUserId: ownerId })).toBeNull();
+  });
+
   it('does not expose blocked or incoming relationship state to unrelated viewers', async () => {
     await getDatabase().collection('profile_relationships').insertOne({
       _id: new ObjectId(),

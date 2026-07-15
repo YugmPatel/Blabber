@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -31,6 +31,7 @@ import Sidebar from '@/components/Sidebar';
 import Avatar from '@/components/Avatar';
 import {
   cancelFollowRequest,
+  fetchAuthorizedObjectUrl,
   fetchCommunities,
   fetchProfileByHandle,
   fetchProfilePosts,
@@ -108,22 +109,59 @@ function EmptyState({ icon: Icon, title, hint }: { icon: typeof Users; title: st
 function ProfilePostCard({ post, onOpen }: { post: FeedPost; onOpen: () => void }) {
   const cover = post.media[0];
   const reactions = totalReactions(post.reactionCounts);
+  const [imageUrl, setImageUrl] = useState<string | undefined>();
+  const [imageFailed, setImageFailed] = useState(false);
+  const normalizedCoverUrl = normalizeMediaUrl(cover?.url);
+
+  useEffect(() => {
+    let alive = true;
+    let objectUrl: string | undefined;
+    setImageUrl(undefined);
+    setImageFailed(false);
+    if (!normalizedCoverUrl) return undefined;
+    fetchAuthorizedObjectUrl(normalizedCoverUrl)
+      .then((url) => {
+        if (!alive) return;
+        if (!url) {
+          setImageFailed(true);
+          return;
+        }
+        objectUrl = url;
+        setImageUrl(url);
+      })
+      .catch(() => {
+        if (alive) setImageFailed(true);
+      });
+    return () => {
+      alive = false;
+      if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
+    };
+  }, [normalizedCoverUrl]);
+
   return (
     <button
       type="button"
       onClick={onOpen}
       className="bl-focus-ring group flex flex-col overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] text-left shadow-sm transition hover:[box-shadow:var(--bl-glow-sm)]"
     >
-      {cover ? (
+      {cover && !imageFailed ? (
+        imageUrl ? (
         <img
-          src={normalizeMediaUrl(cover.url)}
+          src={imageUrl}
           alt=""
           className="aspect-[4/3] w-full bg-[color:var(--bl-hover)] object-cover"
           loading="lazy"
         />
+        ) : (
+          <div className="flex aspect-[4/3] w-full items-center justify-center bg-[color:var(--bl-hover)] text-xs text-[color:var(--bl-text-muted)]">
+            Loading image...
+          </div>
+        )
       ) : (
         <div className="flex aspect-[4/3] w-full items-center justify-center bg-[color:var(--bl-hover)] px-4">
-          <p className="line-clamp-4 text-sm leading-6 text-[color:var(--bl-text-secondary)]">{post.body || 'Post'}</p>
+          <p className="line-clamp-4 text-sm leading-6 text-[color:var(--bl-text-secondary)]">
+            {cover && imageFailed ? 'Image unavailable' : post.body || 'Post'}
+          </p>
         </div>
       )}
       <div className="flex flex-1 flex-col gap-2 p-3">

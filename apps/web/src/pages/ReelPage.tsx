@@ -3,11 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Bookmark, Flag, MessageCircle, Trash2 } from 'lucide-react';
 import {
-  apiClient,
   createReelComment,
   createReelEventToken,
   createReelPlaybackSession,
   deleteReel,
+  fetchAuthorizedObjectUrl,
   fetchReel,
   fetchReelComments,
   recordReelEvent,
@@ -56,8 +56,15 @@ export default function ReelPage() {
   });
 
   useEffect(() => {
+    setPlayback(null);
+    setVideoUrl(undefined);
+    setPosterUrl(undefined);
+    setEventToken('');
+  }, [reelId]);
+
+  useEffect(() => {
     if (reel.data?.processingStatus === 'ready' && !playback && !session.isPending) session.mutate();
-  }, [reel.data?.processingStatus]);
+  }, [reel.data?.processingStatus, playback, session.isPending]);
 
   useEffect(() => {
     if (!reel.data?.id) return;
@@ -82,15 +89,14 @@ export default function ReelPage() {
     const objectUrls: string[] = [];
     const load = async () => {
       const [video, poster] = await Promise.all([
-        apiClient.get<Blob>(playback.fallbackUrl, { responseType: 'blob' }),
-        apiClient.get<Blob>(playback.posterUrl, { responseType: 'blob' }),
+        fetchAuthorizedObjectUrl(playback.fallbackUrl),
+        fetchAuthorizedObjectUrl(playback.posterUrl),
       ]);
       if (!alive) return;
-      const nextVideoUrl = URL.createObjectURL(video.data);
-      const nextPosterUrl = URL.createObjectURL(poster.data);
-      objectUrls.push(nextVideoUrl, nextPosterUrl);
-      setVideoUrl(nextVideoUrl);
-      setPosterUrl(nextPosterUrl);
+      if (!video || !poster) return;
+      objectUrls.push(video, poster);
+      setVideoUrl(video);
+      setPosterUrl(poster);
     };
     void load();
     return () => {

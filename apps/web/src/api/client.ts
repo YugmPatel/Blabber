@@ -103,11 +103,32 @@ export const normalizeMediaUrl = (url?: string | null): string | undefined => {
   }
 };
 
+export function apiErrorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  if (!axios.isAxiosError(error)) return fallback;
+  const data = error.response?.data as any;
+  if (typeof data?.message === 'string' && data.message.trim()) return data.message;
+  if (Array.isArray(data?.details) && data.details[0]?.message) return data.details[0].message;
+  if (typeof data?.error === 'string' && data.error.trim()) return data.error;
+  return error.message || fallback;
+}
+
 export async function fetchAuthorizedObjectUrl(url?: string | null): Promise<string | undefined> {
   const normalizedUrl = normalizeMediaUrl(url);
   if (!normalizedUrl) return undefined;
   if (normalizedUrl.startsWith('blob:') || normalizedUrl.startsWith('data:')) return normalizedUrl;
-  const response = await apiClient.get<Blob>(normalizedUrl, { responseType: 'blob' });
+  const request = (token: string | null) => axios.get<Blob>(normalizedUrl, {
+    responseType: 'blob',
+    withCredentials: true,
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  let response;
+  try {
+    response = await request(accessToken);
+  } catch (error) {
+    if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
+    const token = await refreshAccessToken();
+    response = await request(token);
+  }
   return URL.createObjectURL(response.data);
 }
 
@@ -532,6 +553,8 @@ export interface FeedComment {
 }
 
 export interface ProfileListItem {
+  id: string;
+  username?: string | null;
   name: string;
   handle: string | null;
   displayHandle: string | null;
@@ -915,12 +938,12 @@ export async function askVeyra(payload: { prompt: string; scopeId?: string; cont
   return data;
 }
 
-export async function approveFollowRequest(handle: string) {
-  await apiClient.post(`/api/profiles/requests/${encodeURIComponent(handle)}/approve`);
+export async function approveFollowRequest(identifier: string) {
+  await apiClient.post(`/api/profiles/requests/${encodeURIComponent(identifier)}/approve`);
 }
 
-export async function declineFollowRequest(handle: string) {
-  await apiClient.post(`/api/profiles/requests/${encodeURIComponent(handle)}/decline`);
+export async function declineFollowRequest(identifier: string) {
+  await apiClient.post(`/api/profiles/requests/${encodeURIComponent(identifier)}/decline`);
 }
 
 export async function removeFollower(handle: string) {

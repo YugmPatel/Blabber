@@ -5,7 +5,16 @@ import { logger } from '@repo/utils';
 
 const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  avatarUrl: z.string().url().optional().or(z.literal('')),
+  avatarUrl: z.string().trim().refine((value) => {
+    if (value === '') return true;
+    if (value.startsWith('/api/media/local/')) return true;
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'Avatar URL is invalid.').optional(),
   about: z.string().max(500).optional().or(z.literal('')),
   role: z.string().max(120).optional().or(z.literal('')),
   department: z.string().max(120).optional().or(z.literal('')),

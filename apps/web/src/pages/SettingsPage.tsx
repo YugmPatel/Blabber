@@ -60,6 +60,7 @@ import CameraModal from '@/components/CameraModal';
 import VeyraMark from '@/components/brand/VeyraMark';
 import {
   apiClient,
+  apiErrorMessage,
   approveFollowRequest,
   blockUser,
   declineFollowRequest,
@@ -373,7 +374,7 @@ function ProfileSection() {
       if (refreshUser) refreshUser();
     },
     onError: (err) => {
-      const message = axios.isAxiosError(err) ? err.response?.data?.message || 'Unable to save profile.' : 'Unable to save profile.';
+      const message = apiErrorMessage(err, 'Unable to save profile.');
       setProfileError(message);
       setProfileNotice('');
     },
@@ -387,7 +388,7 @@ function ProfileSection() {
       await socialProfileQuery.refetch();
     },
     onError: (err) => {
-      const message = axios.isAxiosError(err) ? err.response?.data?.message || 'Unable to save handle.' : 'Unable to save handle.';
+      const message = apiErrorMessage(err, 'Unable to save username.');
       setProfileError(message);
       setProfileNotice('');
     },
@@ -397,6 +398,12 @@ function ProfileSection() {
     onSuccess: async () => {
       await followRequestsQuery.refetch();
       await socialProfileQuery.refetch();
+      setProfileNotice('Follow request approved.');
+      setProfileError('');
+    },
+    onError: (err) => {
+      setProfileError(apiErrorMessage(err, 'Unable to approve this follow request.'));
+      setProfileNotice('');
     },
   });
   const declineRequest = useMutation({
@@ -404,6 +411,12 @@ function ProfileSection() {
     onSuccess: async () => {
       await followRequestsQuery.refetch();
       await socialProfileQuery.refetch();
+      setProfileNotice('Follow request declined.');
+      setProfileError('');
+    },
+    onError: (err) => {
+      setProfileError(apiErrorMessage(err, 'Unable to decline this follow request.'));
+      setProfileNotice('');
     },
   });
 
@@ -498,8 +511,8 @@ function ProfileSection() {
         website: profileWebsite,
         visibility: profileVisibility,
       });
-      const currentHandle = (socialProfileQuery.data?.handle || '').replace(/^@/, '');
-      const nextHandle = profileHandle.trim().replace(/^@/, '');
+      const currentHandle = (socialProfileQuery.data?.handle || '').replace(/^@/, '').toLowerCase();
+      const nextHandle = profileHandle.trim().replace(/^@/, '').toLowerCase();
       if (nextHandle && nextHandle !== currentHandle) {
         await saveHandle.mutateAsync(nextHandle);
       }
@@ -507,9 +520,7 @@ function ProfileSection() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
-      const message = axios.isAxiosError(err)
-        ? err.response?.data?.message || 'Unable to save your profile.'
-        : 'Unable to save your profile.';
+      const message = apiErrorMessage(err, 'Unable to save your profile.');
       setProfileError(message);
       setProfileNotice('');
     } finally {
@@ -705,7 +716,7 @@ function ProfileSection() {
                 <input
                   type="text"
                   value={profileHandle}
-                  onChange={(e) => setProfileHandle(e.target.value.replace(/^@/, '').toLowerCase())}
+                  onChange={(e) => setProfileHandle(e.target.value.trimStart().replace(/^@+/, '').toLowerCase())}
                   placeholder="your_username"
                   className="min-w-0 flex-1 bg-transparent py-2.5 pr-3.5 text-sm text-slate-900 outline-none dark:text-white"
                   maxLength={30}
@@ -881,9 +892,12 @@ function ProfileSection() {
             Follow requests ({followRequestsQuery.data?.requests.length ?? 0})
           </h2>
           <div className="mt-3 space-y-2">
-            {(followRequestsQuery.data?.requests || []).map((request) => (
+            {(followRequestsQuery.data?.requests || []).map((request) => {
+              const requesterIdentifier = request.requester.handle || request.requester.id || request.requester.username || '';
+              const requestBusy = approveRequest.isPending || declineRequest.isPending;
+              return (
               <div
-                key={request.requester.handle || request.requestedAt}
+                key={request.requester.id || request.requester.handle || request.requestedAt}
                 className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900/50"
               >
                 <div className="min-w-0">
@@ -891,25 +905,28 @@ function ProfileSection() {
                     {request.requester.name}
                   </p>
                   <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                    {request.requester.displayHandle}
+                    {request.requester.displayHandle || (request.requester.username ? `@${request.requester.username}` : 'No username yet')}
                   </p>
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => request.requester.handle && approveRequest.mutate(request.requester.handle)}
-                    className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-teal-700"
+                    onClick={() => requesterIdentifier && approveRequest.mutate(requesterIdentifier)}
+                    disabled={!requesterIdentifier || requestBusy}
+                    className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Approve
+                    {approveRequest.isPending ? 'Approving...' : 'Approve'}
                   </button>
                   <button
-                    onClick={() => request.requester.handle && declineRequest.mutate(request.requester.handle)}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300"
+                    onClick={() => requesterIdentifier && declineRequest.mutate(requesterIdentifier)}
+                    disabled={!requesterIdentifier || requestBusy}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-300"
                   >
-                    Decline
+                    {declineRequest.isPending ? 'Declining...' : 'Decline'}
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
             {followRequestsQuery.data?.requests.length === 0 && (
               <p className="text-sm text-slate-500 dark:text-slate-400">No pending requests.</p>
             )}

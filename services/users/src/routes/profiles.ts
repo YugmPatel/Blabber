@@ -133,11 +133,12 @@ async function findActiveUserByHandle(handle: string) {
 }
 
 async function findActiveUserByUsername(username: string) {
-  return getUsersCollection().findOne(activeUserQuery({ username: username.trim().toLowerCase() }) as any);
+  return getUsersCollection().findOne(activeUserQuery({ username: canonicalHandle(username) }) as any);
 }
 
 function userIdentity(user: User) {
   return {
+    id: user._id.toString(),
     username: user.username,
     name: user.name,
     handle: user.profileHandle || null,
@@ -331,7 +332,7 @@ export const updateMyHandle = asyncHandler(async (req: Request, res: Response) =
     res.status(200).json({ profile: serializeFullProfile(user, 'self', await profileCounts(user._id)) });
     return;
   }
-  if (user.profileHandleChangedAt && Date.now() - user.profileHandleChangedAt.getTime() < HANDLE_COOLDOWN_MS) {
+  if (user.profileHandle && user.profileHandleChangedAt && Date.now() - user.profileHandleChangedAt.getTime() < HANDLE_COOLDOWN_MS) {
     throw new AppError(429, 'You can change your handle once every 14 days.', 'HANDLE_COOLDOWN');
   }
   await ensureHandleAvailable(handle, userId);
@@ -418,7 +419,10 @@ export const cancelFollowRequest = asyncHandler(async (req: Request, res: Respon
 });
 
 async function requestByHandle(ownerUserId: ObjectId, requesterHandle: string) {
-  const requester = await findActiveUserByHandle(requesterHandle);
+  const clean = canonicalHandle(requesterHandle);
+  const requester = ObjectId.isValid(clean)
+    ? await getUsersCollection().findOne(activeUserQuery({ _id: new ObjectId(clean) }) as any)
+    : await findActiveUserByHandle(clean) || await findActiveUserByUsername(clean);
   if (!requester || await hasBlockBetween(ownerUserId, requester._id)) throw new AppError(404, 'Follow request is unavailable.', 'FOLLOW_REQUEST_UNAVAILABLE');
   return requester;
 }
