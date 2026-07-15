@@ -15,6 +15,7 @@ import { topicBySlug } from './topics.mjs';
 import { buildInventoryReport, checkFfmpegAvailable, enforceMinimumInventory } from './inventory.mjs';
 import { applyComment, applyFollow, applyPost, applyReaction, applyReel, ensureAccount, ensureAccountIdentityAssets, idFor } from './db-writer.mjs';
 import { failureSummary, pickFirstValidCandidate } from './media-preflight.mjs';
+import { assertSeedMediaRegistrationAvailable } from './seed-media-ingest.mjs';
 
 async function makeProcessReels() {
   const require = createRequire(import.meta.url);
@@ -33,6 +34,17 @@ async function makeProcessReels() {
   };
 }
 
+export function assertApplyMediaPreflight({ env = process.env, ffmpegAvailable = checkFfmpegAvailable() } = {}) {
+  if (!ffmpegAvailable) {
+    throw new Error('ERROR: ffmpeg is not available inside the media container — cannot generate local fallback assets or process reel video. Aborting before any writes.');
+  }
+  assertSeedMediaRegistrationAvailable(env);
+}
+
+export function isFatalSeedMediaRegistrationError(reason) {
+  return String(reason || '').includes('401') || reason === 'seed_media_registration_unavailable';
+}
+
 export async function applyContentPlan(db, ObjectId, { env, jwtAccessSecret, port }) {
   const apiKeys = { pexels: env.PEXELS_API_KEY, pixabay: env.PIXABAY_API_KEY, unsplash: env.UNSPLASH_ACCESS_KEY };
   const now = new Date();
@@ -41,9 +53,7 @@ export async function applyContentPlan(db, ObjectId, { env, jwtAccessSecret, por
   const processReels = await makeProcessReels();
   const candidateFailures = [];
 
-  if (!checkFfmpegAvailable()) {
-    throw new Error('ERROR: ffmpeg is not available inside the media container — cannot generate local fallback assets or process reel video. Aborting before any writes.');
-  }
+  assertApplyMediaPreflight({ env, ffmpegAvailable: checkFfmpegAvailable() });
 
   // 1. Accounts first — everything else references them.
   const accountsByHandle = new Map();
@@ -102,6 +112,9 @@ export async function applyContentPlan(db, ObjectId, { env, jwtAccessSecret, por
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       candidateFailures.push({ targetKind: 'reel', category: reelSpec.category, topicSlug: reelSpec.topicSlug, source: picked?.provider || 'generated', reason });
+      if (isFatalSeedMediaRegistrationError(reason)) {
+        throw new Error(`Seed media registration is misconfigured (${reason}). Aborting before retrying additional candidates.`);
+      }
       if (picked) {
         try {
           const fallback = await applyReel(db, ObjectId, { author, reelSpec, picked: null, jwtAccessSecret, env, ordinal, now, processReels });

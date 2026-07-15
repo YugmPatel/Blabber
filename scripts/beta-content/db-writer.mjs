@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { idHexFor } from './seed-keys.mjs';
 import { localMediaRoot, mediaServicePort, SEED_NAMESPACE, SEED_VERSION } from './config.mjs';
 import { generateAccountAvatar, generateLocalImage, generateLocalReelVideo } from './local-assets.mjs';
+import { approveSeedImageMedia, approveSeedReelSource } from './seed-media-ingest.mjs';
 
 export function idFor(ObjectId, seedKey, subKind = 'primary') {
   return new ObjectId(idHexFor(seedKey, subKind));
@@ -145,36 +146,20 @@ async function putGeneratedImageThroughMediaPipeline(db, ObjectId, { user, seedK
 
   await db.collection('media').updateOne(
     { _id: mediaId },
-    {
-      $setOnInsert: { _id: mediaId, createdAt: now },
-      $set: {
-        userId: user._id,
-        fileName,
-        originalFileName: fileName,
-        fileType: 'image/jpeg',
-        fileSize: body.length,
-        s3Key: `beta-content/${pathParts.join('/')}/${mediaId}.jpg`,
-        url: `/api/media/local/${mediaId}`,
-        storage: 'local',
-        localPath,
-        status: 'pending',
-        purpose,
-        importer: provenance,
-        updatedAt: now,
-      },
-      $unset: { approvedAt: '', uploadedAt: '', scanMode: '', scanResult: '', scanErrorCategory: '', rejectedAt: '', quarantinedAt: '' },
-    },
+    { $setOnInsert: { _id: mediaId, createdAt: now } },
     { upsert: true }
   );
-
-  const response = await fetch(`http://localhost:${mediaServicePort(env)}/local/${mediaId.toString()}`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${accessTokenFor(user, jwtAccessSecret)}`, 'Content-Type': 'image/jpeg' },
-    body,
+  await approveSeedImageMedia(db, {
+    mediaId,
+    userId: user._id,
+    localPath,
+    fileName,
+    s3Key: `beta-content/${pathParts.join('/')}/${mediaId}.jpg`,
+    url: `/api/media/local/${mediaId}`,
+    buffer: body,
+    importer: provenance,
+    now,
   });
-  if (!response.ok) throw new Error(`generated_image_pipeline_rejected_${response.status}`);
-  const approved = await db.collection('media').findOne({ _id: mediaId, status: 'approved', fileType: /^image\// });
-  if (!approved) throw new Error('generated_image_not_approved');
 
   return { mediaId, provenance, url: `/api/media/local/${mediaId}` };
 }
@@ -244,37 +229,18 @@ export async function applyPost(db, ObjectId, { author, postSpec, picked, valida
     image = Buffer.alloc(0); // real bytes come from the file we just wrote to disk
   }
 
-  await db.collection('media').updateOne(
-    { _id: mediaId },
-    {
-      $setOnInsert: { _id: mediaId, createdAt: now },
-      $set: {
-        userId: author._id,
-        fileName: `${postSpec.seedKey}.jpg`,
-        originalFileName: `${postSpec.seedKey}.jpg`,
-        fileType: 'image/jpeg',
-        fileSize: image.length,
-        s3Key: `beta-content/photos/${mediaId}.jpg`,
-        url: `/api/media/local/${mediaId}`,
-        storage: 'local',
-        localPath,
-        status: 'pending',
-        purpose: 'general',
-        importer: provenance,
-        updatedAt: now,
-      },
-      $unset: { approvedAt: '', uploadedAt: '', scanMode: '', scanResult: '', scanErrorCategory: '', rejectedAt: '', quarantinedAt: '' },
-    },
-    { upsert: true }
-  );
-
   const body = picked ? image : (await import('node:fs')).readFileSync(localPath);
-  const response = await fetchImpl(`http://localhost:${mediaServicePort(env)}/local/${mediaId.toString()}`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${accessTokenFor(author, jwtAccessSecret)}`, 'Content-Type': 'image/jpeg' },
-    body,
+  await approveSeedImageMedia(db, {
+    mediaId,
+    userId: author._id,
+    localPath,
+    fileName: `${postSpec.seedKey}.jpg`,
+    s3Key: `beta-content/photos/${mediaId}.jpg`,
+    url: `/api/media/local/${mediaId}`,
+    buffer: body,
+    importer: provenance,
+    now,
   });
-  if (!response.ok) throw new Error(`post_photo_pipeline_rejected_${response.status}`);
   const approved = await db.collection('media').findOne({ _id: mediaId, status: 'approved', fileType: /^image\// });
   if (!approved) throw new Error('post_photo_not_approved');
 
@@ -380,12 +346,17 @@ export async function applyReel(db, ObjectId, { author, reelSpec, picked, valida
     { upsert: true }
   );
 
-  const response = await fetchImpl(`http://localhost:${mediaServicePort(env)}/reels/uploads/${reelId.toString()}/source`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${accessTokenFor(author, jwtAccessSecret)}`, 'Content-Type': 'video/mp4' },
-    body: source,
+  await approveSeedReelSource(db, {
+    mediaId,
+    reelId,
+    userId: author._id,
+    localPath: sourcePath,
+    fileName: `${reelSpec.seedKey}.mp4`,
+    s3Key: `beta-content/reels/${mediaId}.mp4`,
+    buffer: source,
+    importer: provenance,
+    now,
   });
-  if (!response.ok) throw new Error(`reel_video_upload_rejected_${response.status}`);
 
   await processReels();
 

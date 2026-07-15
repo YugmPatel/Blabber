@@ -26,6 +26,7 @@ import { buildInventoryReport, checkFfmpegAvailable, countCurrentInventory, enfo
 import { topicBySlug } from './beta-content/topics.mjs';
 import { failureSummary, pickFirstValidCandidate } from './beta-content/media-preflight.mjs';
 import { resolveBetaSeedFontFile } from './beta-content/local-assets.mjs';
+import { assertSeedMediaRegistrationAvailable } from './beta-content/seed-media-ingest.mjs';
 
 const MODE_FLAGS = ['--dry-run', '--apply', '--report', '--reset'];
 
@@ -47,6 +48,21 @@ export function parseArgs(argv) {
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: 'inherit', ...options });
   if (result.status !== 0) process.exit(result.status || 1);
+}
+
+export function betaContentContainerCopyCommands() {
+  return [
+    [
+      'docker',
+      [
+        'compose', '-f', 'docker-compose.full.yml', 'exec', '-T',
+        'media', 'sh', '-lc',
+        'rm -rf -- /app/services/media/seed-beta-content.mjs /app/services/media/beta-content',
+      ],
+    ],
+    ['docker', ['compose', '-f', 'docker-compose.full.yml', 'cp', 'scripts/seed-beta-content.mjs', 'media:/app/services/media/seed-beta-content.mjs']],
+    ['docker', ['compose', '-f', 'docker-compose.full.yml', 'cp', 'scripts/beta-content/.', 'media:/app/services/media/beta-content']],
+  ];
 }
 
 export function isProductionLike(env) {
@@ -181,6 +197,7 @@ async function runDryRun() {
   const usedAssetKeys = new Set();
   const providerCounts = {};
   const candidateFailures = [];
+  assertSeedMediaRegistrationAvailable(process.env);
   const ffmpegAvailable = checkFfmpegAvailable();
   if (!ffmpegAvailable) {
     throw new Error('ERROR: ffmpeg/ffprobe is required on the host for strict beta content dry-run media validation. Install ffmpeg or run dry-run from an environment that has it.');
@@ -338,8 +355,9 @@ export async function main(argv = process.argv.slice(2)) {
       ...(confirmReset ? ['--confirm-reset-beta-seed-content'] : []),
       ...(confirmDeleteProduction ? ['--confirm-delete-production-beta-seed-content'] : []),
     ];
-    run('docker', ['compose', '-f', 'docker-compose.full.yml', 'cp', 'scripts/seed-beta-content.mjs', 'media:/app/services/media/seed-beta-content.mjs']);
-    run('docker', ['compose', '-f', 'docker-compose.full.yml', 'cp', 'scripts/beta-content', 'media:/app/services/media/beta-content']);
+    for (const [command, commandArgs] of betaContentContainerCopyCommands()) {
+      run(command, commandArgs);
+    }
     run('docker', [
       'compose', '-f', 'docker-compose.full.yml', 'exec', '-T',
       '-e', 'BLABBER_BETA_CONTENT_IN_CONTAINER=1',

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MAX_PHOTO_BYTES, MAX_VIDEO_BYTES } from './config.mjs';
 import { candidateAssetKey } from './asset-score.mjs';
+import { validateSeedImagePolicy, validateSeedReelUploadPolicy } from './seed-media-ingest.mjs';
 
 const REEL_MIN_DURATION_SECONDS = 3;
 const REEL_MAX_DURATION_SECONDS = 90;
@@ -85,7 +86,8 @@ export function validateReelProbe(parsed) {
 
 export async function preflightCandidate(candidate, { kind, fetchImpl = fetch, execFile = execFileSync } = {}) {
   const buffer = await downloadCandidateBuffer(candidate, { fetchImpl, maxBytes: kind === 'video' ? MAX_VIDEO_BYTES : MAX_PHOTO_BYTES });
-  if (kind === 'photo' && !detectImageMime(buffer)) throw new Error('mime_mismatch');
+  if (kind === 'photo') validateSeedImagePolicy({ buffer, fileName: 'seed-photo.jpg', declaredMimeType: 'image/jpeg' });
+  if (kind === 'video') validateSeedReelUploadPolicy({ buffer, fileName: 'seed-reel.mp4', declaredMimeType: 'video/mp4' });
   const tempDir = mkdtempSync(join(tmpdir(), 'blabber-beta-preflight-'));
   const extension = kind === 'video' ? '.mp4' : '.jpg';
   const path = join(tempDir, `asset${extension}`);

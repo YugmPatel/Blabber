@@ -118,15 +118,21 @@ pnpm test:beta-content
    campus, food.` — **before** `--apply` does any writes if it's clear the
    plan can't be met, or partway through `--apply` if something fails
    unexpectedly after some items already succeeded.
-6. **`db-writer.mjs`** / **`apply.mjs`** perform the actual writes. Photos
-   and reel source video are downloaded and then `PUT` through the exact
-   same authenticated HTTP routes a real upload would use
-   (`/local/:mediaId`, `/reels/uploads/:reelId/source` on the media
-   service) — so ClamAV/mock malware scanning and, for reels, the real
-   `ffmpeg` transcode always run for real. Reactions, comments, and follows
-   are direct, idempotent Mongo upserts (there's no HTTP route for
-   backfilling historical-looking engagement), keeping the denormalized
-   `reactionCounts`/`commentCount` caches on each post/reel in sync.
+6. **`db-writer.mjs`** / **`apply.mjs`** perform the actual writes. Seed
+   media uses an internal seed ingestion helper instead of browser/JWT upload
+   endpoints. That helper still applies seed media registration checks,
+   content-type/extension validation, ClamAV/mock scanning, local storage
+   writes, approved media status updates, owner IDs, and seed metadata; Reels
+   still run through the real `ffmpeg` processing pipeline after the source
+   is registered. Reactions, comments, and follows are direct, idempotent
+   Mongo upserts (there's no HTTP route for backfilling historical-looking
+   engagement), keeping the denormalized `reactionCounts`/`commentCount`
+   caches on each post/reel in sync.
+
+If apply ever reports a `401` from seed media registration/upload, treat it
+as a programming/configuration error: the seed path should not depend on
+browser user JWT upload auth. Stop, inspect `pnpm seed:beta-content --report`,
+and reset the partial beta seed content before retrying after the fix.
 
 ### Idempotency
 

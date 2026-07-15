@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertProductionModeAllowed,
   assertRecentMongoBackup,
+  betaContentContainerCopyCommands,
   mongoBackupCommand,
   parseArgs,
   productionApplyRequirements,
@@ -100,5 +101,24 @@ describe('production warning output helpers', () => {
     expect(payload.expectedCounts).toMatchObject({ accounts: 10, posts: 60, reels: 30, topics: 10, reactions: '80-150', comments: '25-40' });
     expect(payload.expectedCounts.follows).toBeGreaterThan(0);
     expect(payload.warning).toContain('media records');
+  });
+});
+
+describe('container copy safety', () => {
+  it('removes only temporary copied seed paths before copying fresh seed code', () => {
+    const commands = betaContentContainerCopyCommands();
+    expect(commands).toHaveLength(3);
+
+    const [cleanupCommand, scriptCopyCommand, dirCopyCommand] = commands;
+    expect(cleanupCommand[0]).toBe('docker');
+    expect(cleanupCommand[1]).toEqual([
+      'compose', '-f', 'docker-compose.full.yml', 'exec', '-T',
+      'media', 'sh', '-lc',
+      'rm -rf -- /app/services/media/seed-beta-content.mjs /app/services/media/beta-content',
+    ]);
+    expect(cleanupCommand[1].join(' ')).not.toContain('/data/blabber-media');
+
+    expect(scriptCopyCommand).toEqual(['docker', ['compose', '-f', 'docker-compose.full.yml', 'cp', 'scripts/seed-beta-content.mjs', 'media:/app/services/media/seed-beta-content.mjs']]);
+    expect(dirCopyCommand).toEqual(['docker', ['compose', '-f', 'docker-compose.full.yml', 'cp', 'scripts/beta-content/.', 'media:/app/services/media/beta-content']]);
   });
 });
