@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAccountAvatarFfmpegArgs,
   buildLocalImageFfmpegArgs,
+  buildLocalReelVideoFfmpegArgs,
   resolveBetaSeedFontFile,
 } from '../local-assets.mjs';
 
@@ -74,6 +75,15 @@ describe('generated asset ffmpeg drawtext commands', () => {
     });
     const filter = args[args.indexOf('-vf') + 1];
     expect(filter).toContain("drawtext=fontfile='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'");
+    expect(filter).not.toContain('font=Sans');
+  });
+
+  it('uses fontfile for generated fallback reels', () => {
+    const args = buildLocalReelVideoFfmpegArgs('/tmp/reel.mp4', {
+      fontFile: '/usr/share/fonts/TTF/DejaVuSans.ttf',
+    });
+    const filter = args[args.indexOf('-vf') + 1];
+    expect(filter).toContain("drawtext=fontfile='/usr/share/fonts/TTF/DejaVuSans.ttf'");
     expect(filter).not.toContain('font=Sans');
   });
 });

@@ -220,7 +220,7 @@ export async function ensureAccountIdentityAssets(db, ObjectId, { accountSpec, u
  * pipeline, then upserts the posts document — mirroring
  * scripts/import-pexels-demo-content.mjs's approvePhoto() exactly.
  */
-export async function applyPost(db, ObjectId, { author, postSpec, picked, jwtAccessSecret, env, fetchImpl = fetch, ordinal, now }) {
+export async function applyPost(db, ObjectId, { author, postSpec, picked, validatedBuffer, jwtAccessSecret, env, fetchImpl = fetch, ordinal, now }) {
   const mediaId = idFor(ObjectId, postSpec.seedKey, 'media');
   const postId = idFor(ObjectId, postSpec.seedKey, 'post');
   const existing = await db.collection('posts').findOne({ _id: postId, discoverable: true });
@@ -237,7 +237,7 @@ export async function applyPost(db, ObjectId, { author, postSpec, picked, jwtAcc
     generateLocalImage(localPath, { index: ordinal, title: postSpec.localAsset.title, caption: postSpec.caption });
     image = Buffer.alloc(0);
   } else if (picked) {
-    image = await downloadBuffer(picked.downloadUrl, 18 * 1024 * 1024, fetchImpl);
+    image = validatedBuffer || await downloadBuffer(picked.downloadUrl, 18 * 1024 * 1024, fetchImpl);
   } else {
     mkdirSync(dirname(localPath), { recursive: true });
     generateLocalImage(localPath, { index: ordinal });
@@ -314,7 +314,7 @@ export async function applyPost(db, ObjectId, { author, postSpec, picked, jwtAcc
  * processOnePendingReel(), then flips the reel to published/discoverable —
  * mirroring scripts/import-pexels-demo-content.mjs's approveVideo() exactly.
  */
-export async function applyReel(db, ObjectId, { author, reelSpec, picked, jwtAccessSecret, env, fetchImpl = fetch, ordinal, now, processReels }) {
+export async function applyReel(db, ObjectId, { author, reelSpec, picked, validatedBuffer, jwtAccessSecret, env, fetchImpl = fetch, ordinal, now, processReels }) {
   const mediaId = idFor(ObjectId, reelSpec.seedKey, 'media');
   const reelId = idFor(ObjectId, reelSpec.seedKey, 'reel');
   const existing = await db.collection('reels').findOne({ _id: reelId, processingStatus: 'ready', reelDiscoverable: true });
@@ -325,7 +325,7 @@ export async function applyReel(db, ObjectId, { author, reelSpec, picked, jwtAcc
   let provenance = provenanceFor({ picked, seedKey: reelSpec.seedKey, searchQuery: reelSpec.searchQuery });
   let source;
   if (picked) {
-    source = await downloadBuffer(picked.downloadUrl, 45 * 1024 * 1024, fetchImpl);
+    source = validatedBuffer || await downloadBuffer(picked.downloadUrl, 45 * 1024 * 1024, fetchImpl);
   } else {
     mkdirSync(dirname(sourcePath), { recursive: true });
     generateLocalReelVideo(sourcePath, { index: ordinal });
@@ -390,7 +390,10 @@ export async function applyReel(db, ObjectId, { author, reelSpec, picked, jwtAcc
   await processReels();
 
   const ready = await db.collection('reels').findOne({ _id: reelId, processingStatus: 'ready', fallbackPath: { $exists: true }, posterPath: { $exists: true } });
-  if (!ready) throw new Error('reel_not_ready_after_processing');
+  if (!ready) {
+    const rejected = await db.collection('reels').findOne({ _id: reelId, processingStatus: { $in: ['rejected', 'failed'] } });
+    throw new Error(rejected?.validationFailureCategory || 'reel_not_ready_after_processing');
+  }
 
   await db.collection('reels').updateOne(
     { _id: reelId, processingStatus: 'ready' },

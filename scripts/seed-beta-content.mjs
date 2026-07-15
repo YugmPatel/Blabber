@@ -20,10 +20,12 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { requireProviderKeys, mediaServicePort, mongoUri, mongoDbName } from './beta-content/config.mjs';
 import { buildContentPlan } from './beta-content/content-plan.mjs';
-import { resolvePhoto, resolveVideo } from './beta-content/resolve-asset.mjs';
+import { resolvePhotoCandidates, resolveVideoCandidates } from './beta-content/resolve-asset.mjs';
 import { candidateAssetKey } from './beta-content/asset-score.mjs';
 import { buildInventoryReport, checkFfmpegAvailable, countCurrentInventory, enforceMinimumInventory } from './beta-content/inventory.mjs';
 import { topicBySlug } from './beta-content/topics.mjs';
+import { failureSummary, pickFirstValidCandidate } from './beta-content/media-preflight.mjs';
+import { resolveBetaSeedFontFile } from './beta-content/local-assets.mjs';
 
 const MODE_FLAGS = ['--dry-run', '--apply', '--report', '--reset'];
 
@@ -178,14 +180,32 @@ async function runDryRun() {
   const plan = buildContentPlan();
   const usedAssetKeys = new Set();
   const providerCounts = {};
+  const candidateFailures = [];
+  const ffmpegAvailable = checkFfmpegAvailable();
+  if (!ffmpegAvailable) {
+    throw new Error('ERROR: ffmpeg/ffprobe is required on the host for strict beta content dry-run media validation. Install ffmpeg or run dry-run from an environment that has it.');
+  }
+  let generatedAssetFontFile = null;
+  let generatedAssetError = null;
+  try {
+    generatedAssetFontFile = resolveBetaSeedFontFile();
+  } catch (error) {
+    generatedAssetError = error instanceof Error ? error.message : String(error);
+    throw new Error(generatedAssetError);
+  }
 
   console.log(`Resolving ${plan.posts.length} post photo candidates against Pexels/Pixabay/Unsplash...`);
   const postResolutions = [];
   for (const postSpec of plan.posts) {
     const topic = topicBySlug(postSpec.topicSlug);
-    const { picked, attempts } = postSpec.localAsset
+    const resolution = postSpec.localAsset
       ? { picked: null, attempts: [{ provider: 'generated', skipped: true, reason: 'seed-owned branded card' }] }
-      : await resolvePhoto({ seedKey: postSpec.seedKey, query: postSpec.searchQuery, topic, apiKeys, alreadyUsedAssetKeys: usedAssetKeys });
+      : await resolvePhotoCandidates({ seedKey: postSpec.seedKey, query: postSpec.searchQuery, topic, apiKeys, alreadyUsedAssetKeys: usedAssetKeys });
+    const preflight = postSpec.localAsset
+      ? { picked: null, validated: null, failures: [] }
+      : await pickFirstValidCandidate({ candidates: resolution.candidates, kind: 'photo', alreadyUsedAssetKeys: usedAssetKeys });
+    const picked = preflight.picked;
+    candidateFailures.push(...preflight.failures.map((failure) => ({ ...failure, targetKind: 'post', topicSlug: postSpec.topicSlug })));
     if (picked) {
       usedAssetKeys.add(candidateAssetKey(picked));
       providerCounts[picked.provider] = (providerCounts[picked.provider] || 0) + 1;
@@ -195,22 +215,26 @@ async function runDryRun() {
     // A resolvable local fallback always exists in dry-run's accounting
     // (ffmpeg availability is checked separately below) — only a genuinely
     // impossible ffmpeg situation would make this "unresolved".
-    postResolutions.push({ spec: postSpec, resolved: true, picked, source: postSpec.localAsset ? 'generated' : picked?.provider || 'generated', attempts });
+    postResolutions.push({ spec: postSpec, resolved: true, picked, source: postSpec.localAsset ? 'generated' : picked?.provider || 'generated', attempts: resolution.attempts });
   }
 
   console.log(`Resolving ${plan.reels.length} reel video candidates against Pexels/Pixabay...`);
   const reelResolutions = [];
   for (const reelSpec of plan.reels) {
     const topic = topicBySlug(reelSpec.topicSlug);
-    const { picked, attempts } = await resolveVideo({ seedKey: reelSpec.seedKey, query: reelSpec.searchQuery, topic, apiKeys, alreadyUsedAssetKeys: usedAssetKeys });
+    const resolution = await resolveVideoCandidates({ seedKey: reelSpec.seedKey, query: reelSpec.searchQuery, topic, apiKeys, alreadyUsedAssetKeys: usedAssetKeys });
+    const preflight = await pickFirstValidCandidate({ candidates: resolution.candidates, kind: 'video', alreadyUsedAssetKeys: usedAssetKeys });
+    const picked = preflight.picked;
+    candidateFailures.push(...preflight.failures.map((failure) => ({ ...failure, targetKind: 'reel', category: reelSpec.category, topicSlug: reelSpec.topicSlug })));
     if (picked) {
       usedAssetKeys.add(candidateAssetKey(picked));
       providerCounts[picked.provider] = (providerCounts[picked.provider] || 0) + 1;
     }
-    reelResolutions.push({ spec: reelSpec, resolved: true, picked, source: picked?.provider || 'generated', attempts });
+    // Generated fallback reels are available only when ffmpeg and a concrete
+    // font file are available; buildInventoryReport enforces ffmpeg below.
+    reelResolutions.push({ spec: reelSpec, resolved: true, picked, source: picked?.provider || 'generated', attempts: resolution.attempts });
   }
 
-  const ffmpegAvailable = checkFfmpegAvailable();
   const report = buildInventoryReport({ plan, postResolutions, reelResolutions, ffmpegAvailable });
   const localFallbackCount = { posts: postResolutions.filter((r) => !r.picked).length, reels: reelResolutions.filter((r) => !r.picked).length };
 
@@ -220,7 +244,10 @@ async function runDryRun() {
       inventory: report,
       sourceMix: report.sourceMix,
       localFallback: localFallbackCount,
+      failedCandidateReasons: failureSummary(candidateFailures),
       ffmpegAvailable,
+      generatedAssetFontFile,
+      generatedAssetError,
       note: 'No database writes were made. Run --apply to create this content for real.',
     },
     null,

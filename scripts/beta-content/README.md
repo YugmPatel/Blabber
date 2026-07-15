@@ -55,8 +55,10 @@ seed metadata; they do not call external image-generation APIs.
 
 ```bash
 # Fetch + plan + score against the real provider APIs, report the resulting
-# inventory, and fail loudly if targets can't be met. No database writes.
-# Runs entirely on the host — no Docker required.
+# inventory, and fail loudly if targets can't be met. Dry-run downloads
+# provider candidates into temp storage and runs strict media validation /
+# ffprobe preflight before counting a post or reel as usable. No database
+# writes. Runs entirely on the host.
 pnpm seed:beta-content:dry-run
 
 # Actually create everything: accounts, posts (through the real
@@ -94,17 +96,29 @@ pnpm test:beta-content
    (minimum 1080px width for photos, 5-20s duration target for video,
    portrait preference for Reels, duplicate-asset avoidance, a defensive
    unsafe-term/text-heavy text filter).
-3. If every provider comes back empty for an item, **`local-assets.mjs`**
-   generates a Blabber-teal-branded fallback image/clip with `ffmpeg` — the
-   plan itself never comes up short, even if the real internet does.
-4. **`inventory.mjs`** checks the resolved plan against the required
+3. **`media-preflight.mjs`** downloads candidate media into temp storage and
+   validates it before inventory counts it: images must sniff/probe as valid
+   images, and Reels must satisfy the same stream rules used by the real
+   media processor (one H.264 video stream, optional AAC audio, valid
+   duration/dimensions/frame rate/bitrate). Candidates that fail with
+   `unsupported_stream`, unsupported codecs, invalid dimensions/duration,
+   media-policy-style MIME/type rejection, or download/scan-style failures
+   are skipped and the next provider candidate is tried.
+4. If every provider comes back empty or every provider candidate fails
+   validation for an item, **`local-assets.mjs`** generates a
+   Blabber-teal-branded fallback image/clip with `ffmpeg`. Generated Reels
+   are small deterministic MP4 files and use the same `source: "generated"`
+   metadata pattern as local cards/avatars. Provider media remains the
+   majority when providers return healthy assets; generated Reels only fill
+   gaps after provider retries are exhausted.
+5. **`inventory.mjs`** checks the resolved plan against the required
    minimums (60 posts, 30 reels split 5/5/5/4/4/4/3 across categories, 10
    topics, etc.) and throws a specific, actionable error — e.g. `ERROR:
    Required 30 reels, only 24 valid reels selected. Missing categories:
    campus, food.` — **before** `--apply` does any writes if it's clear the
    plan can't be met, or partway through `--apply` if something fails
    unexpectedly after some items already succeeded.
-5. **`db-writer.mjs`** / **`apply.mjs`** perform the actual writes. Photos
+6. **`db-writer.mjs`** / **`apply.mjs`** perform the actual writes. Photos
    and reel source video are downloaded and then `PUT` through the exact
    same authenticated HTTP routes a real upload would use
    (`/local/:mediaId`, `/reels/uploads/:reelId/source` on the media
@@ -161,6 +175,21 @@ works, and the 10 demo accounts are deactivated rather than deleted outright.
 Reactions/comments/follow edges tied to seeded content are hard-deleted
 since they're pure demo interaction data with no independent value. See
 `reset.mjs` for the exact behavior.
+
+### After a failed apply
+
+If an apply run fails after writing partial seed records, inspect the current
+state first:
+
+```bash
+pnpm seed:beta-content --report
+```
+
+For production cleanup, use the strict beta-content-only reset command:
+
+```bash
+BLABBER_SEED_TARGET=production pnpm seed:beta-content --reset --allow-production --confirm-production-beta-seed-content --confirm-reset-beta-seed-content --confirm-delete-production-beta-seed-content
+```
 
 ## Production
 

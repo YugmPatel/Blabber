@@ -146,6 +146,26 @@ export function buildAccountAvatarFfmpegArgs(outputPath, { index = 0, initials =
   ];
 }
 
+export function buildLocalReelVideoFfmpegArgs(outputPath, { durationSeconds = 6, fontFile } = {}) {
+  if (!fontFile) throw new Error(NO_FONT_ERROR);
+  return [
+    '-y',
+    '-loglevel', 'error',
+    '-f', 'lavfi',
+    '-i', `color=c=0x${BRAND_TEAL}:s=720x1280:d=${durationSeconds}`,
+    '-vf', [
+      `drawbox=x=100+80*sin(t*1.4):y=300+140*cos(t*1.1):w=420:h=420:color=0x${BRAND_MINT}@0.25:t=fill`,
+      'drawbox=x=0:y=1080:w=720:h=200:color=black@0.32:t=fill',
+      `drawtext=fontfile='${escapeDrawtextOption(fontFile)}':text='${escapeDrawtext('Blabber Beta')}':fontcolor=white:fontsize=54:x=56:y=1098`,
+      `drawtext=fontfile='${escapeDrawtextOption(fontFile)}':text='${escapeDrawtext('Generated seed reel')}':fontcolor=0xe2e8f0:fontsize=32:x=56:y=1168`,
+    ].join(','),
+    '-an',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    outputPath,
+  ];
+}
+
 /**
  * A single still frame, Blabber-teal gradient background with a simple
  * geometric accent — used as the local-generated fallback for a feed photo.
@@ -164,18 +184,6 @@ export function generateAccountAvatar(outputPath, { index = 0, initials = 'B' } 
  * clears asset-score.mjs's filters.
  */
 export function generateLocalReelVideo(outputPath, { index = 0, durationSeconds = 6 } = {}) {
-  runQuiet('ffmpeg', [
-    '-y',
-    '-loglevel', 'error',
-    '-f', 'lavfi',
-    '-i', `color=c=0x${BRAND_TEAL}:s=720x1280:d=${durationSeconds}`,
-    '-vf', [
-      `drawbox=x=100+80*sin(t*1.4):y=300+140*cos(t*1.1):w=420:h=420:color=0x${BRAND_MINT}@0.25:t=fill`,
-      'drawbox=x=0:y=1080:w=720:h=200:color=black@0.32:t=fill',
-    ].join(','),
-    '-an',
-    '-c:v', 'libx264',
-    '-pix_fmt', 'yuv420p',
-    outputPath,
-  ]);
+  const fontFile = resolveBetaSeedFontFile();
+  runQuiet('ffmpeg', buildLocalReelVideoFfmpegArgs(outputPath, { index, durationSeconds, fontFile }));
 }

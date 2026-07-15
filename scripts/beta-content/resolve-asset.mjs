@@ -55,8 +55,9 @@ const PROVIDER_MODULES = { pexels, pixabay, unsplash };
  * required keys are present via config.requireProviderKeys before reaching
  * here for the modes that need them).
  */
-export async function resolvePhoto({ seedKey, query, topic, apiKeys, alreadyUsedAssetKeys, fetchImpl, candidatesPerProvider = 8 }) {
+export async function resolvePhotoCandidates({ seedKey, query, topic, apiKeys, alreadyUsedAssetKeys, fetchImpl, candidatesPerProvider = 24 }) {
   const attempts = [];
+  const pool = [];
   for (const provider of photoProviderOrder(seedKey)) {
     const apiKey = apiKeys?.[provider];
     if (!apiKey) {
@@ -65,21 +66,22 @@ export async function resolvePhoto({ seedKey, query, topic, apiKeys, alreadyUsed
     }
     try {
       const candidates = await PROVIDER_MODULES[provider].searchPhotos({ query, perPage: candidatesPerProvider, apiKey, fetchImpl });
-      const picks = selectTopCandidates(candidates, 1, { kind: 'photo', topic, alreadyUsedAssetKeys });
-      attempts.push({ provider, found: candidates.length, picked: Boolean(picks[0]) });
-      if (picks[0]) return { picked: picks[0], attempts };
+      const picks = selectTopCandidates(candidates, candidates.length, { kind: 'photo', topic, alreadyUsedAssetKeys });
+      attempts.push({ provider, found: candidates.length, picked: Boolean(picks[0]), usableCandidates: picks.length });
+      pool.push(...picks);
     } catch (error) {
       attempts.push({ provider, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  return { picked: null, attempts };
+  return { candidates: pool, attempts };
 }
 
 /**
  * Same shape as resolvePhoto but for video needs (Pexels then Pixabay only).
  */
-export async function resolveVideo({ seedKey, query, topic, apiKeys, alreadyUsedAssetKeys, fetchImpl, candidatesPerProvider = 6 }) {
+export async function resolveVideoCandidates({ seedKey, query, topic, apiKeys, alreadyUsedAssetKeys, fetchImpl, candidatesPerProvider = 24 }) {
   const attempts = [];
+  const pool = [];
   for (const provider of videoProviderOrder()) {
     const apiKey = apiKeys?.[provider];
     if (!apiKey) {
@@ -88,12 +90,22 @@ export async function resolveVideo({ seedKey, query, topic, apiKeys, alreadyUsed
     }
     try {
       const candidates = await PROVIDER_MODULES[provider].searchVideos({ query, perPage: candidatesPerProvider, apiKey, fetchImpl });
-      const picks = selectTopCandidates(candidates, 1, { kind: 'video', topic, alreadyUsedAssetKeys });
-      attempts.push({ provider, found: candidates.length, picked: Boolean(picks[0]) });
-      if (picks[0]) return { picked: picks[0], attempts };
+      const picks = selectTopCandidates(candidates, candidates.length, { kind: 'video', topic, alreadyUsedAssetKeys });
+      attempts.push({ provider, found: candidates.length, picked: Boolean(picks[0]), usableCandidates: picks.length });
+      pool.push(...picks);
     } catch (error) {
       attempts.push({ provider, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  return { picked: null, attempts };
+  return { candidates: pool, attempts };
+}
+
+export async function resolvePhoto(params) {
+  const { candidates, attempts } = await resolvePhotoCandidates(params);
+  return { picked: candidates[0] || null, attempts };
+}
+
+export async function resolveVideo(params) {
+  const { candidates, attempts } = await resolveVideoCandidates(params);
+  return { picked: candidates[0] || null, attempts };
 }

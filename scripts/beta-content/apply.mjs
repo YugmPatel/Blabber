@@ -9,11 +9,12 @@
 
 import { createRequire } from 'node:module';
 import { buildContentPlan } from './content-plan.mjs';
-import { resolvePhoto, resolveVideo } from './resolve-asset.mjs';
+import { resolvePhotoCandidates, resolveVideoCandidates } from './resolve-asset.mjs';
 import { candidateAssetKey } from './asset-score.mjs';
 import { topicBySlug } from './topics.mjs';
 import { buildInventoryReport, checkFfmpegAvailable, enforceMinimumInventory } from './inventory.mjs';
 import { applyComment, applyFollow, applyPost, applyReaction, applyReel, ensureAccount, ensureAccountIdentityAssets, idFor } from './db-writer.mjs';
+import { failureSummary, pickFirstValidCandidate } from './media-preflight.mjs';
 
 async function makeProcessReels() {
   const require = createRequire(import.meta.url);
@@ -38,6 +39,7 @@ export async function applyContentPlan(db, ObjectId, { env, jwtAccessSecret, por
   const plan = buildContentPlan();
   const usedAssetKeys = new Set();
   const processReels = await makeProcessReels();
+  const candidateFailures = [];
 
   if (!checkFfmpegAvailable()) {
     throw new Error('ERROR: ffmpeg is not available inside the media container — cannot generate local fallback assets or process reel video. Aborting before any writes.');
@@ -60,17 +62,24 @@ export async function applyContentPlan(db, ObjectId, { env, jwtAccessSecret, por
   for (let ordinal = 0; ordinal < plan.posts.length; ordinal += 1) {
     const postSpec = plan.posts[ordinal];
     const topic = topicBySlug(postSpec.topicSlug);
-    const picked = postSpec.localAsset
-      ? null
-      : (await resolvePhoto({ seedKey: postSpec.seedKey, query: postSpec.searchQuery, topic, apiKeys, alreadyUsedAssetKeys: usedAssetKeys })).picked;
+    const resolution = postSpec.localAsset
+      ? { candidates: [], attempts: [{ provider: 'generated', skipped: true, reason: 'seed-owned branded card' }] }
+      : await resolvePhotoCandidates({ seedKey: postSpec.seedKey, query: postSpec.searchQuery, topic, apiKeys, alreadyUsedAssetKeys: usedAssetKeys });
+    const preflight = postSpec.localAsset
+      ? { picked: null, validated: null, failures: [] }
+      : await pickFirstValidCandidate({ candidates: resolution.candidates, kind: 'photo', alreadyUsedAssetKeys: usedAssetKeys });
+    let picked = preflight.picked;
+    candidateFailures.push(...preflight.failures.map((failure) => ({ ...failure, targetKind: 'post', topicSlug: postSpec.topicSlug })));
     const author = accountsByHandle.get(postSpec.authorHandle);
     try {
-      const result = await applyPost(db, ObjectId, { author, postSpec, picked, jwtAccessSecret, env, ordinal, now });
+      const result = await applyPost(db, ObjectId, { author, postSpec, picked, validatedBuffer: preflight.validated?.buffer, jwtAccessSecret, env, ordinal, now });
       if (picked) usedAssetKeys.add(candidateAssetKey(picked));
       postIdBySeedKey.set(postSpec.seedKey, result.postId);
       postResolutions.push({ spec: postSpec, resolved: true, picked, source: postSpec.localAsset ? 'generated' : picked?.provider || 'generated' });
     } catch (error) {
-      postResolutions.push({ spec: postSpec, resolved: false, picked, source: postSpec.localAsset ? 'generated' : picked?.provider || 'generated', error: error instanceof Error ? error.message : String(error) });
+      const reason = error instanceof Error ? error.message : String(error);
+      candidateFailures.push({ targetKind: 'post', topicSlug: postSpec.topicSlug, source: picked?.provider || 'generated', reason });
+      postResolutions.push({ spec: postSpec, resolved: false, picked, source: postSpec.localAsset ? 'generated' : picked?.provider || 'generated', error: reason });
     }
   }
 
@@ -80,20 +89,49 @@ export async function applyContentPlan(db, ObjectId, { env, jwtAccessSecret, por
   for (let ordinal = 0; ordinal < plan.reels.length; ordinal += 1) {
     const reelSpec = plan.reels[ordinal];
     const topic = topicBySlug(reelSpec.topicSlug);
-    const { picked } = await resolveVideo({ seedKey: reelSpec.seedKey, query: reelSpec.searchQuery, topic, apiKeys, alreadyUsedAssetKeys: usedAssetKeys });
+    const resolution = await resolveVideoCandidates({ seedKey: reelSpec.seedKey, query: reelSpec.searchQuery, topic, apiKeys, alreadyUsedAssetKeys: usedAssetKeys });
+    const preflight = await pickFirstValidCandidate({ candidates: resolution.candidates, kind: 'video', alreadyUsedAssetKeys: usedAssetKeys });
+    let picked = preflight.picked;
+    candidateFailures.push(...preflight.failures.map((failure) => ({ ...failure, targetKind: 'reel', category: reelSpec.category, topicSlug: reelSpec.topicSlug })));
     const author = accountsByHandle.get(reelSpec.authorHandle);
     try {
-      const result = await applyReel(db, ObjectId, { author, reelSpec, picked, jwtAccessSecret, env, ordinal, now, processReels });
+      const result = await applyReel(db, ObjectId, { author, reelSpec, picked, validatedBuffer: preflight.validated?.buffer, jwtAccessSecret, env, ordinal, now, processReels });
       if (picked) usedAssetKeys.add(candidateAssetKey(picked));
       reelIdBySeedKey.set(reelSpec.seedKey, result.reelId);
       reelResolutions.push({ spec: reelSpec, resolved: true, picked, source: picked?.provider || 'generated' });
     } catch (error) {
-      reelResolutions.push({ spec: reelSpec, resolved: false, picked, source: picked?.provider || 'generated', error: error instanceof Error ? error.message : String(error) });
+      const reason = error instanceof Error ? error.message : String(error);
+      candidateFailures.push({ targetKind: 'reel', category: reelSpec.category, topicSlug: reelSpec.topicSlug, source: picked?.provider || 'generated', reason });
+      if (picked) {
+        try {
+          const fallback = await applyReel(db, ObjectId, { author, reelSpec, picked: null, jwtAccessSecret, env, ordinal, now, processReels });
+          reelIdBySeedKey.set(reelSpec.seedKey, fallback.reelId);
+          reelResolutions.push({ spec: reelSpec, resolved: true, picked: null, source: 'generated' });
+          continue;
+        } catch (fallbackError) {
+          candidateFailures.push({ targetKind: 'reel', category: reelSpec.category, topicSlug: reelSpec.topicSlug, source: 'generated', reason: fallbackError instanceof Error ? fallbackError.message : String(fallbackError) });
+        }
+      }
+      reelResolutions.push({ spec: reelSpec, resolved: false, picked, source: picked?.provider || 'generated', error: reason });
     }
   }
 
   const report = buildInventoryReport({ plan, postResolutions, reelResolutions, ffmpegAvailable: true });
-  enforceMinimumInventory(report);
+  try {
+    enforceMinimumInventory(report);
+  } catch (error) {
+    const seedRecordCount = await db.collection('beta_content_seed_records').countDocuments();
+    const detail = {
+      attempted: { posts: plan.posts.length, reels: plan.reels.length },
+      successfullyWritten: { posts: postIdBySeedKey.size, reels: reelIdBySeedKey.size },
+      failedCandidateReasons: failureSummary(candidateFailures),
+      partialSeedRecordsWritten: seedRecordCount > 0,
+      seedRecordCount,
+      reportCommand: 'pnpm seed:beta-content --report',
+      strictProductionResetCommand: 'BLABBER_SEED_TARGET=production pnpm seed:beta-content --reset --allow-production --confirm-production-beta-seed-content --confirm-reset-beta-seed-content --confirm-delete-production-beta-seed-content',
+    };
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(detail, null, 2)}`);
+  }
 
   // 4. Comments, 5. Reactions, 6. Follows — all direct, idempotent inserts.
   let commentsApplied = 0;
@@ -132,6 +170,7 @@ export async function applyContentPlan(db, ObjectId, { env, jwtAccessSecret, por
     comments: { planned: plan.comments.length, applied: commentsApplied },
     reactions: { planned: plan.reactions.length, applied: reactionsApplied },
     follows: { planned: plan.follows.length, applied: followsApplied },
+    failedCandidateReasons: failureSummary(candidateFailures),
     inventoryReport: report,
   };
 }
