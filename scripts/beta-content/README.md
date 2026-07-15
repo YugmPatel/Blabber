@@ -45,9 +45,11 @@ seed metadata; they do not call external image-generation APIs.
   never logs the key value itself, and never proceeds partway through with a
   provider silently disabled.
 
-- `ffmpeg` available inside the `media` container (it already is — the real
-  Reels processing pipeline depends on it) for the local-generated fallback
-  path.
+- `ffmpeg` plus a usable TrueType font inside the `media` container for the
+  local-generated fallback path. The media image installs
+  `fontconfig ttf-dejavu` on Alpine so `drawtext` can resolve a concrete
+  font file. If a custom image changes font paths, set
+  `BETA_SEED_FONT_FILE=/absolute/path/to/font.ttf`.
 
 ## Commands
 

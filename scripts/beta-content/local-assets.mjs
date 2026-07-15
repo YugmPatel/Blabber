@@ -8,6 +8,7 @@
 // rather than sourced stock content.
 
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 
 const BRAND_TEAL = '0f766e';
 const BRAND_MINT = '5eead4';
@@ -25,11 +26,42 @@ const PALETTE = [
   ['365314', 'bef264'],
 ];
 
+const FONT_CANDIDATES = [
+  '/usr/share/fonts/TTF/DejaVuSans.ttf',
+  '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+  '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+];
+
+const NO_FONT_ERROR = 'No usable font file found for beta generated assets. Install fontconfig/ttf-dejavu in the media image or set BETA_SEED_FONT_FILE.';
+
 function runQuiet(command, args) {
   const result = spawnSync(command, args, { stdio: 'pipe', encoding: 'utf8' });
   if (result.status !== 0) {
     throw new Error(`local_asset_generation_failed: ${command} ${(result.stderr || result.error?.message || '').slice(0, 300)}`);
   }
+}
+
+export function resolveBetaSeedFontFile({
+  env = process.env,
+  exists = existsSync,
+  spawn = spawnSync,
+} = {}) {
+  if (env.BETA_SEED_FONT_FILE && exists(env.BETA_SEED_FONT_FILE)) return env.BETA_SEED_FONT_FILE;
+
+  for (const candidate of FONT_CANDIDATES) {
+    if (exists(candidate)) return candidate;
+  }
+
+  for (const family of ['Sans', 'DejaVu Sans']) {
+    const result = spawn('fc-match', ['-f', '%{file}', family], { stdio: 'pipe', encoding: 'utf8' });
+    const file = String(result.stdout || '').trim();
+    if (result.status === 0 && file && exists(file)) return file;
+  }
+
+  throw new Error(NO_FONT_ERROR);
 }
 
 function escapeDrawtext(text) {
@@ -39,6 +71,13 @@ function escapeDrawtext(text) {
     .replace(/'/g, "\\'")
     .replace(/\[/g, '\\[')
     .replace(/\]/g, '\\]');
+}
+
+function escapeDrawtextOption(value) {
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, "\\'");
 }
 
 function wrapWords(text, maxChars) {
@@ -57,26 +96,24 @@ function wrapWords(text, maxChars) {
   return lines.slice(0, 4);
 }
 
-function drawText({ text, x, y, size, color = 'white', lineSpacing = 18, maxChars = 24 }) {
+function drawText({ text, x, y, size, fontFile, color = 'white', lineSpacing = 18, maxChars = 24 }) {
   return wrapWords(text, maxChars)
-    .map((line, index) => `drawtext=text='${escapeDrawtext(line)}':fontcolor=${color}:fontsize=${size}:x=${x}:y=${y + index * (size + lineSpacing)}`)
+    .map((line, index) => `drawtext=fontfile='${escapeDrawtextOption(fontFile)}':text='${escapeDrawtext(line)}':fontcolor=${color}:fontsize=${size}:x=${x}:y=${y + index * (size + lineSpacing)}`)
     .join(',');
 }
 
-/**
- * A single still frame, Blabber-teal gradient background with a simple
- * geometric accent — used as the local-generated fallback for a feed photo.
- */
-export function generateLocalImage(outputPath, { index = 0, title, caption } = {}) {
+export function buildLocalImageFfmpegArgs(outputPath, { index = 0, title, caption, fontFile } = {}) {
+  if (!fontFile) throw new Error(NO_FONT_ERROR);
   const [base, accent] = PALETTE[index % PALETTE.length] || [BRAND_TEAL, BRAND_MINT];
   const textFilters = title
     ? [
-        drawText({ text: 'Blabber', x: 80, y: 72, size: 42, color: `0x${BRAND_MINT}`, maxChars: 16 }),
-        drawText({ text: title, x: 80, y: 360, size: 76, maxChars: 22 }),
-        caption ? drawText({ text: caption, x: 84, y: 575, size: 38, color: '0xe2e8f0', maxChars: 42 }) : '',
+        drawText({ text: 'Blabber', x: 80, y: 72, size: 42, color: `0x${BRAND_MINT}`, maxChars: 16, fontFile }),
+        drawText({ text: title, x: 80, y: 360, size: 76, maxChars: 22, fontFile }),
+        caption ? drawText({ text: caption, x: 84, y: 575, size: 38, color: '0xe2e8f0', maxChars: 42, fontFile }) : '',
       ].filter(Boolean)
     : [];
-  runQuiet('ffmpeg', [
+
+  return [
     '-y',
     '-loglevel', 'error',
     '-f', 'lavfi',
@@ -89,12 +126,13 @@ export function generateLocalImage(outputPath, { index = 0, title, caption } = {
       ...textFilters,
     ].join(','),
     outputPath,
-  ]);
+  ];
 }
 
-export function generateAccountAvatar(outputPath, { index = 0, initials = 'B' } = {}) {
+export function buildAccountAvatarFfmpegArgs(outputPath, { index = 0, initials = 'B', fontFile } = {}) {
+  if (!fontFile) throw new Error(NO_FONT_ERROR);
   const [base, accent] = PALETTE[index % PALETTE.length] || [BRAND_TEAL, BRAND_MINT];
-  runQuiet('ffmpeg', [
+  return [
     '-y',
     '-loglevel', 'error',
     '-f', 'lavfi',
@@ -102,10 +140,22 @@ export function generateAccountAvatar(outputPath, { index = 0, initials = 'B' } 
     '-frames:v', '1',
     '-vf', [
       `drawbox=x=62:y=62:w=388:h=388:color=0x${accent}@0.24:t=fill`,
-      `drawtext=text='${escapeDrawtext(initials)}':fontcolor=white:fontsize=148:x=(w-text_w)/2:y=(h-text_h)/2-10`,
+      `drawtext=fontfile='${escapeDrawtextOption(fontFile)}':text='${escapeDrawtext(initials)}':fontcolor=white:fontsize=148:x=(w-text_w)/2:y=(h-text_h)/2-10`,
     ].join(','),
     outputPath,
-  ]);
+  ];
+}
+
+/**
+ * A single still frame, Blabber-teal gradient background with a simple
+ * geometric accent — used as the local-generated fallback for a feed photo.
+ */
+export function generateLocalImage(outputPath, { index = 0, title, caption } = {}) {
+  runQuiet('ffmpeg', buildLocalImageFfmpegArgs(outputPath, { index, title, caption, fontFile: resolveBetaSeedFontFile() }));
+}
+
+export function generateAccountAvatar(outputPath, { index = 0, initials = 'B' } = {}) {
+  runQuiet('ffmpeg', buildAccountAvatarFfmpegArgs(outputPath, { index, initials, fontFile: resolveBetaSeedFontFile() }));
 }
 
 /**

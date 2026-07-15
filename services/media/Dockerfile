@@ -46,7 +46,7 @@ RUN pnpm --filter @services/media build
 # Stage 3: Production - Create minimal runtime image
 FROM node:20.19.4-alpine AS production
 
-RUN apk add --no-cache ffmpeg libheif-tools
+RUN apk add --no-cache ffmpeg libheif-tools fontconfig ttf-dejavu
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
