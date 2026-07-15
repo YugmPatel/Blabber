@@ -21,6 +21,24 @@ export const chatKeys = {
   invitePreview: (token: string) => [...chatKeys.all, 'invite-preview', token] as const,
 };
 
+function removeChatFromCachedLists(queryClient: ReturnType<typeof useQueryClient>, chatId: string) {
+  queryClient.getQueryCache().findAll({ queryKey: chatKeys.lists() }).forEach((query) => {
+    queryClient.setQueryData<Chat[]>(query.queryKey, (old) => old?.filter((chat) => chat._id !== chatId));
+  });
+}
+
+function mergeChatIntoCachedLists(queryClient: ReturnType<typeof useQueryClient>, updatedChat: Chat) {
+  if (updatedChat.deletedAt) {
+    removeChatFromCachedLists(queryClient, updatedChat._id);
+    return;
+  }
+  queryClient.getQueryCache().findAll({ queryKey: chatKeys.lists() }).forEach((query) => {
+    queryClient.setQueryData<Chat[]>(query.queryKey, (old) =>
+      old?.map((chat) => (chat._id === updatedChat._id ? updatedChat : chat))
+    );
+  });
+}
+
 // Fetch all chats
 export const useChats = (filters?: { archived?: boolean; limit?: number }) => {
   return useQuery({
@@ -74,6 +92,7 @@ export const useUpdateChat = (chatId: string) => {
     onSuccess: (updatedChat) => {
       // Update the chat detail cache
       queryClient.setQueryData(chatKeys.detail(chatId), updatedChat);
+      mergeChatIntoCachedLists(queryClient, updatedChat);
       // Invalidate chat lists
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
@@ -94,6 +113,7 @@ export const useAddMember = (chatId: string) => {
     onSuccess: (updatedChat) => {
       // Update the chat detail cache
       queryClient.setQueryData(chatKeys.detail(chatId), updatedChat);
+      mergeChatIntoCachedLists(queryClient, updatedChat);
       // Invalidate chat lists
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
@@ -180,6 +200,7 @@ export const useLeaveGroup = (chatId: string) => {
     },
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+      removeChatFromCachedLists(queryClient, chatId);
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
   });
@@ -196,6 +217,28 @@ export const useDeleteGroup = (chatId: string) => {
     },
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+      removeChatFromCachedLists(queryClient, chatId);
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useEndGroup = (chatId: string) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post<{ chat: Chat }>(`/api/chats/${chatId}/end`);
+      return response.data.chat;
+    },
+    onSuccess: (updatedChat) => {
+      if (updatedChat.deletedAt) {
+        queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+        removeChatFromCachedLists(queryClient, chatId);
+      } else {
+        queryClient.setQueryData(chatKeys.detail(chatId), updatedChat);
+        mergeChatIntoCachedLists(queryClient, updatedChat);
+      }
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
   });

@@ -603,7 +603,7 @@ export default function ChatView() {
   // Loading state
   if (chatLoading || messagesLoading) {
     return (
-      <div className="flex h-full flex-col bg-white dark:bg-slate-900">
+      <div className="flex h-full min-w-0 w-full flex-1 flex-col bg-white dark:bg-slate-900">
         <div className="flex h-full items-center justify-center">
           <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-teal-600 dark:border-teal-400" />
         </div>
@@ -614,7 +614,7 @@ export default function ChatView() {
   // Error state
   if (!chat) {
     return (
-      <div className="flex h-full flex-col bg-white dark:bg-slate-900">
+      <div className="flex h-full min-w-0 w-full flex-1 flex-col bg-white dark:bg-slate-900">
         <div className="flex h-full items-center justify-center px-6">
           <div className="max-w-sm rounded-lg border border-slate-200 bg-white p-6 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <p className="text-base font-semibold text-slate-900 dark:text-white">Chat not available</p>
@@ -635,7 +635,7 @@ export default function ChatView() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-white dark:bg-slate-900">
+    <div className="flex h-full min-w-0 w-full flex-1 flex-col bg-white dark:bg-slate-900">
       <div className="flex items-center border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900 md:hidden">
         <button
           type="button"

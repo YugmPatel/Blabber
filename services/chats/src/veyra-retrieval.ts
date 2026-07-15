@@ -75,6 +75,7 @@ const STOPWORDS = new Set([
   'show', 'find', 'list', 'search', 'send', 'forward', 'delete', 'remove', 'update', 'edit', 'rsvp', 'schedule',
   'open', 'go', 'navigate',
   'photo', 'photos', 'picture', 'pictures', 'image', 'images',
+  'video', 'videos', 'media', 'clip', 'clips',
   'pdf', 'pdfs', 'document', 'documents', 'file', 'files',
   'link', 'links', 'url', 'urls',
   'plan', 'plans', 'planned', 'trip', 'event', 'events',
@@ -114,9 +115,10 @@ function planMatchesAllWords(plan: PlanThisDocument, queryWords: string[]): bool
 }
 
 /** What kind of content an action-class request ("send X to Y") refers to, reusing the same keyword signals as retrieval. */
-export function classifyRetrievalContentType(prompt: string): 'find_photos' | 'find_documents' | 'find_links' | 'find_plans' | 'search_messages' {
+export function classifyRetrievalContentType(prompt: string): 'find_photos' | 'find_documents' | 'find_links' | 'find_videos' | 'find_plans' | 'search_messages' {
   const text = prompt.toLowerCase();
   if (/\b(photo|photos|picture|pictures|image|images)\b/.test(text)) return 'find_photos';
+  if (/\b(video|videos|media|clip|clips)\b/.test(text)) return 'find_videos';
   if (/\b(pdf|pdfs|document|documents|file|files)\b/.test(text)) return 'find_documents';
   if (/\b(link|links|url|urls)\b/.test(text)) return 'find_links';
   if (/\b(plan|plans|trip|event|events)\b/.test(text)) return 'find_plans';
@@ -238,7 +240,7 @@ export async function findChats(userId: ObjectId, settings: VeyraSettingsDocumen
 export async function listAttachments(
   chat: Chat,
   userId: ObjectId,
-  type: 'image' | 'document' | 'pdf',
+  type: 'image' | 'document' | 'pdf' | 'video',
   query?: string
 ): Promise<VeyraResultCard[]> {
   const names = await loadUserNames(chat.participants);
@@ -250,6 +252,8 @@ export async function listAttachments(
   } else if (type === 'document') {
     filter['media.type'] = 'document';
     filter['media.mimeType'] = { $ne: 'application/pdf' };
+  } else if (type === 'video') {
+    filter['media.type'] = 'video';
   } else {
     filter['media.type'] = 'image';
   }
@@ -266,7 +270,7 @@ export async function listAttachments(
   return messages.map((message) => ({
     resultType: 'attachment' as const,
     id: message._id.toString(),
-    title: message.media?.fileName || (type === 'image' ? 'Photo' : type === 'pdf' ? 'PDF' : 'Document'),
+    title: message.media?.fileName || (type === 'image' ? 'Photo' : type === 'video' ? 'Video' : type === 'pdf' ? 'PDF' : 'Document'),
     subtitle: chatLabel,
     senderName: senderNames.get(message.senderId.toString()) || 'Someone',
     chatId: chat._id.toString(),

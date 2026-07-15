@@ -91,8 +91,15 @@ function classifyIntent(prompt: string): VeyraIntentCategory {
   }
   if (/\bwho (started|created|made|proposed)\b/.test(text)) return 'plan_creator';
   if (/\b(photo|photos|picture|pictures|image|images)\b/.test(text)) return 'find_photos';
+  if (/\b(video|videos|media|clip|clips)\b/.test(text)) return 'find_videos';
   if (/\b(pdf|pdfs|document|documents|file|files)\b/.test(text)) return 'find_documents';
   if (/\b(link|links|url|urls)\b/.test(text)) return 'find_links';
+  if (
+    /\b(find|show|list|search)\b[^.?!]{0,60}\b(plans?|trips?|events?)\b/.test(text) ||
+    /\b(plans?|trips?)\b[^.?!]{0,60}\b(shared|approved spaces?|with|from)\b/.test(text)
+  ) {
+    return 'find_plans';
+  }
   if (/\b(hi|hello|hey)\b/.test(text) || /how are you/.test(text)) return 'greeting';
   if (
     /\b(what can you|what do you do|your capabilit|tell me what you can do|approved veyra space|what is an approved space)\b/.test(text) ||
@@ -292,7 +299,7 @@ async function chatAnswer(chatId: ObjectId, userId: ObjectId, intent: 'decision_
   return `From shared items in ${label}: the latest available ${kind} was shared on ${message.createdAt.toISOString().slice(0, 10)}.`;
 }
 
-type RetrievalContentIntent = 'find_photos' | 'find_documents' | 'find_links' | 'find_plans' | 'search_messages';
+type RetrievalContentIntent = 'find_photos' | 'find_documents' | 'find_links' | 'find_videos' | 'find_plans' | 'search_messages';
 
 function relativeDay(iso: string): string {
   const date = new Date(iso);
@@ -326,6 +333,7 @@ function summarizeRetrieval(
     find_photos: ['photo', 'photos'],
     find_documents: attachmentKind === 'pdf' ? ['PDF', 'PDFs'] : ['document', 'documents'],
     find_links: ['link', 'links'],
+    find_videos: ['video', 'videos'],
     find_plans: ['result', 'results'],
     search_messages: ['message', 'messages'],
   };
@@ -460,6 +468,8 @@ async function runRetrieval(
   let attachmentKind: 'pdf' | 'document' | undefined;
   if (contentIntent === 'find_photos') {
     cards = await listAttachments(chat, userId, 'image');
+  } else if (contentIntent === 'find_videos') {
+    cards = await listAttachments(chat, userId, 'video');
   } else if (contentIntent === 'find_documents') {
     attachmentKind = /\bpdf/i.test(prompt) ? 'pdf' : 'document';
     cards = await listAttachments(chat, userId, attachmentKind);
@@ -547,7 +557,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
       answer = "You're welcome! Let me know if there's anything else you'd like to find.";
     } else if (intent === 'general_help') {
       answer =
-        "I can search the Blabber spaces you've approved for messages, links, PDFs, files, photos, plans, events, and tasks — just tell me what to look for and where. An approved space is a chat, group, or community you've explicitly selected in AI Privacy; I never search anywhere else.";
+        "I can search the Blabber spaces you've approved for messages, links, PDFs, files, photos, videos, plans, events, and tasks — just tell me what to look for and where. An approved space is a chat, group, or community you've explicitly selected in AI Privacy; I never search anywhere else.";
     } else if (intent === 'capability_spaces') {
       const approvedLabels = settings.scopes
         .filter((scope) => scope.type === 'chat' || scope.type === 'community')
@@ -560,7 +570,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
       }
     } else if (intent === 'unclear') {
       answer =
-        "I'm not sure how to help with that yet. I can search messages, links, PDFs, files, photos, plans, events, and tasks in the spaces you've approved — try asking me to find something specific.";
+        "I'm not sure how to help with that yet. I can search messages, links, PDFs, files, photos, videos, plans, events, and tasks in the spaces you've approved — try asking me to find something specific.";
     } else {
       answer = 'I can help you find Chats, Feed, Reels, Discover, My Actions, Settings, and approved spaces.';
     }
@@ -740,10 +750,18 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
     const usedPlanContext = resolutionSource === 'context' && Boolean(clientContext?.activePlanTitle);
     let answer: string;
     if (cards.length === 0) {
-      answer = "I couldn't find an authorized match in your approved Veyra spaces.";
+      answer = 'No matching results found in your approved spaces.';
     } else if (intent === 'action_request') {
       const noun =
-        contentIntent === 'find_photos' ? 'photo' : contentIntent === 'find_documents' ? 'document' : contentIntent === 'find_links' ? 'link' : 'item';
+        contentIntent === 'find_photos'
+          ? 'photo'
+          : contentIntent === 'find_videos'
+            ? 'video'
+            : contentIntent === 'find_documents'
+              ? 'document'
+              : contentIntent === 'find_links'
+                ? 'link'
+                : 'item';
       answer = `I found ${cards.length} ${noun}${cards.length === 1 ? '' : 's'}. Choose one, then confirm where to send it.`;
 	    } else {
 	      answer = summarizeRetrieval(contentIntent, cards, scopeLabel, attachmentKind, usedPlanContext);

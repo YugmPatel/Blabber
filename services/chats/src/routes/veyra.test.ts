@@ -253,6 +253,24 @@ describe('POST /veyra/ask', () => {
       expect(response.body.results[0].title).toBe('trip.pdf');
     });
 
+    it('retrieves videos from an approved space', async () => {
+      await enableVeyra();
+      const chatId = await seedChatWithUser('Yugm');
+      await grantScope('chat', chatId.toString());
+      const message = await seedMessage(chatId, {
+        media: { type: 'video', mimeType: 'video/mp4', fileName: 'demo-clip.mp4' },
+        senderId: mockUserId,
+      });
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'find any video from yugm' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('find_videos');
+      expect(response.body.resultType).toBe('attachment');
+      expect(response.body.results).toHaveLength(1);
+      expect(response.body.results[0].title).toBe('demo-clip.mp4');
+      expect(response.body.results[0].deepLink).toEqual({ kind: 'chat_message', chatId: chatId.toString(), messageId: message._id.toString() });
+    });
+
     it('returns only authorized links with safe deep links, never raw storage/provider URLs', async () => {
       await enableVeyra();
       const chatId = await seedChatWithUser('Family');
@@ -295,6 +313,62 @@ describe('POST /veyra/ask', () => {
       expect(response.body.results[0].title).toBe('Hiking Trip');
     });
 
+    it('treats "find any plan with Yugm" as plan retrieval, not plan status', async () => {
+      await enableVeyra();
+      const chatId = await seedChatWithUser('Yugm');
+      await grantScope('chat', chatId.toString());
+      await getDatabase().collection('plan_this_plans').insertOne({
+        _id: new ObjectId(),
+        chatId,
+        creatorUserId: mockUserId,
+        source: { type: 'post', sourceId: new ObjectId(), previewLabel: 'x' },
+        state: 'voting',
+        title: 'Demo Trip',
+        description: 'A plan with Yugm for the demo trip',
+        checklist: [],
+        participants: [{ userId: mockUserId }],
+        votes: [],
+        assignments: [],
+        updateCount: 0,
+        planVersion: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'find any plan with yugm' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('find_plans');
+      expect(response.body.resultType).toBe('plan');
+      expect(response.body.results[0].title).toBe('Demo Trip');
+    });
+
+    it('treats "show my plans" as retrieval across approved spaces', async () => {
+      await enableVeyra();
+      const chatId = await seedChatWithUser('Family');
+      await grantScope('chat', chatId.toString());
+      await getDatabase().collection('plan_this_plans').insertOne({
+        _id: new ObjectId(),
+        chatId,
+        creatorUserId: mockUserId,
+        source: { type: 'post', sourceId: new ObjectId(), previewLabel: 'x' },
+        state: 'finalized',
+        title: 'Apartment Planning',
+        checklist: [],
+        participants: [{ userId: mockUserId }],
+        votes: [],
+        assignments: [],
+        updateCount: 0,
+        planVersion: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'show my plans' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('find_plans');
+      expect(response.body.results[0].title).toBe('Apartment Planning');
+    });
+
     it('asks a clarifying question instead of guessing when a chat name matches more than one approved scope', async () => {
       await enableVeyra();
       const chatA = await seedChatWithUser('Yugm Work');
@@ -333,7 +407,7 @@ describe('POST /veyra/ask', () => {
       const response = await request(app).post('/veyra/ask').send({ prompt: 'show me photos from Family' });
       expect(response.status).toBe(200);
       expect(response.body.results).toHaveLength(0);
-      expect(response.body.answer).toBe("I couldn't find an authorized match in your approved Veyra spaces.");
+      expect(response.body.answer).toBe('No matching results found in your approved spaces.');
     });
   });
 
@@ -950,7 +1024,7 @@ describe('POST /veyra/ask', () => {
       const response = await request(app).post('/veyra/ask').send({ prompt: 'Show PDFs from that group', context });
       expect(response.status).toBe(200);
       expect(response.body.results).toHaveLength(0);
-      expect(response.body.answer).toBe("I couldn't find an authorized match in your approved Veyra spaces.");
+      expect(response.body.answer).toBe('No matching results found in your approved spaces.');
       expect(response.body.context).toEqual(context);
     });
   });

@@ -45,6 +45,14 @@ const baseSettings = {
   globalAiEnabled: true,
 };
 
+const settingsWithSandboxScope = {
+  settings: {
+    ...baseSettings.settings,
+    scopes: [{ id: 'chat:1', type: 'chat' as const, targetId: 'chat1', label: 'AI QA Sandbox', grantedAt: new Date().toISOString() }],
+  },
+  globalAiEnabled: true,
+};
+
 type ResultLike = { 0?: { transcript?: string }; isFinal?: boolean };
 
 class MockSpeechRecognition {
@@ -175,6 +183,28 @@ describe('VeyraPage', () => {
 
     await waitFor(() => expect(mockAskVeyra).toHaveBeenCalledTimes(1));
     expect(mockAskVeyra).toHaveBeenCalledWith({ prompt: 'what can you help with', scopeId: undefined });
+  });
+
+  it('refetches approved spaces before asking so newly granted access is used immediately', async () => {
+    const freshSettings = {
+      settings: {
+        ...baseSettings.settings,
+        scopes: [{ id: 'chat:fresh', type: 'chat' as const, targetId: 'fresh', label: 'Fresh Group', grantedAt: new Date().toISOString() }],
+      },
+      globalAiEnabled: true,
+    };
+    mockFetchVeyraSettings
+      .mockResolvedValueOnce(structuredClone(baseSettings))
+      .mockResolvedValueOnce(structuredClone(freshSettings));
+    mockAskVeyra.mockResolvedValue({ answer: 'Found it.', intent: 'find_links', scope: { id: 'chat:fresh', type: 'chat', label: 'Fresh Group' } });
+
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'find any links shared with yugm' } });
+    fireEvent.click(screen.getByLabelText('Send to Veyra'));
+
+    await waitFor(() => expect(mockAskVeyra).toHaveBeenCalledTimes(1));
+    expect(mockAskVeyra).toHaveBeenCalledWith({ prompt: 'find any links shared with yugm', scopeId: 'chat:fresh' });
   });
 
   it('transitions Thinking → Speaking → ready after a real response, and reads it aloud', async () => {
@@ -330,7 +360,7 @@ describe('VeyraPage', () => {
     fireEvent.click(screen.getByText('Yugm Work'));
 
     await waitFor(() => expect(mockAskVeyra).toHaveBeenCalledTimes(2));
-    expect(mockAskVeyra).toHaveBeenLastCalledWith({ prompt: 'show me photos from Yugm', scopeId: 'chat:1', context: undefined });
+    expect(mockAskVeyra).toHaveBeenLastCalledWith({ prompt: 'show me photos from Yugm', scopeId: 'chat:1' });
   });
 
   it('appends each new turn to the conversation instead of replacing the previous answer', async () => {
@@ -355,6 +385,7 @@ describe('VeyraPage', () => {
   });
 
   it('threads follow-up context between turns and clears it only via the local "New conversation" control', async () => {
+    mockFetchVeyraSettings.mockResolvedValue(structuredClone(settingsWithSandboxScope));
     mockAskVeyra
       .mockResolvedValueOnce({
         answer: 'Someone started "Santa Cruz Trip" in AI QA Sandbox.',
@@ -380,7 +411,7 @@ describe('VeyraPage', () => {
     // The second request echoes back the context returned by the first response.
     expect(mockAskVeyra).toHaveBeenLastCalledWith({
       prompt: 'What tasks do I have for this?',
-      scopeId: undefined,
+      scopeId: 'chat:1',
       context: { activePlanId: 'plan1', activePlanTitle: 'Santa Cruz Trip', activeSpaceId: 'chat:1', activeSpaceName: 'AI QA Sandbox' },
     });
 
@@ -396,10 +427,11 @@ describe('VeyraPage', () => {
     fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'third question' } });
     fireEvent.click(screen.getByLabelText('Send to Veyra'));
     await screen.findByText('Third answer.');
-    expect(mockAskVeyra).toHaveBeenLastCalledWith({ prompt: 'third question', scopeId: undefined, context: undefined });
+    expect(mockAskVeyra).toHaveBeenLastCalledWith({ prompt: 'third question', scopeId: 'chat:1' });
   });
 
   it('route navigation away from and back to /veyra preserves the in-memory thread and context', async () => {
+    mockFetchVeyraSettings.mockResolvedValue(structuredClone(settingsWithSandboxScope));
     mockAskVeyra.mockResolvedValueOnce({
       answer: 'Someone started "Santa Cruz Trip" in AI QA Sandbox.',
       intent: 'plan_creator',
@@ -430,7 +462,7 @@ describe('VeyraPage', () => {
     await screen.findByText('Found 1 task.');
     expect(mockAskVeyra).toHaveBeenLastCalledWith({
       prompt: 'What tasks do I have for this?',
-      scopeId: undefined,
+      scopeId: 'chat:1',
       context: { activePlanId: 'plan1', activePlanTitle: 'Santa Cruz Trip', activeSpaceId: 'chat:1', activeSpaceName: 'AI QA Sandbox' },
     });
   });
@@ -482,6 +514,6 @@ describe('VeyraPage', () => {
     fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'Who started it?' } });
     fireEvent.click(screen.getByLabelText('Send to Veyra'));
     await screen.findByText('Which plan would you like to know about?');
-    expect(mockAskVeyra).toHaveBeenLastCalledWith({ prompt: 'Who started it?', scopeId: undefined, context: undefined });
+    expect(mockAskVeyra).toHaveBeenLastCalledWith({ prompt: 'Who started it?', scopeId: undefined });
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { QueryClient } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
 import { renderQueryHook, waitFor } from '../test/query-test-utils';
 import {
@@ -8,6 +9,8 @@ import {
   useUpdateChat,
   useAddMember,
   useRemoveMember,
+  useDeleteGroup,
+  useEndGroup,
   usePinChat,
   useArchiveChat,
   chatKeys,
@@ -52,6 +55,10 @@ describe('useChats hooks', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  const keepChatListCache = (queryClient: QueryClient) => {
+    queryClient.setQueryDefaults(chatKeys.list(undefined), { gcTime: Infinity });
+  };
 
   describe('useChats', () => {
     it('should fetch all chats', async () => {
@@ -223,6 +230,65 @@ describe('useChats hooks', () => {
 
       expect(apiClient.delete).toHaveBeenCalledWith('/api/chats/chat-2/members/user-3');
       expect(result.current.data).toEqual(updatedChat);
+    });
+  });
+
+  describe('delete/end group cache updates', () => {
+    it('removes a deleted group from cached chat lists immediately', async () => {
+      vi.mocked(apiClient.delete).mockResolvedValueOnce({ data: { success: true } });
+      const { result, queryClient } = renderQueryHook(() => useDeleteGroup('chat-2'));
+      keepChatListCache(queryClient);
+      queryClient.setQueryData(chatKeys.list(undefined), [mockChat, mockGroupChat]);
+
+      result.current.mutate('Test Group');
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(apiClient.delete).toHaveBeenCalledWith('/api/chats/chat-2', {
+        data: { confirmation: 'Test Group' },
+      });
+      expect(queryClient.getQueryData<Chat[]>(chatKeys.list(undefined))?.map((chat) => chat._id)).toEqual(['chat-1']);
+      expect(queryClient.getQueryData(chatKeys.detail('chat-2'))).toBeUndefined();
+    });
+
+    it('removes an end-and-delete temporary group from cached chat lists immediately', async () => {
+      const deletedChat = {
+        ...mockGroupChat,
+        groupKind: 'temporary' as const,
+        temporaryCompletionBehavior: 'end_and_delete' as const,
+        endedAt: new Date('2024-01-02'),
+        deletedAt: new Date('2024-01-02'),
+      };
+      vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { chat: deletedChat } });
+      const { result, queryClient } = renderQueryHook(() => useEndGroup('chat-2'));
+      keepChatListCache(queryClient);
+      queryClient.setQueryData(chatKeys.list(undefined), [mockChat, mockGroupChat]);
+
+      result.current.mutate();
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(apiClient.post).toHaveBeenCalledWith('/api/chats/chat-2/end');
+      expect(queryClient.getQueryData<Chat[]>(chatKeys.list(undefined))?.map((chat) => chat._id)).toEqual(['chat-1']);
+      expect(queryClient.getQueryData(chatKeys.detail('chat-2'))).toBeUndefined();
+    });
+
+    it('keeps an end-only temporary group visible as ended', async () => {
+      const endedChat = {
+        ...mockGroupChat,
+        groupKind: 'temporary' as const,
+        temporaryCompletionBehavior: 'end_only' as const,
+        endedAt: new Date('2024-01-02'),
+      };
+      vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { chat: endedChat } });
+      const { result, queryClient } = renderQueryHook(() => useEndGroup('chat-2'));
+      keepChatListCache(queryClient);
+      queryClient.setQueryData(chatKeys.list(undefined), [mockChat, mockGroupChat]);
+
+      result.current.mutate();
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(queryClient.getQueryData<Chat[]>(chatKeys.list(undefined))?.find((chat) => chat._id === 'chat-2')?.endedAt).toEqual(
+        endedChat.endedAt
+      );
     });
   });
 

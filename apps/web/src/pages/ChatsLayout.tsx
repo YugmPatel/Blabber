@@ -192,7 +192,7 @@ export default function ChatsLayout() {
         </div>
 
         {/* Main content column */}
-        <div className="flex min-h-0 min-w-0 flex-1 basis-0 gap-0 p-0 md:gap-3 md:p-3">
+        <div className="flex min-h-0 min-w-0 w-full flex-1 basis-0 gap-0 p-0 md:gap-3 md:p-3">
           {/* Chat list panel */}
           <section className={`${id ? 'hidden md:flex' : 'flex'} w-full flex-col overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:w-[340px] md:flex-[0_0_340px] md:rounded-2xl`}>
             <div className="space-y-3 border-b border-[color:var(--bl-border)] p-4">
@@ -303,9 +303,11 @@ export default function ChatsLayout() {
           </section>
 
           {/* Chat view / empty state */}
-          <section className={`${id ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 basis-0 overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:rounded-2xl`}>
+          <section className={`${id ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 w-full flex-1 basis-0 overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:rounded-2xl`}>
             {id ? (
-              <Outlet />
+              <div className="flex min-h-0 min-w-0 w-full flex-1">
+                <Outlet />
+              </div>
             ) : (
               <EmptyState onStartConversation={() => setIsNewChatModalOpen(true)} />
             )}
@@ -459,7 +461,7 @@ function CombinedSearchResults({
 
 function EmptyState({ onStartConversation }: { onStartConversation: () => void }) {
   return (
-    <div className="relative flex h-full items-center justify-center overflow-y-auto bg-white px-6 py-12 dark:bg-slate-900">
+    <div className="relative flex h-full w-full items-center justify-center overflow-y-auto bg-white px-6 py-12 dark:bg-slate-900">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 hidden h-80 dark:block"

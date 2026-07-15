@@ -123,6 +123,14 @@ function suggestedPrompts(scopeType?: VeyraSettings['scopes'][number]['type']): 
   return ['What can you help with?', 'Where can I find my chats?'];
 }
 
+function contextForFreshScopes(
+  currentContext: ReturnType<typeof useVeyraSession>['context'],
+  scopes: VeyraSettings['scopes']
+) {
+  if (!currentContext?.activeSpaceId) return currentContext;
+  return scopes.some((scope) => scope.id === currentContext.activeSpaceId) ? currentContext : undefined;
+}
+
 function stateCaption(state: VeyraState, greetingTitle: string, greetingSubtitle: string): { title: string; subtitle?: string } {
   switch (state) {
     case 'disabled':
@@ -218,8 +226,20 @@ export default function VeyraPage() {
   }, [conversation.length]);
 
   const ask = useMutation({
-    mutationFn: ({ turnId, text, scopeIdOverride }: { turnId: string; text: string; origin: 'voice' | 'typed'; scopeIdOverride?: string }) =>
-      askVeyra({ prompt: text, scopeId: scopeIdOverride ?? selectedScope?.id, context }).then((result) => ({ turnId, result })),
+    mutationFn: async ({ turnId, text, scopeIdOverride }: { turnId: string; text: string; origin: 'voice' | 'typed'; scopeIdOverride?: string }) => {
+      const fresh = await queryClient.fetchQuery({
+        queryKey: ['veyra-settings'],
+        queryFn: fetchVeyraSettings,
+        staleTime: 0,
+      });
+      const freshScopes = fresh.settings.scopes;
+      const freshScopeId =
+        scopeIdOverride
+          ? scopeIdOverride
+          : freshScopes.find((scope) => scope.id === selectedScope?.id)?.id || freshScopes[0]?.id;
+      const freshContext = contextForFreshScopes(context, freshScopes);
+      return askVeyra({ prompt: text, scopeId: freshScopeId, ...(freshContext ? { context: freshContext } : {}) }).then((result) => ({ turnId, result }));
+    },
     onMutate: () => {
       setState('thinking');
     },

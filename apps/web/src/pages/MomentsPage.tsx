@@ -79,6 +79,33 @@ const MAX_LENGTH = 500;
 const REPLY_MAX_LENGTH = 1000;
 const VIDEO_PROCESSING_TIMEOUT_MS = 120_000;
 const MOMENT_REACTIONS = ['❤️', '😂', '😮', '😢', '🙌'];
+const SUPPORTED_AUDIO_FILE_EXTENSION = /\.(mp3|m4a|wav|webm|ogg)$/i;
+
+function audioMimeFromFileName(fileName: string) {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  if (lower.endsWith('.m4a')) return 'audio/mp4';
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  if (lower.endsWith('.ogg')) return 'audio/ogg';
+  if (lower.endsWith('.webm')) return 'audio/webm';
+  return '';
+}
+
+function audioExtensionForMime(mimeType: string) {
+  const type = mimeType.split(';')[0].trim().toLowerCase();
+  if (type === 'audio/mpeg' || type === 'audio/mp3') return 'mp3';
+  if (type === 'audio/mp4' || type === 'audio/x-m4a' || type === 'audio/m4a') return 'm4a';
+  if (type === 'audio/wav' || type === 'audio/x-wav') return 'wav';
+  if (type === 'audio/ogg') return 'ogg';
+  return 'webm';
+}
+
+function normalizeAudioFileForUpload(file: File) {
+  const declaredType = file.type.split(';')[0].trim().toLowerCase();
+  if (declaredType && declaredType !== 'application/octet-stream') return file;
+  const inferredType = audioMimeFromFileName(file.name);
+  return inferredType ? new File([file], file.name, { type: inferredType }) : file;
+}
 
 function formatCreatedAt(value: string, nowMs: number) {
   const diffMs = Math.max(0, nowMs - new Date(value).getTime());
@@ -704,14 +731,10 @@ function CreateMomentModal({ onClose, onCreated, initialMode = 'text' }: { onClo
       } else if (mode === 'audio') {
         if (!audioBlob) throw new Error('Record or upload audio.');
         const audioType = audioBlob.type && audioBlob.type.startsWith('audio/') ? audioBlob.type : 'audio/webm';
-        const extension = audioType.includes('mp4') || audioType.includes('m4a')
-          ? 'm4a'
-          : audioType.includes('ogg')
-            ? 'ogg'
-            : audioType.includes('wav')
-              ? 'wav'
-              : 'webm';
-        const audioFile = new File([audioBlob], `moment-audio-${Date.now()}.${extension}`, { type: audioType });
+        const extension = audioExtensionForMime(audioType);
+        const audioFile = audioBlob instanceof File
+          ? normalizeAudioFileForUpload(audioBlob)
+          : new File([audioBlob], `moment-audio-${Date.now()}.${extension}`, { type: audioType });
         const result = await upload.uploadMedia?.(audioFile);
         if (!result?.mediaId) throw new Error('Audio upload failed.');
         mediaId = result.mediaId;
@@ -813,13 +836,17 @@ function CreateMomentModal({ onClose, onCreated, initialMode = 'text' }: { onClo
   const setAudioFile = (file: File | null) => {
     clearAudio();
     if (!file) return;
-    if (file.type && !file.type.startsWith('audio/')) {
+    const declaredType = file.type.split(';')[0].trim().toLowerCase();
+    const hasSupportedType =
+      !declaredType || declaredType === 'application/octet-stream' || declaredType.startsWith('audio/');
+    if (!hasSupportedType || !SUPPORTED_AUDIO_FILE_EXTENSION.test(file.name)) {
       setAudioError('Choose a supported audio file.');
       return;
     }
-    setAudioBlob(file);
+    const uploadableFile = normalizeAudioFileForUpload(file);
+    setAudioBlob(uploadableFile);
     setAudioDuration(0);
-    setAudioUrl(URL.createObjectURL(file));
+    setAudioUrl(URL.createObjectURL(uploadableFile));
   };
 
   useEffect(() => {

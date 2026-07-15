@@ -21,6 +21,7 @@ export type VeyraIntentCategory =
   | 'find_photos'
   | 'find_documents'
   | 'find_links'
+  | 'find_videos'
   | 'find_plans'
   | 'search_messages'
   // Action-class language (send/forward/create/update/delete). This batch
@@ -46,6 +47,7 @@ export const RETRIEVAL_VEYRA_INTENTS: ReadonlySet<VeyraIntentCategory> = new Set
   'find_photos',
   'find_documents',
   'find_links',
+  'find_videos',
   'find_plans',
   'search_messages',
 ]);

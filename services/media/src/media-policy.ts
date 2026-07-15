@@ -22,6 +22,7 @@ const MIME_ALIASES: Record<string, string> = {
   'image/pjpeg': 'image/jpeg',
   'image/x-citrix-jpeg': 'image/jpeg',
   'image/x-png': 'image/png',
+  'audio/mp3': 'audio/mpeg',
 };
 
 // Declared Content-Types that mean "the browser/OS doesn't actually know" —
@@ -159,6 +160,7 @@ export function validateMediaPolicy(params: {
   const hasTrustworthyDeclaredType = Boolean(declared) && !UNKNOWN_DECLARED_TYPES.has(declared);
   let expectedByExtension = EXTENSION_TO_MIME.get(extension);
   if (!expectedByExtension) throw new Error('unsafe_type');
+  if (extension === '.mp3') expectedByExtension = 'audio/mpeg';
 
   // .webm is shared between voice-message audio and video attachments; the
   // container's EBML magic bytes can't tell them apart, so when the browser

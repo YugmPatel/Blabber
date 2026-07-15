@@ -99,6 +99,14 @@ function webmBuffer() {
   return Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(8)]);
 }
 
+function mp3Id3Buffer() {
+  return Buffer.concat([Buffer.from('ID3', 'ascii'), Buffer.alloc(32)]);
+}
+
+function mp3FrameBuffer() {
+  return Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.alloc(32)]);
+}
+
 function pdfBuffer() {
   return Buffer.concat([Buffer.from('%PDF-1.4', 'ascii'), Buffer.alloc(8)]);
 }
@@ -157,6 +165,38 @@ describe('validateMediaPolicy video formats', () => {
   it('still categorizes an undeclared .webm as audio (voice-message default)', () => {
     const result = validateMediaPolicy({ fileName: 'voice.webm', declaredMimeType: 'audio/webm', buffer: webmBuffer() });
     expect(result).toMatchObject({ category: 'audio', mimeType: 'audio/webm' });
+  });
+});
+
+describe('validateMediaPolicy MP3 handling', () => {
+  it('accepts a valid MP3 with an ID3 header', () => {
+    const result = validateMediaPolicy({
+      fileName: 'voice.mp3',
+      declaredMimeType: 'audio/mpeg',
+      buffer: mp3Id3Buffer(),
+    });
+
+    expect(result).toMatchObject({ category: 'audio', mimeType: 'audio/mpeg', extension: '.mp3' });
+  });
+
+  it('accepts a valid MP3 with an MPEG frame header', () => {
+    const result = validateMediaPolicy({
+      fileName: 'voice.mp3',
+      declaredMimeType: 'audio/mpeg',
+      buffer: mp3FrameBuffer(),
+    });
+
+    expect(result).toMatchObject({ category: 'audio', mimeType: 'audio/mpeg', extension: '.mp3' });
+  });
+
+  it('rejects a spoofed MP3 upload', () => {
+    expect(() =>
+      validateMediaPolicy({
+        fileName: 'voice.mp3',
+        declaredMimeType: 'audio/mpeg',
+        buffer: textBuffer('not actually an mp3'),
+      })
+    ).toThrow('mime_mismatch');
   });
 });
 
