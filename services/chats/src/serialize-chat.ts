@@ -28,11 +28,15 @@ export async function markExpiredIfNeeded(chat: Chat): Promise<Chat> {
   }
 
   const endedAt = new Date();
+  const shouldDelete = chat.temporaryCompletionBehavior === 'end_and_delete';
+  const set: Partial<Chat> = shouldDelete
+    ? { endedAt, deletedAt: endedAt, updatedAt: endedAt }
+    : { endedAt, updatedAt: endedAt };
   await getDatabase().collection<Chat>('chats').updateOne(
     { _id: chat._id, endedAt: { $exists: false }, deletedAt: { $exists: false } },
-    { $set: { endedAt, updatedAt: endedAt } }
+    { $set: set }
   );
-  return { ...chat, endedAt, updatedAt: endedAt };
+  return { ...chat, ...set };
 }
 
 export async function serializeChat(
@@ -58,6 +62,9 @@ export async function serializeChat(
   if (activeChat.groupContext) serialized.groupContext = activeChat.groupContext;
   if (activeChat.avatarUrl) serialized.avatarUrl = activeChat.avatarUrl;
   if (activeChat.groupKind) serialized.groupKind = activeChat.groupKind;
+  if (activeChat.temporaryCompletionBehavior) {
+    serialized.temporaryCompletionBehavior = activeChat.temporaryCompletionBehavior;
+  }
   serialized.sendMode = activeChat.sendMode || 'everyone';
   serialized.aiEnabled = activeChat.aiEnabled !== false;
   serialized.memberRestrictions = (activeChat.memberRestrictions || []).map((restriction) => ({

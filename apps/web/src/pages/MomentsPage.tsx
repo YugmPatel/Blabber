@@ -17,12 +17,13 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
-  Send,
-  Square,
-  Trash2,
-  Type,
-  Video,
-  Volume2,
+	  Send,
+	  Square,
+	  Trash2,
+	  Type,
+	  Upload,
+	  Video,
+	  Volume2,
   X,
 } from 'lucide-react';
 import {
@@ -651,6 +652,7 @@ function CreateMomentModal({ onClose, onCreated, initialMode = 'text' }: { onClo
   const [audioError, setAudioError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
+  const audioFileRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -700,7 +702,7 @@ function CreateMomentModal({ onClose, onCreated, initialMode = 'text' }: { onClo
         if (!result?.mediaId) throw new Error('Photo upload failed.');
         mediaId = result.mediaId;
       } else if (mode === 'audio') {
-        if (!audioBlob) throw new Error('Record audio.');
+        if (!audioBlob) throw new Error('Record or upload audio.');
         const audioType = audioBlob.type && audioBlob.type.startsWith('audio/') ? audioBlob.type : 'audio/webm';
         const extension = audioType.includes('mp4') || audioType.includes('m4a')
           ? 'm4a'
@@ -804,6 +806,20 @@ function CreateMomentModal({ onClose, onCreated, initialMode = 'text' }: { onClo
       if (current) URL.revokeObjectURL(current);
       return null;
     });
+    setAudioError(null);
+    if (audioFileRef.current) audioFileRef.current.value = '';
+  };
+
+  const setAudioFile = (file: File | null) => {
+    clearAudio();
+    if (!file) return;
+    if (file.type && !file.type.startsWith('audio/')) {
+      setAudioError('Choose a supported audio file.');
+      return;
+    }
+    setAudioBlob(file);
+    setAudioDuration(0);
+    setAudioUrl(URL.createObjectURL(file));
   };
 
   useEffect(() => {
@@ -982,20 +998,32 @@ function CreateMomentModal({ onClose, onCreated, initialMode = 'text' }: { onClo
               )}
               <textarea value={caption} onChange={(event) => setCaption(event.target.value.slice(0, MAX_LENGTH))} placeholder="Add a caption" className="min-h-[90px] w-full resize-none rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] p-3 text-sm text-[color:var(--bl-text)] outline-none placeholder:text-[color:var(--bl-text-muted)] focus:border-teal-400" maxLength={MAX_LENGTH} />
             </>
-          ) : mode === 'audio' ? (
-            <>
-              <div className="rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-[color:var(--bl-text)]">Record audio</p>
-                    <p className="text-xs text-[color:var(--bl-text-muted)]">{isRecordingAudio ? `Recording ${formatAudioDuration(audioDuration)}` : audioBlob ? `Preview ${formatAudioDuration(audioDuration)}` : 'Start when you are ready.'}</p>
-                  </div>
-                  {isRecordingAudio ? (
-                    <button type="button" onClick={stopAudioRecording} className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-500"><Square size={14} />Stop</button>
-                  ) : (
-                    <button type="button" onClick={startAudioRecording} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"><Mic size={15} />Record</button>
-                  )}
-                </div>
+	          ) : mode === 'audio' ? (
+	            <>
+	              <input
+	                ref={audioFileRef}
+	                type="file"
+	                accept="audio/*,.m4a,.mp3,.wav,.ogg,.webm"
+	                className="hidden"
+	                onChange={(event) => setAudioFile(event.target.files?.[0] || null)}
+	              />
+	              <div className="rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] p-4">
+	                <div className="flex items-center justify-between gap-3">
+	                  <div>
+	                    <p className="text-sm font-semibold text-[color:var(--bl-text)]">Audio Moment</p>
+	                    <p className="text-xs text-[color:var(--bl-text-muted)]">{isRecordingAudio ? `Recording ${formatAudioDuration(audioDuration)}` : audioBlob ? `Preview ${audioDuration ? formatAudioDuration(audioDuration) : 'uploaded audio'}` : 'Record or upload an audio file.'}</p>
+	                  </div>
+	                  <div className="flex flex-wrap justify-end gap-2">
+	                    {isRecordingAudio ? (
+	                      <button type="button" onClick={stopAudioRecording} className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-500"><Square size={14} />Stop</button>
+	                    ) : (
+	                      <>
+	                        <button type="button" onClick={startAudioRecording} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"><Mic size={15} />Record</button>
+	                        <button type="button" onClick={() => audioFileRef.current?.click()} className="inline-flex items-center gap-2 rounded-xl border border-[color:var(--bl-border)] px-3 py-2 text-sm font-semibold text-[color:var(--bl-text-secondary)] transition hover:border-teal-400 hover:text-teal-700 dark:hover:text-teal-300"><Upload size={15} />Upload</button>
+	                      </>
+	                    )}
+	                  </div>
+	                </div>
                 {audioUrl && <audio src={audioUrl} controls preload="metadata" className="mt-4 w-full" aria-label="Play or pause audio Moment preview" />}
                 {(audioBlob || isRecordingAudio) && <button type="button" onClick={clearAudio} className="mt-3 text-sm font-semibold text-rose-600 dark:text-rose-300">Cancel audio</button>}
                 {audioError && <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">{audioError}</p>}

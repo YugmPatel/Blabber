@@ -15,6 +15,7 @@ interface NewGroupModalProps {
 }
 
 type ExpirationOption = '1hour' | '24hours' | '3days' | '1week' | 'custom';
+type TemporaryCompletionBehavior = 'end_only' | 'end_and_delete';
 
 const expirationOptions: { value: ExpirationOption; label: string; ms?: number }[] = [
   { value: '1hour', label: '1 hour', ms: 60 * 60 * 1000 },
@@ -33,6 +34,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   const [groupDescription, setGroupDescription] = useState('');
   const [isTemporary, setIsTemporary] = useState(false);
   const [expiration, setExpiration] = useState<ExpirationOption>('24hours');
+  const [temporaryCompletionBehavior, setTemporaryCompletionBehavior] = useState<TemporaryCompletionBehavior>('end_only');
   const [customExpirationDate, setCustomExpirationDate] = useState('');
   const [disappearingMessages, setDisappearingMessages] = useState(false);
   const [disappearingDuration, setDisappearingDuration] = useState<'24h' | '7d' | '90d'>('24h');
@@ -106,6 +108,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
         description: groupDescription.trim() || undefined,
         ...(groupAvatarUrl ? { avatarUrl: groupAvatarUrl } : {}),
         groupKind: isTemporary ? 'temporary' : 'standard',
+        temporaryCompletionBehavior: isTemporary ? temporaryCompletionBehavior : undefined,
         expiresAt: getExpirationDate()?.toISOString(),
       };
 
@@ -149,6 +152,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     setGroupDescription('');
     setIsTemporary(false);
     setExpiration('24hours');
+    setTemporaryCompletionBehavior('end_only');
     setCustomExpirationDate('');
     setDisappearingMessages(false);
     setGroupAvatar('');
@@ -539,6 +543,29 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                         </span>
                       </div>
                     )}
+                    <div>
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300">When it ends:</p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {([
+                          ['end_only', 'End only', 'Keep it readable and disable new messages.'],
+                          ['end_and_delete', 'End and delete', 'Remove it from active convo lists.'],
+                        ] as const).map(([value, label, description]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setTemporaryCompletionBehavior(value)}
+                            className={`rounded-xl border px-3 py-2 text-left transition ${
+                              temporaryCompletionBehavior === value
+                                ? 'border-orange-400 bg-orange-50 text-orange-900 dark:border-orange-500/70 dark:bg-orange-500/15 dark:text-orange-100'
+                                : 'border-slate-200 bg-white text-slate-700 hover:border-orange-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                            }`}
+                          >
+                            <span className="block text-sm font-semibold">{label}</span>
+                            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

@@ -118,6 +118,40 @@ describe('NewGroupModal', () => {
     expect(cachedList?.some((chat) => chat._id === 'group-new')).toBe(true);
   });
 
+  it('sends the selected temporary group completion behavior when creating a group', async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(chatKeys.list(undefined), [existingChat]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(await screen.findByText('Friend One'));
+    fireEvent.click(screen.getByText(/Next \(1 selected\)/));
+
+    fireEvent.change(await screen.findByPlaceholderText('Enter group name...'), {
+      target: { value: 'Weekend Trip' },
+    });
+    fireEvent.click(screen.getAllByRole('switch')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /End and delete/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Group' }));
+
+    await waitFor(() => {
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/api/chats',
+        expect.objectContaining({
+          groupKind: 'temporary',
+          temporaryCompletionBehavior: 'end_and_delete',
+          expiresAt: expect.any(String),
+        })
+      );
+    });
+  });
+
   it('shows display name as the primary label with @username as secondary metadata, never a raw email as primary when a name exists', async () => {
     const queryClient = createTestQueryClient();
     render(

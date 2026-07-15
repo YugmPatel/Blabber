@@ -13,6 +13,7 @@ export interface Chat {
   groupContext?: string;
   avatarUrl?: string;
   groupKind?: 'standard' | 'temporary';
+  temporaryCompletionBehavior?: 'end_only' | 'end_and_delete';
   sendMode?: 'everyone' | 'admins_only';
   aiEnabled?: boolean;
   memberRestrictions?: {

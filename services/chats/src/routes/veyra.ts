@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { z } from 'zod';
-import { asyncHandler } from '@repo/utils';
+import { asyncHandler, logger } from '@repo/utils';
 import { getDatabase } from '../db';
 import { getChatsCollection } from '../models/chat';
 import { getChatActionsCollection } from '../models/chat-action';
@@ -61,6 +61,7 @@ const AskSchema = z.object({
   scopeId: z.string().optional(),
   context: ContextSchema,
 });
+const OPENROUTER_CHAT_COMPLETIONS_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 function scopeId(type: VeyraScopeType, targetId?: ObjectId) {
   return targetId ? `${type}:${targetId.toString()}` : type;
@@ -340,6 +341,75 @@ function summarizeRetrieval(
   }
   const recency = first?.createdAt && first.senderName ? ` The newest is from ${first.senderName} ${relativeDay(first.createdAt)}.` : '';
   return `I found ${count} ${noun} in ${scopeLabel}.${recency}`;
+}
+
+async function synthesizeVeyraAnswer(
+  prompt: string,
+  cards: VeyraResultCard[],
+  fallbackAnswer: string
+): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  const model = process.env.OPENROUTER_MODEL?.trim();
+  if (!apiKey || !model || cards.length === 0) return fallbackAnswer;
+
+  const context = cards.slice(0, 6).map((card, index) => ({
+    index: index + 1,
+    type: card.resultType,
+    title: card.title,
+    subtitle: card.subtitle,
+    senderName: card.senderName,
+    chatLabel: card.chatLabel,
+    createdAt: card.createdAt,
+  }));
+
+  try {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    };
+    const referer = process.env.OPENROUTER_HTTP_REFERER || process.env.OPENROUTER_REFERER;
+    if (referer) headers['HTTP-Referer'] = referer;
+
+    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are Veyra inside Blabber. Answer only from the approved retrieved result metadata provided. Do not invent facts, messages, or spaces. Keep the answer concise and mention that results are from approved spaces.',
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              question: prompt,
+              deterministicAnswer: fallbackAnswer,
+              approvedResults: context,
+            }),
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 220,
+      }),
+    });
+
+    if (!response.ok) throw new Error(`openrouter_${response.status}`);
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = payload.choices?.[0]?.message?.content?.trim();
+    return content || fallbackAnswer;
+  } catch (error) {
+    logger.warn(
+      {
+        feature: 'veyra',
+        approvedResultCount: cards.length,
+        reason: error instanceof Error ? error.message : 'unknown_openrouter_error',
+      },
+      'Veyra OpenRouter synthesis fallback used'
+    );
+    return fallbackAnswer;
+  }
 }
 
 function scopeIdForChat(settings: VeyraSettingsDocument, chatId: ObjectId): string | undefined {
@@ -675,9 +745,12 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
       const noun =
         contentIntent === 'find_photos' ? 'photo' : contentIntent === 'find_documents' ? 'document' : contentIntent === 'find_links' ? 'link' : 'item';
       answer = `I found ${cards.length} ${noun}${cards.length === 1 ? '' : 's'}. Choose one, then confirm where to send it.`;
-    } else {
-      answer = summarizeRetrieval(contentIntent, cards, scopeLabel, attachmentKind, usedPlanContext);
-    }
+	    } else {
+	      answer = summarizeRetrieval(contentIntent, cards, scopeLabel, attachmentKind, usedPlanContext);
+	    }
+	    if (cards.length > 0 && intent !== 'action_request') {
+	      answer = await synthesizeVeyraAnswer(parsed.data.prompt, cards, answer);
+	    }
 
     await audit(userObjectId, scopeType, intent, cards.length > 0);
 

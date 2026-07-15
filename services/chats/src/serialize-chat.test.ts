@@ -8,6 +8,7 @@ describe('serializeChat participant display', () => {
   beforeEach(async () => {
     await connectToDatabase();
     await getDatabase().collection('users').deleteMany({});
+    await getDatabase().collection('chats').deleteMany({});
   });
 
   afterEach(async () => {
@@ -56,5 +57,32 @@ describe('serializeChat participant display', () => {
       name: 'nobody@example.com',
       email: 'nobody@example.com',
     });
+  });
+
+  it('marks an expired temporary group as deleted when configured to end and delete', async () => {
+    const ownerId = new ObjectId();
+    const now = new Date();
+    const chat: Chat = {
+      _id: new ObjectId(),
+      type: 'group',
+      groupKind: 'temporary',
+      temporaryCompletionBehavior: 'end_and_delete',
+      expiresAt: new Date(Date.now() - 60_000),
+      participants: [ownerId],
+      admins: [ownerId],
+      ownerId,
+      title: 'Expired Trip',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await getDatabase().collection<Chat>('chats').insertOne(chat);
+
+    const serialized = await serializeChat(chat);
+
+    expect(serialized.endedAt).toBeInstanceOf(Date);
+    expect(serialized.deletedAt).toBeInstanceOf(Date);
+    const stored = await getDatabase().collection<Chat>('chats').findOne({ _id: chat._id });
+    expect(stored?.endedAt).toBeInstanceOf(Date);
+    expect(stored?.deletedAt).toBeInstanceOf(Date);
   });
 });

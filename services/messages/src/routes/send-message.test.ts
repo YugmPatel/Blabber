@@ -90,6 +90,48 @@ describe('POST /:chatId - Send Message', () => {
     expect(chat?.lastMessageRef.messageId.toString()).toBe(response.body._id);
   });
 
+  it('should send an event message in a group chat', async () => {
+    const groupChatId = new ObjectId();
+    await getDatabase().collection('chats').insertOne({
+      _id: groupChatId,
+      type: 'group',
+      participants: [TEST_USER_ID, OTHER_USER_ID],
+      admins: [TEST_USER_ID],
+      ownerId: TEST_USER_ID,
+      title: 'Q/A',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const token = generateToken(TEST_USER_ID.toString());
+    const startsAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    const response = await request(app)
+      .post(`/${groupChatId.toString()}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        body: 'Team sync',
+        type: 'event',
+        event: {
+          title: 'Team sync',
+          startsAt,
+          timezone: 'America/Los_Angeles',
+          location: 'Blabber HQ',
+        },
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.chatId).toBe(groupChatId.toString());
+    expect(response.body.type).toBe('event');
+    expect(response.body.event).toMatchObject({
+      title: 'Team sync',
+      timezone: 'America/Los_Angeles',
+      location: 'Blabber HQ',
+      currentUserRsvp: 'going',
+    });
+    const stored = await getDatabase().collection('messages').findOne({ _id: new ObjectId(response.body._id) });
+    expect(stored?.event?.title).toBe('Team sync');
+  });
+
   it('should send message with tempId for optimistic updates', async () => {
     const token = generateToken(TEST_USER_ID.toString());
     const tempId = 'temp-123-456';
@@ -114,6 +156,7 @@ describe('POST /:chatId - Send Message', () => {
       fileType: 'image/jpeg',
       url: 'http://localhost:3000/api/media/local/test-image.jpg',
       storage: 'local',
+      status: 'approved',
       uploadedAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -679,6 +722,35 @@ describe('POST /:chatId - Send Message', () => {
 
       expect(response.status).toBe(403);
       expect(response.body.message).toContain('This temporary group has ended');
+    });
+
+    it('soft-deletes a lazily expired group configured for end and delete', async () => {
+      const chatId = new ObjectId();
+      const ownerId = new ObjectId();
+      await getDatabase().collection('chats').insertOne({
+        _id: chatId,
+        type: 'group',
+        groupKind: 'temporary',
+        temporaryCompletionBehavior: 'end_and_delete',
+        expiresAt: new Date(Date.now() - 1000),
+        participants: [ownerId],
+        admins: [ownerId],
+        ownerId,
+        title: 'Lazily Deleted Group',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const token = generateToken(ownerId.toString());
+
+      const response = await request(app)
+        .post(`/${chatId.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Past expiry' });
+
+      expect(response.status).toBe(404);
+      const stored = await getDatabase().collection('chats').findOne({ _id: chatId });
+      expect(stored?.endedAt).toBeInstanceOf(Date);
+      expect(stored?.deletedAt).toBeInstanceOf(Date);
     });
   });
 });

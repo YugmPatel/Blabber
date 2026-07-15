@@ -192,9 +192,9 @@ export default function ChatsLayout() {
         </div>
 
         {/* Main content column */}
-        <div className="flex min-w-0 flex-1 gap-0 p-0 md:gap-3 md:p-3">
+        <div className="flex min-h-0 min-w-0 flex-1 basis-0 gap-0 p-0 md:gap-3 md:p-3">
           {/* Chat list panel */}
-          <section className={`${id ? 'hidden md:flex' : 'flex'} w-full flex-col overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:max-w-[340px] md:rounded-2xl md:w-[340px]`}>
+          <section className={`${id ? 'hidden md:flex' : 'flex'} w-full flex-col overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:w-[340px] md:flex-[0_0_340px] md:rounded-2xl`}>
             <div className="space-y-3 border-b border-[color:var(--bl-border)] p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -303,7 +303,7 @@ export default function ChatsLayout() {
           </section>
 
           {/* Chat view / empty state */}
-          <section className={`${id ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:rounded-2xl`}>
+          <section className={`${id ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 basis-0 overflow-hidden border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm md:rounded-2xl`}>
             {id ? (
               <Outlet />
             ) : (

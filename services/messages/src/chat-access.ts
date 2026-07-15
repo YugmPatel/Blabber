@@ -15,6 +15,7 @@ interface ChatDocument {
     restrictedAt: Date;
   }[];
   groupKind?: 'standard' | 'temporary';
+  temporaryCompletionBehavior?: 'end_only' | 'end_and_delete';
   expiresAt?: Date;
   endedAt?: Date;
   deletedAt?: Date;
@@ -38,11 +39,15 @@ export async function assertChatMembership(chatId: ObjectId, userId: ObjectId): 
 
   const now = new Date();
   if (chat.groupKind === 'temporary' && chat.expiresAt && chat.expiresAt <= now && !chat.endedAt) {
+    const set: Partial<ChatDocument> & { updatedAt: Date } =
+      chat.temporaryCompletionBehavior === 'end_and_delete'
+        ? { endedAt: now, deletedAt: now, updatedAt: now }
+        : { endedAt: now, updatedAt: now };
     await getDatabase().collection<ChatDocument>('chats').updateOne(
-      { _id: chat._id, endedAt: { $exists: false } },
-      { $set: { endedAt: now, updatedAt: now } }
+      { _id: chat._id, endedAt: { $exists: false }, deletedAt: { $exists: false } },
+      { $set: set }
     );
-    chat.endedAt = now;
+    Object.assign(chat, set);
   }
 
   return chat;

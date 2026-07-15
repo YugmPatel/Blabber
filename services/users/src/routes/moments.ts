@@ -346,7 +346,17 @@ function serializeMomentReplyMessage(message: any) {
     senderId: message.senderId.toString(),
     type: 'text',
     body: message.body,
-    momentReply: { isMomentReply: true, label: 'Replied to a Moment' },
+    momentReply: {
+      isMomentReply: true,
+      label: message.momentReply?.label || 'Replied to a Moment',
+      momentId: message.momentReply?.momentId?.toString(),
+      authorUserId: message.momentReply?.authorUserId?.toString(),
+      authorName: message.momentReply?.authorName,
+      momentType: message.momentReply?.momentType,
+      text: message.momentReply?.text,
+      mediaUrl: message.momentReply?.mediaUrl,
+      unavailable: message.momentReply?.unavailable,
+    },
     reactions: [],
     status: 'sent',
     deletedFor: [],
@@ -690,6 +700,11 @@ export const replyToMoment = asyncHandler(async (req: Request, res: Response) =>
   }
 
   const now = new Date();
+  const momentAuthor = await getDatabase().collection('users').findOne(
+    { _id: moment.authorUserId },
+    { projection: { name: 1, username: 1 } }
+  );
+  const momentText = String(moment.textBody || moment.caption || '').trim();
   const messageDoc = {
     _id: new ObjectId(),
     chatId: chat._id,
@@ -700,6 +715,12 @@ export const replyToMoment = asyncHandler(async (req: Request, res: Response) =>
       isMomentReply: true,
       momentId: moment._id,
       authorUserId: moment.authorUserId,
+      authorName: momentAuthor?.name || momentAuthor?.username || 'Someone',
+      momentType: moment.type,
+      text: momentText || undefined,
+      mediaUrl: moment.mediaId && ['image', 'audio'].includes(moment.type)
+        ? `/api/moments/${moment._id.toString()}/media`
+        : undefined,
       label: 'Replied to a Moment',
       createdAt: now,
     },

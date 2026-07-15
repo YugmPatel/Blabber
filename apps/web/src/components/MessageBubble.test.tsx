@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import MessageBubble from './MessageBubble';
 import type { Message } from '@repo/types';
 
@@ -184,5 +184,142 @@ describe('MessageBubble', () => {
     // Time format will vary by locale, just check it exists
     const timeElement = screen.getByText(/\d{1,2}:\d{2}/);
     expect(timeElement).toBeInTheDocument();
+  });
+
+  it('shows poll voter names when show voters is enabled', () => {
+    const pollMessage: Message = {
+      ...mockMessage,
+      type: 'poll',
+      body: 'Lunch?',
+      poll: {
+        question: 'Lunch?',
+        options: [
+          { id: 'option-1', text: 'Pizza', votes: ['user2'], voteCount: 1 },
+          { id: 'option-2', text: 'Sushi', votes: [], voteCount: 0 },
+        ],
+        allowMultiple: false,
+        allowVoteChanges: true,
+        showVoters: true,
+        currentUserVote: [],
+        votes: [
+          {
+            userId: 'user2',
+            optionIds: ['option-1'],
+            votedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      },
+    };
+
+    render(
+      <MessageBubble
+        message={pollMessage}
+        isSentByMe={false}
+        getUserName={(userId) => (userId === 'user2' ? 'Alice' : userId)}
+      />
+    );
+
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+  });
+
+  it('hides poll voter names when show voters is disabled', () => {
+    const pollMessage: Message = {
+      ...mockMessage,
+      type: 'poll',
+      body: 'Lunch?',
+      poll: {
+        question: 'Lunch?',
+        options: [
+          { id: 'option-1', text: 'Pizza', votes: ['user2'], voteCount: 1 },
+          { id: 'option-2', text: 'Sushi', votes: [], voteCount: 0 },
+        ],
+        allowMultiple: false,
+        allowVoteChanges: true,
+        showVoters: false,
+        currentUserVote: [],
+      },
+    };
+
+    render(
+      <MessageBubble
+        message={pollMessage}
+        isSentByMe={false}
+        getUserName={(userId) => (userId === 'user2' ? 'Alice' : userId)}
+      />
+    );
+
+    expect(screen.queryByText('Alice')).not.toBeInTheDocument();
+  });
+
+  it('submits multiple poll options when multiple choice is enabled', () => {
+    const onPollVote = vi.fn();
+    const pollMessage: Message = {
+      ...mockMessage,
+      type: 'poll',
+      body: 'Lunch?',
+      poll: {
+        question: 'Lunch?',
+        options: [
+          { id: 'option-1', text: 'Pizza', votes: [], voteCount: 1 },
+          { id: 'option-2', text: 'Sushi', votes: [], voteCount: 0 },
+        ],
+        allowMultiple: true,
+        allowVoteChanges: true,
+        showVoters: false,
+        currentUserVote: ['option-1'],
+      },
+    };
+
+    render(<MessageBubble message={pollMessage} isSentByMe={false} onPollVote={onPollVote} />);
+    fireEvent.click(screen.getByRole('button', { name: /Sushi/i }));
+
+    expect(onPollVote).toHaveBeenCalledWith('1', ['option-1', 'option-2']);
+  });
+
+  it('does not allow a poll vote change when vote changes are disabled', () => {
+    const onPollVote = vi.fn();
+    const pollMessage: Message = {
+      ...mockMessage,
+      type: 'poll',
+      body: 'Lunch?',
+      poll: {
+        question: 'Lunch?',
+        options: [
+          { id: 'option-1', text: 'Pizza', votes: [], voteCount: 1 },
+          { id: 'option-2', text: 'Sushi', votes: [], voteCount: 0 },
+        ],
+        allowMultiple: false,
+        allowVoteChanges: false,
+        showVoters: false,
+        currentUserVote: ['option-1'],
+      },
+    };
+
+    render(<MessageBubble message={pollMessage} isSentByMe={false} onPollVote={onPollVote} />);
+    fireEvent.click(screen.getByRole('button', { name: /Sushi/i }));
+
+    expect(onPollVote).not.toHaveBeenCalled();
+  });
+
+  it('renders rich Moment reply context', () => {
+    const momentReplyMessage: Message = {
+      ...mockMessage,
+      body: 'Looks good',
+      momentReply: {
+        isMomentReply: true,
+        label: 'Replied to a Moment',
+        momentId: 'moment-1',
+        authorName: 'Deva',
+        momentType: 'audio',
+        text: 'Voice update from campus',
+      },
+    };
+
+    render(<MessageBubble message={momentReplyMessage} isSentByMe={false} />);
+
+    expect(screen.getByText('Replied to a Moment')).toBeInTheDocument();
+    expect(screen.getByText('Deva · Audio Moment')).toBeInTheDocument();
+    expect(screen.getByText('Voice update from campus')).toBeInTheDocument();
   });
 });

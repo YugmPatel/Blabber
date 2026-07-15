@@ -381,11 +381,11 @@ export const leaveGroup = asyncHandler(async (req: Request, res: Response) => {
 });
 
 /**
- * Manually end a temporary group (admin only). Sets endedAt immediately
+ * Manually end a temporary group (admin only). Applies the group's selected
+ * completion behavior immediately
  * rather than waiting for expiresAt to lapse, giving admins explicit control
  * over the lifecycle instead of relying purely on lazy expiry detection.
- * Ending is non-destructive: messages/media stay visible, the group just
- * becomes read-only (see isChatExpired / assertChatWritable).
+ * End only is non-destructive; end and delete soft-hides it from active lists.
  */
 export const endGroup = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.userId;
@@ -409,9 +409,12 @@ export const endGroup = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const endedAt = new Date();
+  const set = chat.temporaryCompletionBehavior === 'end_and_delete'
+    ? { endedAt, deletedAt: endedAt, updatedAt: endedAt }
+    : { endedAt, updatedAt: endedAt };
   await getChatsCollection().updateOne(
     { _id: chat._id },
-    { $set: { endedAt, updatedAt: endedAt } }
+    { $set: set }
   );
 
   const updatedChat = await getChatsCollection().findOne({ _id: chat._id });

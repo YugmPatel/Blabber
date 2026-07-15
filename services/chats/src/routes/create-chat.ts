@@ -20,6 +20,7 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const { type, participantIds, title, description, groupContext, avatarUrl, groupKind, expiresAt } = validationResult.data;
+  const temporaryCompletionBehavior = (validationResult.data as { temporaryCompletionBehavior?: 'end_only' | 'end_and_delete' }).temporaryCompletionBehavior;
 
   // Get authenticated user ID from middleware
   const userId = (req as any).user?.userId;
@@ -145,6 +146,9 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
     groupContext: type === 'group' ? groupContext : undefined,
     avatarUrl,
     groupKind: type === 'group' ? groupKind || 'standard' : undefined,
+    temporaryCompletionBehavior: type === 'group' && groupKind === 'temporary'
+      ? temporaryCompletionBehavior || 'end_only'
+      : undefined,
     aiEnabled: type === 'group' ? true : undefined,
     expiresAt: type === 'group' && groupKind === 'temporary' ? expiresDate : undefined,
     createdAt: now,

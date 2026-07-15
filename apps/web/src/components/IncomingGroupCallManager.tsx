@@ -145,8 +145,8 @@ export default function IncomingGroupCallManager({ socket, isConnected }: Incomi
       {incomingCall && !activeCall && (
         <div className="fixed inset-x-4 top-4 z-[115] mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-start gap-3">
-            {incomingCall.chatAvatarUrl ? (
-              <Avatar src={incomingCall.chatAvatarUrl} alt={groupTitle} size="md" />
+            {incomingCall.fromUserAvatarUrl || incomingCall.chatAvatarUrl ? (
+              <Avatar src={incomingCall.fromUserAvatarUrl || incomingCall.chatAvatarUrl} alt={incomingCall.fromUserName || groupTitle} size="md" />
             ) : (
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-600">
                 <Users size={18} className="text-white" />

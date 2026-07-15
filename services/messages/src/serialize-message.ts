@@ -116,6 +116,13 @@ export function serializeMessage(message: MessageDocument, tempId?: string, view
       ? {
           isMomentReply: true,
           label: message.momentReply.label || 'Replied to a Moment',
+          momentId: message.momentReply.momentId ? objectIdToString(message.momentReply.momentId) : undefined,
+          authorUserId: message.momentReply.authorUserId ? objectIdToString(message.momentReply.authorUserId) : undefined,
+          authorName: message.momentReply.authorName,
+          momentType: message.momentReply.momentType,
+          text: message.momentReply.text,
+          mediaUrl: message.momentReply.mediaUrl,
+          unavailable: message.momentReply.unavailable,
         }
       : undefined,
     mentions: message.mentions?.map((mention) => ({

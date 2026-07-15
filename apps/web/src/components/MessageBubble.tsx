@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Message } from '@repo/types';
-import { createReport, getAccessToken, normalizeMediaUrl } from '@/api/client';
+import { createReport, fetchAuthorizedObjectUrl, getAccessToken, normalizeMediaUrl } from '@/api/client';
 import Avatar from './Avatar';
 import ReadReceipts from './ReadReceipts';
 import PlanThisMessageCard from './PlanThisMessageCard';
 import SharedItemMessageCard from './SharedItemMessageCard';
-import { Bookmark, Flag, Image as ImageIcon, Loader2, Pin, X } from 'lucide-react';
+import { Bookmark, Flag, Image as ImageIcon, Loader2, Pin, Type, Video, Volume2, X } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -28,6 +28,7 @@ interface MessageBubbleProps {
   onEventRsvp?: (messageId: string, status: 'going' | 'maybe' | 'declined') => void;
   onEventCancel?: (messageId: string) => void;
   onEventIcs?: (messageId: string) => void;
+  getUserName?: (userId: string) => string;
   highlighted?: boolean;
 }
 
@@ -199,6 +200,7 @@ export default function MessageBubble({
   onEventRsvp,
   onEventCancel,
   onEventIcs,
+  getUserName,
   highlighted = false,
 }: MessageBubbleProps) {
   const [showMenu, setShowMenu] = useState(false);
@@ -211,8 +213,37 @@ export default function MessageBubble({
   const [reportStatus, setReportStatus] = useState<string | null>(null);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [momentMediaObjectUrl, setMomentMediaObjectUrl] = useState<string | undefined>();
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const canCopyPhoto = isSentByMe && message.media?.type === 'image' && Boolean(message.media.url);
+  const momentReply = message.momentReply;
+
+  useEffect(() => {
+    if (!momentReply?.mediaUrl || momentReply.momentType !== 'image') {
+      setMomentMediaObjectUrl(undefined);
+      return undefined;
+    }
+
+    let active = true;
+    let objectUrl: string | undefined;
+    fetchAuthorizedObjectUrl(momentReply.mediaUrl)
+      .then((url) => {
+        if (!active) {
+          if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setMomentMediaObjectUrl(url);
+      })
+      .catch(() => {
+        if (active) setMomentMediaObjectUrl(undefined);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
+    };
+  }, [momentReply?.mediaUrl, momentReply?.momentType]);
 
   useEffect(() => {
     if (!showMenu) return;
@@ -512,6 +543,13 @@ export default function MessageBubble({
             const selected = currentVote.includes(option.id) || option.votes.includes(currentUserId || '');
             const count = option.voteCount ?? option.votes.length;
             const percent = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
+            const voterIds = new Set<string>(message.poll?.showVoters ? option.votes : []);
+            if (message.poll?.showVoters) {
+              message.poll.votes?.forEach((vote) => {
+                if (vote.optionIds.includes(option.id)) voterIds.add(vote.userId);
+              });
+            }
+            const voterNames = Array.from(voterIds).map((userId) => getUserName?.(userId) || userId);
 
             return (
               <button
@@ -535,6 +573,11 @@ export default function MessageBubble({
                     {count} vote{count === 1 ? '' : 's'}
                   </span>
                 </span>
+                {voterNames.length > 0 && (
+                  <span className="relative mt-1 block truncate text-[11px] opacity-70">
+                    {voterNames.join(', ')}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -665,6 +708,57 @@ export default function MessageBubble({
   const renderSharedItem = () => {
     if (!message.sharedItem) return null;
     return <SharedItemMessageCard sharedItem={message.sharedItem} />;
+  };
+
+  const renderMomentReplyPreview = () => {
+    if (!momentReply?.isMomentReply) return null;
+    const iconClass = 'h-4 w-4 flex-shrink-0 text-teal-600 dark:text-teal-300';
+    const Icon =
+      momentReply.momentType === 'image'
+        ? ImageIcon
+        : momentReply.momentType === 'audio'
+          ? Volume2
+          : momentReply.momentType === 'video'
+            ? Video
+            : Type;
+    const typeLabel = momentReply.momentType
+      ? `${momentReply.momentType[0].toUpperCase()}${momentReply.momentType.slice(1)} Moment`
+      : 'Moment';
+
+    return (
+      <div className="mb-2 rounded-xl border border-teal-100 bg-teal-50/80 p-2.5 dark:border-teal-800/50 dark:bg-teal-500/10">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-300">
+          {momentReply.label || 'Replied to a Moment'}
+        </p>
+        {momentReply.unavailable ? (
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Moment unavailable</p>
+        ) : (
+          <div className="mt-2 flex items-start gap-2.5">
+            {momentMediaObjectUrl ? (
+              <img
+                src={momentMediaObjectUrl}
+                alt=""
+                className="h-12 w-12 flex-shrink-0 rounded-lg bg-slate-100 object-cover dark:bg-slate-800"
+              />
+            ) : (
+              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-white text-teal-600 dark:bg-slate-900 dark:text-teal-300">
+                <Icon className={iconClass} />
+              </span>
+            )}
+            <span className="min-w-0">
+              <span className="block truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+                {momentReply.authorName ? `${momentReply.authorName} · ${typeLabel}` : typeLabel}
+              </span>
+              {momentReply.text && (
+                <span className="mt-0.5 line-clamp-2 block text-sm text-slate-600 dark:text-slate-300">
+                  {momentReply.text}
+                </span>
+              )}
+            </span>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderReplyPreview = () => {
@@ -946,11 +1040,7 @@ export default function MessageBubble({
                 Forwarded
               </p>
             )}
-            {message.momentReply?.isMomentReply && (
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                {message.momentReply.label || 'Replied to a Moment'}
-              </p>
-            )}
+            {renderMomentReplyPreview()}
             {renderMedia()}
             {renderPoll()}
             {renderSticker()}

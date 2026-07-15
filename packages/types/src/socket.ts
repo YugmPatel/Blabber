@@ -6,6 +6,7 @@ export interface CallInvitePayload {
   chatId: string;
   fromUserId: string;
   fromUserName?: string;
+  fromUserAvatarUrl?: string;
   toUserId: string;
   callType: CallType;
 }
@@ -65,6 +66,7 @@ export interface GroupCallStartPayload {
   chatAvatarUrl?: string;
   fromUserId: string;
   fromUserName?: string;
+  fromUserAvatarUrl?: string;
   callType: CallType;
   startedAt?: string;
 }
@@ -96,6 +98,9 @@ export interface ClientToServerEvents {
       question: string;
       options: string[];
       allowMultiple?: boolean;
+      allowVoteChanges?: boolean;
+      showVoters?: boolean;
+      closesAt?: string;
     };
     sticker?: {
       emoji: string;
@@ -104,8 +109,14 @@ export interface ClientToServerEvents {
     event?: {
       title: string;
       startsAt: string;
+      startAt?: string;
+      endAt?: string;
+      timezone?: string;
       location?: string;
+      meetingUrl?: string;
       description?: string;
+      reminderEnabled?: boolean;
+      reminderOffsetMinutes?: number;
     };
     replyToId?: string;
     mentions?: Array<{ userId: string; start: number; length: number }>;
@@ -124,6 +135,7 @@ export interface ClientToServerEvents {
     groupContext?: string;
     avatarUrl?: string;
     groupKind?: 'standard' | 'temporary';
+    temporaryCompletionBehavior?: 'end_only' | 'end_and_delete';
     expiresAt?: string;
   }) => void;
   'chat:join': (data: { chatId: string }) => void;

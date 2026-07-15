@@ -239,14 +239,22 @@ export interface MessagePin {
   messageId: string;
   pinnedBy: string;
   pinnedAt: string;
-  preview: {
-    senderId: string;
-    senderDisplayName: string;
-    type?: string;
-    snippet: string;
-    attachmentLabel?: string;
-    createdAt: string;
-  };
+	  preview: {
+	    senderId: string;
+	    senderDisplayName: string;
+	    type?: string;
+	    snippet: string;
+	    attachmentLabel?: string;
+	    media?: {
+	      type?: string;
+	      url?: string;
+	      thumbnailUrl?: string;
+	      fileName?: string;
+	      mimeType?: string;
+	      size?: number;
+	    };
+	    createdAt: string;
+	  };
 }
 
 export interface SavedMessageItem {

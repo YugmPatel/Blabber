@@ -1247,7 +1247,6 @@ function ChatIntelligenceDrawer({
   const { user: currentUser } = useAuth();
   const [pendingTask, setPendingTask] = useState<ChatSummaryTask | null>(null);
   const [activeIntelligenceTab, setActiveIntelligenceTab] = useState<'catch-up' | 'actions' | 'brain'>('catch-up');
-  const askTabLabel = isGroupChat ? 'Group Brain' : 'Ask Chat';
   const participantProfiles = new Map((chat.participantProfiles || []).map((profile) => [profile._id, profile]));
   const currentUserCanManageActions = Boolean(
     currentUser?._id &&
@@ -1263,6 +1262,23 @@ function ChatIntelligenceDrawer({
   const actionOwnerOptions = currentUserCanManageActions
     ? ownerOptions
     : ownerOptions.filter((option) => option.userId === currentUser?._id);
+
+  useEffect(() => {
+    if (!isGroupChat && activeIntelligenceTab === 'brain') {
+      setActiveIntelligenceTab('catch-up');
+    }
+  }, [activeIntelligenceTab, isGroupChat]);
+
+  const intelligenceTabs = isGroupChat
+    ? ([
+        ['catch-up', 'Catch Me Up'],
+        ['actions', 'Actions'],
+        ['brain', 'Group Brain'],
+      ] as const)
+    : ([
+        ['catch-up', 'Catch Me Up'],
+        ['actions', 'Actions'],
+      ] as const);
 
   const handleAddTaskToActions = (task: ChatSummaryTask) => {
     if (isGroupChat && !currentUserCanManageActions && task.assignedToUserId && task.assignedToUserId !== currentUser?._id) {
@@ -1295,9 +1311,9 @@ function ChatIntelligenceDrawer({
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Chat Intelligence</h2>
               <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-                {isGroupChat
-                  ? 'Summaries, actions, and answers from this group chat'
-                  : 'Summaries, actions, and answers from this conversation'}
+	                {isGroupChat
+	                  ? 'Summaries, actions, and answers from this group chat'
+	                  : 'Summaries and actions from this conversation'}
               </p>
             </div>
           </div>
@@ -1312,12 +1328,8 @@ function ChatIntelligenceDrawer({
         </header>
 
         <div className="border-b border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900">
-          <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-950">
-            {([
-              ['catch-up', 'Catch Me Up'],
-              ['actions', 'Actions'],
-              ['brain', askTabLabel],
-            ] as const).map(([value, label]) => (
+	          <div className={`${isGroupChat ? 'grid-cols-3' : 'grid-cols-2'} grid gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-950`}>
+	            {intelligenceTabs.map(([value, label]) => (
               <button
                 key={value}
                 type="button"
@@ -1379,10 +1391,10 @@ function ChatIntelligenceDrawer({
             </IntelligencePanelBoundary>
           )}
 
-          {activeIntelligenceTab === 'brain' && (
-            <IntelligencePanelBoundary title={askTabLabel} panel={askTabLabel} chatId={chatId} chatType={chat.type}>
-              <GroupBrainPanel
-                mode={isGroupChat ? 'group' : 'direct'}
+	          {isGroupChat && activeIntelligenceTab === 'brain' && (
+	            <IntelligencePanelBoundary title="Group Brain" panel="Group Brain" chatId={chatId} chatType={chat.type}>
+	              <GroupBrainPanel
+	                mode="group"
                 isAsking={isAskingBrain}
                 errorMessage={brainError?.message}
                 onAsk={(question) => askBrain(question)}

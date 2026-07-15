@@ -104,6 +104,11 @@ export interface MessageDocument {
     isMomentReply: boolean;
     momentId?: ObjectId;
     authorUserId?: ObjectId;
+    authorName?: string;
+    momentType?: 'text' | 'image' | 'audio' | 'video';
+    text?: string;
+    mediaUrl?: string;
+    unavailable?: boolean;
     label?: string;
     createdAt?: Date;
   };

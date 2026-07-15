@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Message } from '@repo/types';
 import MessageBubble from './MessageBubble';
 import DateDivider from './DateDivider';
@@ -59,6 +59,16 @@ export default function MessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const observerTarget = useRef<HTMLDivElement>(null);
   const previousScrollHeight = useRef<number>(0);
+  const displayMessages = useMemo(() => {
+    const seenPlanIds = new Set<string>();
+    return messages.filter((message) => {
+      const planId = message.planThis?.planId;
+      if (!planId) return true;
+      if (seenPlanIds.has(planId)) return false;
+      seenPlanIds.add(planId);
+      return true;
+    });
+  }, [messages]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -90,14 +100,14 @@ export default function MessageList({
       scrollRef.current.scrollTop = scrollDiff;
       previousScrollHeight.current = 0;
     }
-  }, [messages.length]);
+  }, [displayMessages.length]);
 
   // Scroll to bottom on initial load
   useEffect(() => {
-    if (scrollRef.current && messages.length > 0 && !hasNextPage) {
+    if (scrollRef.current && displayMessages.length > 0 && !hasNextPage) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages.length, hasNextPage]);
+  }, [displayMessages.length, hasNextPage]);
 
   // Group messages by date
   const groupMessagesByDate = useCallback(() => {
@@ -107,7 +117,7 @@ export default function MessageList({
 
     // Messages are in reverse chronological order (newest first)
     // We need to reverse to process oldest first
-    const sortedMessages = [...messages].reverse();
+    const sortedMessages = [...displayMessages].reverse();
 
     sortedMessages.forEach((message) => {
       const messageDate = new Date(message.createdAt);
@@ -133,7 +143,7 @@ export default function MessageList({
     }
 
     return groups;
-  }, [messages]);
+  }, [displayMessages]);
 
   const messageGroups = groupMessagesByDate();
 
@@ -144,7 +154,7 @@ export default function MessageList({
     return prevMessage.senderId !== message.senderId;
   };
 
-  if (messages.length === 0) {
+  if (displayMessages.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center bg-[#f8faf9] text-slate-500 dark:bg-[#071315] dark:text-slate-400">
         <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-center dark:border-[#1b393c] dark:bg-[#0b1d20]">
@@ -199,7 +209,8 @@ export default function MessageList({
                   senderName={
                     !isSentByMe && isGroupChat ? getUserName(message.senderId) : undefined
                   }
-                  senderAvatarUrl={!isSentByMe ? getUserAvatar(message.senderId) : undefined}
+                    senderAvatarUrl={!isSentByMe ? getUserAvatar(message.senderId) : undefined}
+                    getUserName={getUserName}
                   onReply={onReply}
                   onForward={onForward}
                   onPin={onPin}

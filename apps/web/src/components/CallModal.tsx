@@ -45,6 +45,7 @@ function serializeDescription(description: RTCSessionDescriptionInit) {
 }
 
 const callCanceledMessage = 'Call canceled.';
+const RING_TIMEOUT_MS = 45_000;
 
 function getMediaErrorMessage(callType: ActiveCall['callType'], error?: unknown) {
   const devices = callType === 'video' ? 'camera and microphone' : 'microphone';
@@ -91,6 +92,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const invitedCallIdsRef = useRef(new Set<string>());
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isClosingRef = useRef(false);
 
   useEffect(() => {
@@ -192,7 +194,7 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
     clearActiveCall();
   }, [cleanupResources, clearActiveCall]);
 
-  const emitControl = useCallback(
+	  const emitControl = useCallback(
     (event: 'call:accept' | 'call:decline' | 'call:cancel' | 'call:end', call: ActiveCall) => {
       if (!socket || !currentUser?._id) return;
       socket.emit(event, {
@@ -203,7 +205,31 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
       });
     },
     [socket, currentUser?._id]
-  );
+	  );
+
+	  useEffect(() => {
+	    if (ringTimerRef.current) {
+	      clearTimeout(ringTimerRef.current);
+	      ringTimerRef.current = null;
+	    }
+	    if (!activeCall || (activeCall.status !== 'outgoing' && activeCall.status !== 'incoming')) return undefined;
+
+	    const callId = activeCall.callId;
+	    ringTimerRef.current = setTimeout(() => {
+	      const latestCall = activeCallRef.current;
+	      if (!latestCall || latestCall.callId !== callId) return;
+	      if (latestCall.status !== 'outgoing' && latestCall.status !== 'incoming') return;
+	      emitControl(latestCall.status === 'outgoing' ? 'call:cancel' : 'call:decline', latestCall);
+	      closeCall('No answer.');
+	    }, RING_TIMEOUT_MS);
+
+	    return () => {
+	      if (ringTimerRef.current) {
+	        clearTimeout(ringTimerRef.current);
+	        ringTimerRef.current = null;
+	      }
+	    };
+	  }, [activeCall?.callId, activeCall?.status, closeCall, emitControl]);
 
   const drainPendingIceCandidates = useCallback(async () => {
     const pc = peerConnectionRef.current;
@@ -369,13 +395,14 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
     ensureLocalMedia(activeCall)
       .then(() => {
         if (!isCurrentCall(activeCall) || activeCallRef.current?.status !== 'outgoing') return;
-        socket.emit('call:invite', {
-          callId: activeCall.callId,
-          chatId: activeCall.chatId,
-          fromUserId: currentUser._id,
-          fromUserName: getUserName(currentUser),
-          toUserId: activeCall.toUserId,
-          callType: activeCall.callType,
+	        socket.emit('call:invite', {
+	          callId: activeCall.callId,
+	          chatId: activeCall.chatId,
+	          fromUserId: currentUser._id,
+	          fromUserName: getUserName(currentUser),
+	          fromUserAvatarUrl: currentUser.avatarUrl,
+	          toUserId: activeCall.toUserId,
+	          callType: activeCall.callType,
         });
       })
       .catch((error) => {
@@ -410,9 +437,10 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
         fromUserId: data.fromUserId,
         fromUserName: data.fromUserName,
         toUserId: currentUser._id,
-        peerUserId: data.fromUserId,
-        peerName: data.fromUserName || 'Someone',
-      });
+	        peerUserId: data.fromUserId,
+	        peerName: data.fromUserName || 'Someone',
+	        peerAvatarUrl: data.fromUserAvatarUrl,
+	      });
     };
 
     const handleAccepted = (data: CallControlPayload) => {
@@ -568,10 +596,13 @@ export default function CallModal({ socket, isConnected }: CallModalProps) {
 
   useEffect(
     () => () => {
-      if (closeTimerRef.current) {
-        clearTimeout(closeTimerRef.current);
-      }
-      cleanupResources();
+	      if (closeTimerRef.current) {
+	        clearTimeout(closeTimerRef.current);
+	      }
+	      if (ringTimerRef.current) {
+	        clearTimeout(ringTimerRef.current);
+	      }
+	      cleanupResources();
     },
     [cleanupResources]
   );

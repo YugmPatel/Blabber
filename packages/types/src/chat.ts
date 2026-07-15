@@ -23,6 +23,7 @@ export interface Chat {
   groupContext?: string;
   avatarUrl?: string;
   groupKind?: 'standard' | 'temporary';
+  temporaryCompletionBehavior?: 'end_only' | 'end_and_delete';
   sendMode?: 'everyone' | 'admins_only';
   aiEnabled?: boolean;
   memberRestrictions?: {
@@ -82,6 +83,7 @@ export const ChatSchema = z.object({
   groupContext: z.string().max(2000).optional(),
   avatarUrl: AvatarUrlSchema.optional(),
   groupKind: z.enum(['standard', 'temporary']).optional(),
+  temporaryCompletionBehavior: z.enum(['end_only', 'end_and_delete']).optional(),
   sendMode: z.enum(['everyone', 'admins_only']).optional(),
   aiEnabled: z.boolean().optional(),
   memberRestrictions: z.array(z.object({
@@ -118,6 +120,7 @@ export const CreateChatDTOSchema = z.object({
   groupContext: z.string().max(2000).optional(),
   avatarUrl: AvatarUrlSchema.optional(),
   groupKind: z.enum(['standard', 'temporary']).optional(),
+  temporaryCompletionBehavior: z.enum(['end_only', 'end_and_delete']).optional(),
   expiresAt: z.string().datetime().optional(),
 }).refine(
   (data) => {

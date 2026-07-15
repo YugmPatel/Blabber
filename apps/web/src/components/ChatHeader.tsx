@@ -1294,10 +1294,11 @@ export default function ChatHeader({
         callId,
         chatId: chat._id,
         chatTitle: getChatTitle(chat),
-        chatAvatarUrl: getChatAvatar(chat),
-        fromUserId: currentUser._id,
-        fromUserName: getUserTitle(currentUser as DisplayUser, 'You'),
-        callType,
+	        chatAvatarUrl: getChatAvatar(chat),
+	        fromUserId: currentUser._id,
+	        fromUserName: getUserTitle(currentUser as DisplayUser, 'You'),
+	        fromUserAvatarUrl: (currentUser as DisplayUser).avatarUrl,
+	        callType,
         startedAt: new Date().toISOString(),
       });
       setGroupCall({ callId, callType, isInitiator: true });

@@ -21,10 +21,20 @@ function serializeSave(save: any, message: any | null, senderName?: string, chat
           senderId: message.senderId.toString(),
           senderDisplayName: senderName || 'Someone',
           type: inferMessageType(message),
-          snippet: messageSnippet(message, undefined, 180),
-          attachmentLabel: attachmentLabel(message),
-          createdAt: message.createdAt,
-        }
+	          snippet: messageSnippet(message, undefined, 180),
+	          attachmentLabel: attachmentLabel(message),
+	          media: message.media
+	            ? {
+	                type: message.media.type,
+	                url: message.media.url,
+	                thumbnailUrl: message.media.thumbnailUrl,
+	                fileName: message.media.fileName,
+	                mimeType: message.media.mimeType,
+	                size: message.media.size,
+	              }
+	            : undefined,
+	          createdAt: message.createdAt,
+	        }
       : undefined,
   };
 }

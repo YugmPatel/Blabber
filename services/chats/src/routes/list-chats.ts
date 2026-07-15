@@ -134,15 +134,17 @@ export const listChats = asyncHandler(async (req: Request, res: Response) => {
   );
 
   // Serialize chats for response
-  const serializedChats = await Promise.all(
-    chats.map(async (chat) => ({
-      ...(await serializeChat(chat, { includeParticipants: true, viewerId: userObjectId })),
-      unreadCount: unreadCountByChatId.get(chat._id.toString()) || 0,
-      mentionUnreadCount: chat.type === 'group' ? mentionUnreadCountByChatId.get(chat._id.toString()) || 0 : 0,
-      archived: archivedByChatId.has(chat._id.toString()),
-      archivedAt: archivedByChatId.get(chat._id.toString())?.archivedAt,
-    }))
-  );
+  const serializedChats = (
+    await Promise.all(
+      chats.map(async (chat) => ({
+        ...(await serializeChat(chat, { includeParticipants: true, viewerId: userObjectId })),
+        unreadCount: unreadCountByChatId.get(chat._id.toString()) || 0,
+        mentionUnreadCount: chat.type === 'group' ? mentionUnreadCountByChatId.get(chat._id.toString()) || 0 : 0,
+        archived: archivedByChatId.has(chat._id.toString()),
+        archivedAt: archivedByChatId.get(chat._id.toString())?.archivedAt,
+      }))
+    )
+  ).filter((chat) => !chat.deletedAt);
 
   return res.status(200).json({
     chats: serializedChats,

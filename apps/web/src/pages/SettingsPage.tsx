@@ -98,7 +98,7 @@ import {
   revokeVeyraScope,
   updateVeyraSettings,
 } from '@/api/client';
-import type { DiscoveryTopic } from '@/api/client';
+import type { DiscoveryTopic, VeyraSettings } from '@/api/client';
 import { useSavedMessages } from '@/hooks/useMessages';
 import { groupActiveDeviceSessions } from '@/utils/device-sessions';
 import { SavedContentSection } from './SavedMessagesPage';
@@ -2817,9 +2817,16 @@ function AISection() {
     queryFn: fetchVeyraScopeCandidates,
     enabled: Boolean(veyraQuery.data?.settings.enabled),
   });
+  const syncVeyraSettings = (settings: VeyraSettings) => {
+    queryClient.setQueryData(['veyra-settings'], (current: any) =>
+      current ? { ...current, settings } : { settings, globalAiEnabled: enabled }
+    );
+    void queryClient.invalidateQueries({ queryKey: ['veyra-settings'] });
+    void queryClient.invalidateQueries({ queryKey: ['veyra-scope-candidates'] });
+  };
   const updateVeyra = useMutation({
     mutationFn: updateVeyraSettings,
-    onSuccess: (settings) => queryClient.setQueryData(['veyra-settings'], (current: any) => current ? { ...current, settings } : current),
+    onSuccess: syncVeyraSettings,
   });
   const grantScope = useMutation({
     mutationFn: () => {
@@ -2827,15 +2834,15 @@ function AISection() {
       if (!candidate) throw new Error('Choose a space.');
       return grantVeyraScope({ type: candidate.type, targetId: candidate.targetId });
     },
-    onSuccess: (settings) => {
-      setSelectedScope('');
-      queryClient.setQueryData(['veyra-settings'], (current: any) => current ? { ...current, settings } : current);
-    },
-  });
-  const revokeScope = useMutation({
-    mutationFn: revokeVeyraScope,
-    onSuccess: (settings) => queryClient.setQueryData(['veyra-settings'], (current: any) => current ? { ...current, settings } : current),
-  });
+	    onSuccess: (settings) => {
+	      setSelectedScope('');
+	      syncVeyraSettings(settings);
+	    },
+	  });
+	  const revokeScope = useMutation({
+	    mutationFn: revokeVeyraScope,
+	    onSuccess: syncVeyraSettings,
+	  });
   const veyra = veyraQuery.data?.settings;
   const availabilityLabel =
     availabilityQuery.data === 'available'

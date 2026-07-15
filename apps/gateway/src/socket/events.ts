@@ -354,10 +354,10 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
       return;
     }
 
-    io.to(`user:${data.toUserId}`).emit('call:incoming', {
-      ...data,
-      fromUserId,
-    });
+	    io.to(`user:${data.toUserId}`).emit('call:incoming', {
+	      ...data,
+	      fromUserId,
+	    });
     await recordCallEvent(socket, {
       callId: data.callId,
       chatId: data.chatId,
@@ -417,16 +417,17 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
         try {
           const settings = await getPublicUserSettings(participantId);
           if (!settings.incomingCallsEnabled || !hasUserRoom(io, participantId)) continue;
-          io.to(`user:${participantId}`).emit('group-call:incoming', {
-            callId: data.callId,
-            chatId: data.chatId,
-            chatTitle: data.chatTitle || chat.title,
-            chatAvatarUrl: data.chatAvatarUrl || chat.avatarUrl,
-            fromUserId,
-            fromUserName: data.fromUserName,
-            callType: data.callType,
-            startedAt,
-          });
+	          io.to(`user:${participantId}`).emit('group-call:incoming', {
+	            callId: data.callId,
+	            chatId: data.chatId,
+	            chatTitle: data.chatTitle || chat.title,
+	            chatAvatarUrl: data.chatAvatarUrl || chat.avatarUrl,
+	            fromUserId,
+	            fromUserName: data.fromUserName,
+	            fromUserAvatarUrl: (data as { fromUserAvatarUrl?: string }).fromUserAvatarUrl,
+	            callType: data.callType,
+	            startedAt,
+	          });
           deliveredCount += 1;
         } catch (error) {
           logger.warn({ error, participantId, chatId: data.chatId }, 'Failed to deliver group call invite');
@@ -682,10 +683,11 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
       description?: string;
       groupContext?: string;
       groupKind?: 'standard' | 'temporary';
+      temporaryCompletionBehavior?: 'end_only' | 'end_and_delete';
       expiresAt?: string;
     }) => {
       try {
-        const { type, participantIds, title, avatarUrl, description, groupContext, groupKind, expiresAt } = data;
+        const { type, participantIds, title, avatarUrl, description, groupContext, groupKind, temporaryCompletionBehavior, expiresAt } = data;
         const userId = socket.data.userId;
         const token = socket.data.token;
 
@@ -705,6 +707,7 @@ export function setupClientEvents(socket: Socket, io: SocketIOServer) {
             description,
             groupContext,
             groupKind,
+            temporaryCompletionBehavior,
             expiresAt,
           },
           {

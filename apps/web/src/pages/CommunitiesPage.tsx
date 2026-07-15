@@ -164,7 +164,7 @@ export default function CommunitiesPage() {
               <p className="mt-1 text-sm text-[color:var(--bl-text-muted)]">Join communities to connect with people who share your interests.</p>
             </div>
             <button
-              onClick={() => navigate('/discover')}
+              onClick={() => navigate('/discover?tab=browse')}
               className="bl-focus-ring flex-shrink-0 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
             >
               Explore Communities

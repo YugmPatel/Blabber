@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -6,16 +6,21 @@ import {
   ChevronDown,
   Clapperboard,
   ExternalLink,
+  FileText,
   Film,
+  Image as ImageIcon,
   MessageSquare,
   Search,
   Trash2,
+  Video,
+  Volume2,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchSavedPosts, fetchSavedReels, normalizeMediaUrl, unsavePost, unsaveReel } from '@/api/client';
+import { fetchAuthorizedObjectUrl, fetchSavedPosts, fetchSavedReels, reelPosterUrl, unsavePost, unsaveReel } from '@/api/client';
 import { useSavedMessages, useUnsaveMessage } from '@/hooks/useMessages';
 import { sourceJumpPath } from '@/lib/source-jump';
-import type { FeedPost } from '@/api/client';
+import type { FeedPost, SavedMessageItem } from '@/api/client';
 
 type SavedTab = 'messages' | 'posts' | 'reels';
 
@@ -67,15 +72,65 @@ function EndMarker({ label }: { label: string }) {
   );
 }
 
+function AuthorizedPreviewImage({
+  src,
+  alt,
+  className,
+  fallback,
+}: {
+  src?: string | null;
+  alt: string;
+  className: string;
+  fallback: ReactNode;
+}) {
+  const [objectUrl, setObjectUrl] = useState<string | undefined>();
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!src) {
+      setObjectUrl(undefined);
+      setFailed(false);
+      return undefined;
+    }
+    let active = true;
+    let resolvedUrl: string | undefined;
+    setFailed(false);
+    fetchAuthorizedObjectUrl(src)
+      .then((url) => {
+        if (!active) {
+          if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+          return;
+        }
+        resolvedUrl = url;
+        setObjectUrl(url);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+      if (resolvedUrl?.startsWith('blob:')) URL.revokeObjectURL(resolvedUrl);
+    };
+  }, [src]);
+
+  if (!src || failed) return <>{fallback}</>;
+  return objectUrl ? <img src={objectUrl} alt={alt} className={className} /> : <>{fallback}</>;
+}
+
 function SavedPostPreview({ post }: { post: FeedPost }) {
   const first = post.media[0];
   return (
     <div className="flex items-start gap-3">
       {first ? (
-        <img
-          src={normalizeMediaUrl(first.url)}
+        <AuthorizedPreviewImage
+          src={first.url}
           alt=""
           className="h-16 w-16 rounded-xl bg-slate-100 object-cover dark:bg-slate-700"
+          fallback={(
+            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-slate-100 text-slate-400 dark:bg-slate-700">
+              <ImageIcon size={18} />
+            </div>
+          )}
         />
       ) : (
         <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-slate-100 text-slate-400 dark:bg-slate-700">
@@ -86,6 +141,33 @@ function SavedPostPreview({ post }: { post: FeedPost }) {
         <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{post.author.name}</p>
         <p className="mt-1 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">{post.body || 'Saved post'}</p>
       </div>
+    </div>
+  );
+}
+
+function SavedMessageMediaPreview({ media }: { media?: NonNullable<NonNullable<SavedMessageItem['preview']>['media']> }) {
+  if (!media) return null;
+  const mediaUrl = media.thumbnailUrl || media.url;
+  if (media.type === 'image' && mediaUrl) {
+    return (
+      <AuthorizedPreviewImage
+        src={mediaUrl}
+        alt=""
+        className="mt-2 h-20 w-28 rounded-xl bg-slate-100 object-cover dark:bg-slate-700"
+        fallback={<MediaChip icon={ImageIcon} label="Image attachment" />}
+      />
+    );
+  }
+  const Icon = media.type === 'video' ? Video : media.type === 'audio' ? Volume2 : FileText;
+  const label = media.fileName || (media.type === 'video' ? 'Video attachment' : media.type === 'audio' ? 'Audio attachment' : 'Document attachment');
+  return <MediaChip icon={Icon} label={label} />;
+}
+
+function MediaChip({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <div className="mt-2 inline-flex max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+      <Icon size={15} className="flex-shrink-0 text-teal-600 dark:text-teal-300" />
+      <span className="truncate">{label}</span>
     </div>
   );
 }
@@ -293,14 +375,15 @@ export function SavedContentSection({ embedded = false }: { embedded?: boolean }
                         <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                           {item.chatTitle || 'Conversation'}
                         </p>
-                        <p className="mt-0.5 line-clamp-2 text-[13px] text-slate-600 dark:text-slate-300">
+	                        <p className="mt-0.5 line-clamp-2 text-[13px] text-slate-600 dark:text-slate-300">
                           {item.available
                             ? `${item.preview?.senderDisplayName || 'Message'}: ${
                                 item.preview?.snippet || item.preview?.attachmentLabel || 'Message'
                               }`
-                            : 'This saved message is no longer available.'}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{formatDate(item.savedAt)}</p>
+	                            : 'This saved message is no longer available.'}
+	                        </p>
+	                        {item.available && <SavedMessageMediaPreview media={item.preview?.media} />}
+	                        <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{formatDate(item.savedAt)}</p>
                       </div>
                       {!editingMessages && (
                         <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
@@ -349,8 +432,8 @@ export function SavedContentSection({ embedded = false }: { embedded?: boolean }
                       <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">{formatDate(savedAt)}</span>
                     </div>
                     <div className="mt-3 flex justify-end gap-2">
-                      <button onClick={() => navigate(`/feed?post=${post.id}`)} className={JUMP_BTN}>
-                        <ExternalLink size={13} /> Jump to original
+	                      <button onClick={() => navigate(`/posts/${post.id}`)} className={JUMP_BTN}>
+	                        <ExternalLink size={13} /> Jump to original
                       </button>
                       <button onClick={() => removePost.mutate(post.id)} className={REMOVE_BTN}>
                         <Trash2 size={13} /> Remove
@@ -381,9 +464,16 @@ export function SavedContentSection({ embedded = false }: { embedded?: boolean }
                       key={reel.id}
                       className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
                     >
-                      <div className="flex aspect-video w-full items-center justify-center bg-gradient-to-br from-teal-50 to-slate-100 dark:from-teal-500/10 dark:to-slate-900">
-                        <Film size={24} className="text-teal-600/60 dark:text-teal-300/50" />
-                      </div>
+	                      <AuthorizedPreviewImage
+	                        src={reel.thumbnailUrl || reel.posterUrl || reelPosterUrl(reel.id)}
+	                        alt=""
+	                        className="aspect-video w-full bg-slate-100 object-cover dark:bg-slate-900"
+	                        fallback={(
+	                          <div className="flex aspect-video w-full items-center justify-center bg-gradient-to-br from-teal-50 to-slate-100 dark:from-teal-500/10 dark:to-slate-900">
+	                            <Film size={24} className="text-teal-600/60 dark:text-teal-300/50" />
+	                          </div>
+	                        )}
+	                      />
                       <div className="flex flex-1 flex-col gap-1 p-3.5">
                         <p className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-white">
                           {reel.caption || 'Reel'}

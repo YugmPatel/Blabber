@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bookmark, CalendarClock, ChevronDown, EyeOff, Film, HelpCircle, Menu, MessageCircle, RefreshCw, Repeat2, Search, Share2, Sparkles, Target, TrendingUp, UserMinus, UserPlus, UsersRound, VolumeX, X } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import Sidebar from '@/components/Sidebar';
@@ -694,11 +694,13 @@ function CommunityCard({ community }: { community: DiscoveryCommunity }) {
 
 export default function DiscoverPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
-  const [view, setView] = useState<'for-you' | 'browse'>('for-you');
+  const initialView = searchParams.get('tab') === 'browse' ? 'browse' : 'for-you';
+  const [view, setView] = useState<'for-you' | 'browse'>(initialView);
   const [searchText, setSearchText] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [openItem, setOpenItem] = useState<{ type: 'post' | 'reel'; id: string } | null>(null);
@@ -766,6 +768,16 @@ export default function DiscoverPage() {
   const paginationActive = showAllPosts || showAllReels || showAllPeople || showAllCommunities || isSearching;
 
   useEffect(() => {
+    const nextView = searchParams.get('tab') === 'browse' ? 'browse' : 'for-you';
+    setView((current) => (current === nextView ? current : nextView));
+  }, [searchParams]);
+
+  const selectView = (nextView: 'for-you' | 'browse') => {
+    setView(nextView);
+    setSearchParams(nextView === 'browse' ? { tab: 'browse' } : {});
+  };
+
+  useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(searchText.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [searchText]);
@@ -828,13 +840,13 @@ export default function DiscoverPage() {
             </div>
             <div className="inline-flex flex-shrink-0 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-1">
               <button
-                onClick={() => setView('for-you')}
+                onClick={() => selectView('for-you')}
                 className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${view === 'for-you' ? 'bg-teal-600 text-white shadow-sm dark:bg-teal-500 dark:text-slate-950' : 'text-[color:var(--bl-text-secondary)] hover:bg-[color:var(--bl-hover)]'}`}
               >
                 For You
               </button>
               <button
-                onClick={() => setView('browse')}
+                onClick={() => selectView('browse')}
                 className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${view === 'browse' ? 'bg-teal-600 text-white shadow-sm dark:bg-teal-500 dark:text-slate-950' : 'text-[color:var(--bl-text-secondary)] hover:bg-[color:var(--bl-hover)]'}`}
               >
                 Browse

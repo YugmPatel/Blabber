@@ -111,6 +111,13 @@ export interface Message {
   momentReply?: {
     isMomentReply: boolean;
     label: string;
+    momentId?: string;
+    authorUserId?: string;
+    authorName?: string;
+    momentType?: 'text' | 'image' | 'audio' | 'video';
+    text?: string;
+    mediaUrl?: string;
+    unavailable?: boolean;
   };
   mentions?: Array<{
     userId: string;
@@ -239,6 +246,13 @@ export const MessageSchema = z.object({
   momentReply: z.object({
     isMomentReply: z.boolean(),
     label: z.string(),
+    momentId: z.string().optional(),
+    authorUserId: z.string().optional(),
+    authorName: z.string().optional(),
+    momentType: z.enum(['text', 'image', 'audio', 'video']).optional(),
+    text: z.string().optional(),
+    mediaUrl: z.string().optional(),
+    unavailable: z.boolean().optional(),
   }).optional(),
   mentions: z.array(z.object({
     userId: z.string(),
