@@ -555,7 +555,14 @@ export default function FeedPage() {
             )}
             {feedQuery.data?.posts.length === 0 && (
               <div className="rounded-2xl border border-dashed border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-6 py-14 text-center text-sm text-[color:var(--bl-text-muted)]">
-                {feedTab === 'featured' ? 'No featured posts are available right now.' : 'Your Following feed is quiet right now.'}
+                <p>{feedTab === 'featured' ? 'No featured posts are available right now.' : 'Follow people or explore Discover to see posts here.'}</p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/discover')}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-teal-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-teal-700"
+                >
+                  Explore Discover
+                </button>
               </div>
             )}
             {feedQuery.data?.posts.map((post) => <PostCard key={post.id} post={post} />)}

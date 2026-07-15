@@ -45,6 +45,11 @@
     "backup:verify": "node scripts/mongo-backup-verify.mjs",
     "seed:demo-social": "node scripts/seed-demo-social.mjs",
     "import:pexels-demo-content": "node scripts/import-pexels-demo-content.mjs",
+    "seed:beta-content": "node scripts/seed-beta-content.mjs",
+    "seed:beta-content:dry-run": "node scripts/seed-beta-content.mjs --dry-run",
+    "seed:beta-content:apply": "node scripts/seed-beta-content.mjs --apply",
+    "seed:beta-content:report": "node scripts/seed-beta-content.mjs --report",
+    "test:beta-content": "vitest run scripts/beta-content",
     "deploy": "turbo run deploy",
     "docker:build": "docker-compose -f docker-compose.dev.yml build",
     "docker:up": "docker-compose -f docker-compose.dev.yml up",
@@ -59,8 +64,10 @@
   "devDependencies": {
     "dotenv-cli": "^11.0.0",
     "eslint": "^8.57.0",
+    "mongodb": "^6.3.0",
     "prettier": "^3.2.5",
-    "turbo": "^2.6.0"
+    "turbo": "^2.6.0",
+    "vitest": "^1.2.1"
   },
   "engines": {
     "node": ">=20.19.4",

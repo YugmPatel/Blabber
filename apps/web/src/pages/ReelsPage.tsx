@@ -537,7 +537,16 @@ export default function ReelsPage() {
               )}
               {active.isError && <p className="py-8 text-center text-sm text-rose-600 dark:text-rose-300">Unable to load Reels.</p>}
               {!active.isLoading && visibleReels.length === 0 && (
-                <p className="py-8 text-center text-sm text-[color:var(--bl-text-muted)]">No Reels are available right now.</p>
+                <div className="py-8 text-center text-sm text-[color:var(--bl-text-muted)]">
+                  <p>No reels yet. Check back soon or create the first one.</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/reels/new')}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-teal-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-teal-700"
+                  >
+                    Create a Reel
+                  </button>
+                </div>
               )}
               {visibleReels.map((reel) => (
                 <ReelCard

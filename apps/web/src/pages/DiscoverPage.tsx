@@ -911,6 +911,12 @@ export default function DiscoverPage() {
             <div className="space-y-8">
               <TrendingTopics selectedTopic={selectedTopic} onSelect={setSelectedTopic} />
 
+              {selectedTopic && !loading && !hasAnyBrowseContent ? (
+                <p className="rounded-2xl border border-dashed border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] p-8 text-center text-sm text-[color:var(--bl-text-muted)]">
+                  This topic is still growing.
+                </p>
+              ) : null}
+
               {allCommunities.length ? (
                 <section>
                   <div className="mb-3 flex items-center justify-between gap-3">
