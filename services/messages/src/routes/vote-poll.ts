@@ -45,8 +45,10 @@ export async function votePoll(req: Request, res: Response, next: NextFunction):
 
     const chat = await assertChatMembership(message.chatId, voterObjectId);
     // Voting edits the poll and notifies the other participant, so a blocked
-    // direct chat must reject it the same as a new message.
-    await assertChatWritable(chat, voterObjectId);
+    // direct chat must reject it the same as a new message. It is not
+    // "sending a message" though, so an admins-only group doesn't block
+    // votes from non-admin members.
+    await assertChatWritable(chat, voterObjectId, { enforceSendMode: false });
 
     if (isPollClosed(message.poll)) {
       res.status(400).json({ error: 'Bad Request', message: 'Poll is closed' });

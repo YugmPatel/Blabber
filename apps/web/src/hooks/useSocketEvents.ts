@@ -389,30 +389,19 @@ export const useSocketEvents = (socket: TypedSocket | null) => {
       setTyping(data.chatId, data.userId, data.isTyping);
     };
 
-    // Handler for chat updates
-    const handleChatUpdated = (data: { chat: any }) => {
-      const chat: Chat = {
-        ...data.chat,
-        createdAt: new Date(data.chat.createdAt),
-        updatedAt: new Date(data.chat.updatedAt),
-        lastMessageRef: data.chat.lastMessageRef
-          ? {
-              ...data.chat.lastMessageRef,
-              createdAt: new Date(data.chat.lastMessageRef.createdAt),
-            }
-          : undefined,
-      };
-
-      // Update the chat detail cache
-      queryClient.setQueryData(chatKeys.detail(chat._id), chat);
-
-      // Update the chat in the list cache
-      queryClient.setQueryData<Chat[]>(chatKeys.lists(), (old) => {
-        if (!old) return old;
-        return old.map((c) => (c._id === chat._id ? chat : c));
-      });
-
-      // Invalidate chat lists to ensure consistency
+    // Handler for chat updates. The gateway/pubsub payload for this event is
+    // intentionally thin ({chatId, name?, avatar?, updatedBy} — see
+    // ChatUpdatedEvent in packages/types/src/events.ts) for every current
+    // publisher (title/settings edits, membership changes, sendMode toggles,
+    // group-ended state), not a full Chat document. Rehydrate via
+    // invalidation/refetch instead of trying to splice a partial payload
+    // into the cache — this is what actually applies permission/lifecycle
+    // changes (admin-only mode, ended temporary groups) on other members'
+    // clients without a manual refresh.
+    const handleChatUpdated = (data: { chatId?: string; chat?: any }) => {
+      const chatId = data.chatId || data.chat?._id;
+      if (!chatId) return;
+      queryClient.invalidateQueries({ queryKey: chatKeys.detail(chatId) });
       queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     };
 

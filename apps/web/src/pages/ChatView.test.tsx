@@ -522,6 +522,121 @@ describe('ChatView', () => {
     expect(screen.queryByPlaceholderText(/type a message/i)).not.toBeInTheDocument();
   });
 
+  it('shows an ended-group banner and hides the composer for an ended temporary group', async () => {
+    const endedGroup: Chat = {
+      _id: 'chat4',
+      type: 'group',
+      participants: ['user1', 'user2'],
+      admins: ['user1'],
+      groupKind: 'temporary',
+      expiresAt: new Date(Date.now() - 60 * 60 * 1000),
+      endedAt: new Date(Date.now() - 30 * 60 * 1000),
+      title: 'Ended Temp Group',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
+      data: endedGroup,
+      isLoading: false,
+    } as any);
+
+    vi.spyOn(useMessagesModule, 'useMessages').mockReturnValue({
+      data: { pages: [{ messages: [], nextCursor: null }] },
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUser').mockReturnValue({ data: undefined } as any);
+    vi.spyOn(useUsersModule, 'useUserPresence').mockReturnValue({ data: undefined } as any);
+
+    renderChatView('chat4');
+
+    await waitFor(() => {
+      expect(screen.getByText('This temporary group has ended.')).toBeInTheDocument();
+    });
+    expect(screen.queryByPlaceholderText(/type a message/i)).not.toBeInTheDocument();
+  });
+
+  it('shows an admins-only banner and disables the composer for a non-admin member', async () => {
+    const adminOnlyChat: Chat = {
+      _id: 'chat3',
+      type: 'group',
+      participants: ['user1', 'user2'],
+      admins: ['user2'],
+      ownerId: 'user2',
+      sendMode: 'admins_only',
+      title: 'Admin Only Group',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
+      data: adminOnlyChat,
+      isLoading: false,
+    } as any);
+
+    vi.spyOn(useMessagesModule, 'useMessages').mockReturnValue({
+      data: { pages: [{ messages: [], nextCursor: null }] },
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUser').mockReturnValue({ data: undefined } as any);
+    vi.spyOn(useUsersModule, 'useUserPresence').mockReturnValue({ data: undefined } as any);
+
+    renderChatView('chat3');
+
+    await waitFor(() => {
+      expect(screen.getByText('Only admins can send messages in this group.')).toBeInTheDocument();
+    });
+    // Composer stays mounted (unlike the ended/blocked cases) but disabled,
+    // so the user sees why they can't send rather than the input vanishing.
+    expect(screen.getByPlaceholderText(/type a message/i)).toBeDisabled();
+  });
+
+  it('lets an admin send in their own admins-only group (composer stays enabled, no banner)', async () => {
+    const adminOnlyChat: Chat = {
+      _id: 'chat3',
+      type: 'group',
+      participants: ['user1', 'user2'],
+      admins: ['user1'],
+      ownerId: 'user1',
+      sendMode: 'admins_only',
+      title: 'Admin Only Group',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
+      data: adminOnlyChat,
+      isLoading: false,
+    } as any);
+
+    vi.spyOn(useMessagesModule, 'useMessages').mockReturnValue({
+      data: { pages: [{ messages: [], nextCursor: null }] },
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as any);
+
+    vi.spyOn(useUsersModule, 'useUser').mockReturnValue({ data: undefined } as any);
+    vi.spyOn(useUsersModule, 'useUserPresence').mockReturnValue({ data: undefined } as any);
+
+    renderChatView('chat3');
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Only admins can send messages in this group.')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/type a message/i)).not.toBeDisabled();
+  });
+
   it('shows the generic blocked copy (not who blocked whom) when the other participant blocked the current user', async () => {
     vi.spyOn(useChatsModule, 'useChat').mockReturnValue({
       data: { ...mockChat, canMessage: false, blockedState: 'blocked' },

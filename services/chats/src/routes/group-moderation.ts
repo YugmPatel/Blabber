@@ -1,12 +1,30 @@
 import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { z } from 'zod';
+import { EventType, type ChatUpdatedEvent } from '@repo/types';
+import { createEvent, logger } from '@repo/utils';
 import { getDatabase } from '../db';
 import { Chat, getChatsCollection } from '../models/chat';
 import {
   getGroupModerationActivityCollection,
   recordGroupModerationActivity,
 } from '../models/group-moderation-activity';
+import { getPubSub } from '../pubsub';
+
+async function publishChatUpdated(chat: Chat, updatedBy: string) {
+  try {
+    await getPubSub().publish(
+      createEvent<ChatUpdatedEvent>(EventType.CHAT_UPDATED, {
+        chatId: chat._id.toString(),
+        name: chat.title,
+        avatar: chat.avatarUrl,
+        updatedBy,
+      })
+    );
+  } catch (error) {
+    logger.error({ error, chatId: chat._id.toString() }, 'Failed to publish chat updated event');
+  }
+}
 
 const settingsSchema = z.object({
   sendMode: z.enum(['everyone', 'admins_only']),
@@ -86,6 +104,9 @@ export async function updateModerationSettings(req: Request, res: Response, next
       action: 'send_mode_changed',
       metadata: { sendMode: parsed.data.sendMode },
     });
+    // Other members' composers need to react immediately, not just the
+    // acting admin's own tab — see apps/web's chat:updated handler.
+    await publishChatUpdated({ ...chat, sendMode: parsed.data.sendMode, updatedAt: now }, actorId.toString());
     res.status(200).json({ sendMode: parsed.data.sendMode });
   } catch (error) {
     next(error);
@@ -132,6 +153,7 @@ export async function restrictMember(req: Request, res: Response, next: NextFunc
       targetUserId: targetId,
       action: 'member_restricted',
     });
+    await publishChatUpdated(chat, actorId.toString());
     res.status(200).json({ restricted: true });
   } catch (error) {
     next(error);
@@ -167,6 +189,7 @@ export async function unrestrictMember(req: Request, res: Response, next: NextFu
       targetUserId: targetId,
       action: 'member_unrestricted',
     });
+    await publishChatUpdated(chat, actorId.toString());
     res.status(200).json({ restricted: false });
   } catch (error) {
     next(error);

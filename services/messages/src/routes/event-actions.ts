@@ -28,7 +28,7 @@ async function loadEventMessage(
   messageId: string,
   userObjectId: ObjectId,
   res: Response,
-  options: { requireWritable?: boolean } = {}
+  options: { requireWritable?: boolean; enforceSendMode?: boolean } = {}
 ) {
   if (!ObjectId.isValid(messageId)) {
     res.status(400).json({ error: 'Bad Request', message: 'Invalid message ID' });
@@ -46,7 +46,7 @@ async function loadEventMessage(
   // blocked direct chat must reject them the same as a new message. Viewing/
   // exporting the existing event (exportEventIcs) stays allowed regardless.
   if (options.requireWritable !== false) {
-    await assertChatWritable(chat, userObjectId);
+    await assertChatWritable(chat, userObjectId, { enforceSendMode: options.enforceSendMode });
   }
   const participants = chat.participants.map((participantId) => participantId.toString());
   return { message, participants };
@@ -72,7 +72,9 @@ export async function rsvpEvent(req: Request, res: Response, next: NextFunction)
     }
 
     const userObjectId = new ObjectId(userId);
-    const loaded = await loadEventMessage(req.params.messageId, userObjectId, res);
+    // RSVPing is not "sending a message" — an admins-only group doesn't
+    // block non-admin members from responding to an existing event.
+    const loaded = await loadEventMessage(req.params.messageId, userObjectId, res, { enforceSendMode: false });
     if (!loaded) return;
     const { message, participants } = loaded;
     if (message.event?.cancelledAt) {

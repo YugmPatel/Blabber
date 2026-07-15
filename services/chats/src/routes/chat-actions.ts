@@ -494,7 +494,19 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
 
   const chats = await getChatsCollection()
     .find({ participants: userObjectId, deletedAt: { $exists: false } })
-    .project({ _id: 1, type: 1, title: 1, avatarUrl: 1, admins: 1, ownerId: 1, participants: 1, participantProfiles: 1 })
+    .project({
+      _id: 1,
+      type: 1,
+      title: 1,
+      avatarUrl: 1,
+      admins: 1,
+      ownerId: 1,
+      participants: 1,
+      participantProfiles: 1,
+      groupKind: 1,
+      expiresAt: 1,
+      endedAt: 1,
+    })
     .toArray();
   const userIdsToLoad = Array.from(new Set(chats.flatMap((chat) => chat.participants?.map((id: ObjectId) => id.toString()) ?? [])));
   const userNamesById = await loadUserNames(userIdsToLoad);
@@ -532,13 +544,25 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
     .sort({ lastActivityAt: -1, updatedAt: -1 })
     .toArray();
 
+  // Ended/expired temporary groups keep their historical actions visible
+  // (consistent with old messages staying visible after a group ends) but
+  // the "mine" aggregator must mark them so the frontend doesn't present
+  // them as active actionable items — see chatEndedAt on ChatActionItem.
+  const chatEndedAtFor = (chat: any): string | undefined => {
+    if (!chat || chat.type !== 'group') return undefined;
+    if (!isChatExpired(chat)) return undefined;
+    return (chat.endedAt instanceof Date ? chat.endedAt : new Date()).toISOString();
+  };
+
   const actionsByChat = new Map<string, ChatActionItem[]>();
   for (const doc of actions) {
+    const chat = chatById.get(doc.chatId.toString());
     const item = {
       ...toActionItem(doc, permissionsForVisibleAction(doc, chatById.get(doc.chatId.toString())!, userObjectId)),
       chatTitle: chatTitleById.get(doc.chatId.toString()) || 'Chat',
       chatAvatarUrl: chatById.get(doc.chatId.toString())?.avatarUrl,
       chatType: chatById.get(doc.chatId.toString())?.type,
+      chatEndedAt: chatEndedAtFor(chat),
     } as ChatActionItem & { chatTitle: string; chatAvatarUrl?: string };
     const key = doc.chatId.toString();
     actionsByChat.set(key, [...(actionsByChat.get(key) || []), item]);
@@ -570,9 +594,10 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
     .map((plan) => {
       const chat = chatById.get(plan.chatId.toString());
       if (!chat) return null;
-      return syntheticPlanAction(plan, chat, userObjectId, chatTitleById.get(plan.chatId.toString()) || 'Chat', chat.avatarUrl);
+      const synthetic = syntheticPlanAction(plan, chat, userObjectId, chatTitleById.get(plan.chatId.toString()) || 'Chat', chat.avatarUrl);
+      return synthetic ? { ...synthetic, chatEndedAt: chatEndedAtFor(chat) } : null;
     })
-    .filter(Boolean) as Array<ChatActionItem & { chatTitle: string; chatAvatarUrl?: string; chatType?: 'direct' | 'group' }>;
+    .filter(Boolean) as Array<ChatActionItem & { chatTitle: string; chatAvatarUrl?: string; chatType?: 'direct' | 'group'; chatEndedAt?: string }>;
 
   return res.status(200).json({ actions: [...planActions, ...sourcedActions] });
 });

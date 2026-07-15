@@ -95,6 +95,7 @@ import {
   addMember,
   deleteGroup,
   demoteMember,
+  endGroup,
   leaveGroup,
   promoteMember,
   removeMember,
@@ -238,6 +239,7 @@ app.post('/:id/admins', authMiddleware, requireChatAdmin, promoteMember);
 app.delete('/:id/admins', authMiddleware, requireChatAdmin, demoteMember);
 app.patch('/:id/owner', authMiddleware, requireChatAdmin, transferOwnership);
 app.post('/:id/leave', authMiddleware, requireGroupParticipant, leaveGroup);
+app.post('/:id/end', authMiddleware, requireChatAdmin, endGroup);
 app.delete('/:id', authMiddleware, requireChatAdmin, deleteGroup);
 app.post('/:id/pin', authMiddleware, pinChat);
 app.post('/:id/unpin', authMiddleware, unpinChat);

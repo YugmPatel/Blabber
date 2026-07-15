@@ -335,4 +335,90 @@ describe('Group Member Management', () => {
       expect(response.body.error).toBe('Validation Error');
     });
   });
+
+  describe('POST /:id/end - End Temporary Group', () => {
+    it('ends an active temporary group as admin', async () => {
+      const db = getDatabase();
+      const result = await db.collection('chats').insertOne({
+        type: 'group',
+        groupKind: 'temporary',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        participants: [mockUserId],
+        admins: [mockUserId],
+        title: 'Temp Group',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const chatId = result.insertedId;
+
+      const response = await request(app).post(`/${chatId.toString()}/end`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.chat.endedAt).toBeDefined();
+
+      const updated = await db.collection('chats').findOne({ _id: chatId });
+      expect(updated?.endedAt).toBeInstanceOf(Date);
+    });
+
+    it('rejects ending a standard (non-temporary) group', async () => {
+      const db = getDatabase();
+      const result = await db.collection('chats').insertOne({
+        type: 'group',
+        groupKind: 'standard',
+        participants: [mockUserId],
+        admins: [mockUserId],
+        title: 'Standard Group',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const chatId = result.insertedId;
+
+      const response = await request(app).post(`/${chatId.toString()}/end`);
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toBe('Only temporary groups can be ended');
+    });
+
+    it('rejects ending an already-ended temporary group', async () => {
+      const db = getDatabase();
+      const result = await db.collection('chats').insertOne({
+        type: 'group',
+        groupKind: 'temporary',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        endedAt: new Date(),
+        participants: [mockUserId],
+        admins: [mockUserId],
+        title: 'Already Ended',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const chatId = result.insertedId;
+
+      const response = await request(app).post(`/${chatId.toString()}/end`);
+
+      expect(response.status).toBe(400);
+      expect(response.body.message).toBe('This group has already ended');
+    });
+
+    it('rejects ending a group as a non-admin', async () => {
+      const db = getDatabase();
+      const admin = new ObjectId();
+      await seedChatUsers([admin]);
+      const result = await db.collection('chats').insertOne({
+        type: 'group',
+        groupKind: 'temporary',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        participants: [mockUserId, admin],
+        admins: [admin],
+        title: 'Temp Group',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const chatId = result.insertedId;
+
+      const response = await request(app).post(`/${chatId.toString()}/end`);
+
+      expect(response.status).toBe(403);
+    });
+  });
 });

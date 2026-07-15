@@ -448,4 +448,237 @@ describe('POST /:chatId - Send Message', () => {
       expect(stored).toBeNull();
     });
   });
+
+  describe('Admin-only group enforcement', () => {
+    const GROUP_CHAT_ID = new ObjectId();
+    const ADMIN_ID = new ObjectId();
+    const MEMBER_ID = new ObjectId();
+
+    async function seedAdminOnlyGroup() {
+      await getDatabase().collection('chats').insertOne({
+        _id: GROUP_CHAT_ID,
+        type: 'group',
+        participants: [ADMIN_ID, MEMBER_ID],
+        admins: [ADMIN_ID],
+        ownerId: ADMIN_ID,
+        sendMode: 'admins_only',
+        title: 'Admin Only Group',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    it('rejects a non-admin sending a text message', async () => {
+      await seedAdminOnlyGroup();
+      const token = generateToken(MEMBER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${GROUP_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Hello everyone' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.message).toContain('Only group admins can send messages');
+      const stored = await getDatabase().collection('messages').findOne({ chatId: GROUP_CHAT_ID });
+      expect(stored).toBeNull();
+    });
+
+    it('rejects a non-admin sending a media message', async () => {
+      await seedAdminOnlyGroup();
+      const mediaId = new ObjectId();
+      await getDatabase().collection('media').insertOne({
+        _id: mediaId,
+        userId: MEMBER_ID,
+        fileType: 'image/jpeg',
+        url: 'http://localhost:3000/api/media/local/test-image.jpg',
+        storage: 'local',
+        status: 'approved',
+        uploadedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const token = generateToken(MEMBER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${GROUP_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Check this out', mediaId: mediaId.toString() });
+
+      expect(response.status).toBe(403);
+      const stored = await getDatabase().collection('messages').findOne({ chatId: GROUP_CHAT_ID });
+      expect(stored).toBeNull();
+    });
+
+    it('rejects a non-admin creating a poll', async () => {
+      await seedAdminOnlyGroup();
+      const token = generateToken(MEMBER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${GROUP_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Lunch poll', poll: { question: 'Lunch?', options: ['Pizza', 'Sushi'] } });
+
+      expect(response.status).toBe(403);
+      const stored = await getDatabase().collection('messages').findOne({ chatId: GROUP_CHAT_ID });
+      expect(stored).toBeNull();
+    });
+
+    it('rejects a non-admin creating an event', async () => {
+      await seedAdminOnlyGroup();
+      const token = generateToken(MEMBER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${GROUP_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Team sync',
+          event: { title: 'Team sync', startsAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
+        });
+
+      expect(response.status).toBe(403);
+      const stored = await getDatabase().collection('messages').findOne({ chatId: GROUP_CHAT_ID });
+      expect(stored).toBeNull();
+    });
+
+    it('allows an admin to send a text message', async () => {
+      await seedAdminOnlyGroup();
+      const token = generateToken(ADMIN_ID.toString());
+
+      const response = await request(app)
+        .post(`/${GROUP_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Announcement from admin' });
+
+      expect(response.status).toBe(201);
+    });
+
+    it('allows sending again once the group is switched back to everyone', async () => {
+      await seedAdminOnlyGroup();
+      await getDatabase().collection('chats').updateOne(
+        { _id: GROUP_CHAT_ID },
+        { $set: { sendMode: 'everyone' } }
+      );
+      const token = generateToken(MEMBER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${GROUP_CHAT_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Now I can send' });
+
+      expect(response.status).toBe(201);
+    });
+  });
+
+  describe('Ended temporary group enforcement', () => {
+    const ENDED_GROUP_ID = new ObjectId();
+    const OWNER_ID = new ObjectId();
+
+    async function seedEndedGroup() {
+      await getDatabase().collection('chats').insertOne({
+        _id: ENDED_GROUP_ID,
+        type: 'group',
+        groupKind: 'temporary',
+        expiresAt: new Date(Date.now() - 60 * 60 * 1000),
+        endedAt: new Date(Date.now() - 30 * 60 * 1000),
+        participants: [OWNER_ID],
+        admins: [OWNER_ID],
+        ownerId: OWNER_ID,
+        title: 'Ended Temp Group',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    it('rejects a new text message', async () => {
+      await seedEndedGroup();
+      const token = generateToken(OWNER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${ENDED_GROUP_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Still active?' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.message).toContain('This temporary group has ended');
+      const stored = await getDatabase().collection('messages').findOne({ chatId: ENDED_GROUP_ID });
+      expect(stored).toBeNull();
+    });
+
+    it('rejects a new poll', async () => {
+      await seedEndedGroup();
+      const token = generateToken(OWNER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${ENDED_GROUP_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Poll', poll: { question: 'Still relevant?', options: ['Yes', 'No'] } });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('rejects a new event', async () => {
+      await seedEndedGroup();
+      const token = generateToken(OWNER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${ENDED_GROUP_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          body: 'Event',
+          event: { title: 'Reunion', startsAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
+        });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('rejects a new media message', async () => {
+      await seedEndedGroup();
+      const mediaId = new ObjectId();
+      await getDatabase().collection('media').insertOne({
+        _id: mediaId,
+        userId: OWNER_ID,
+        fileType: 'image/jpeg',
+        url: 'http://localhost:3000/api/media/local/test-image.jpg',
+        storage: 'local',
+        status: 'approved',
+        uploadedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const token = generateToken(OWNER_ID.toString());
+
+      const response = await request(app)
+        .post(`/${ENDED_GROUP_ID.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Photo', mediaId: mediaId.toString() });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('rejects sends via a still-future expiresAt that has since lapsed, without a prior endedAt write', async () => {
+      const chatId = new ObjectId();
+      const ownerId = new ObjectId();
+      await getDatabase().collection('chats').insertOne({
+        _id: chatId,
+        type: 'group',
+        groupKind: 'temporary',
+        expiresAt: new Date(Date.now() - 1000),
+        participants: [ownerId],
+        admins: [ownerId],
+        ownerId,
+        title: 'Lazily Expired Group',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const token = generateToken(ownerId.toString());
+
+      const response = await request(app)
+        .post(`/${chatId.toString()}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ body: 'Past expiry' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.message).toContain('This temporary group has ended');
+    });
+  });
 });

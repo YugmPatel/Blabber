@@ -187,6 +187,11 @@ export const ChatActionItemSchema = z.object({
     canDelete: z.boolean().optional(),
   }).optional(),
   deletedAt: z.string().optional(),
+  // Set when the source chat is an ended/expired temporary group. The action
+  // itself keeps its own status (open/completed/etc.) for history, but a
+  // truthy chatEndedAt means it should not be presented as an active,
+  // actionable item (see services/chats's getMyChatActions).
+  chatEndedAt: z.string().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });

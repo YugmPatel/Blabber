@@ -55,7 +55,9 @@ export async function reactToMessage(
     const chat = await assertChatMembership(message.chatId, userObjectId);
     // Reacting creates a new interaction the other participant is notified
     // of, so a blocked direct chat must reject it the same as a new message.
-    await assertChatWritable(chat, userObjectId);
+    // It is not "sending a message" though, so an admins-only group doesn't
+    // block reactions from non-admin members.
+    await assertChatWritable(chat, userObjectId, { enforceSendMode: false });
 
     // Check if user already has a reaction on this message
     const existingReactionIndex = message.reactions.findIndex(

@@ -245,4 +245,39 @@ describe('POST /:messageId/react - React to Message', () => {
     const stored = await collection.findOne({ _id: insertResult.insertedId });
     expect(stored?.reactions).toHaveLength(0);
   });
+
+  it('allows a non-admin to react in an admins-only group (reacting is not "sending a message")', async () => {
+    const adminId = new ObjectId();
+    const groupChatId = new ObjectId();
+    await getDatabase().collection('chats').insertOne({
+      _id: groupChatId,
+      type: 'group',
+      participants: [adminId, TEST_USER_ID],
+      admins: [adminId],
+      sendMode: 'admins_only',
+      title: 'Admin Only Group',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const collection = getMessagesCollection();
+    const insertResult = await collection.insertOne({
+      _id: new ObjectId(),
+      chatId: groupChatId,
+      senderId: adminId,
+      body: 'Announcement',
+      reactions: [],
+      status: 'sent' as const,
+      deletedFor: [],
+      createdAt: new Date(),
+    });
+
+    const token = generateToken(TEST_USER_ID.toString());
+    const response = await request(app)
+      .post(`/${insertResult.insertedId.toString()}/react`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ emoji: '👍' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reactions).toHaveLength(1);
+  });
 });

@@ -380,6 +380,45 @@ export const leaveGroup = asyncHandler(async (req: Request, res: Response) => {
   return res.status(200).json({ success: true });
 });
 
+/**
+ * Manually end a temporary group (admin only). Sets endedAt immediately
+ * rather than waiting for expiresAt to lapse, giving admins explicit control
+ * over the lifecycle instead of relying purely on lazy expiry detection.
+ * Ending is non-destructive: messages/media stay visible, the group just
+ * becomes read-only (see isChatExpired / assertChatWritable).
+ */
+export const endGroup = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  const chat = (req as any).chat;
+  if (!userId || !chat) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  if (chat.groupKind !== 'temporary') {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'Only temporary groups can be ended',
+    });
+  }
+
+  if (isChatExpired(chat)) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'This group has already ended',
+    });
+  }
+
+  const endedAt = new Date();
+  await getChatsCollection().updateOne(
+    { _id: chat._id },
+    { $set: { endedAt, updatedAt: endedAt } }
+  );
+
+  const updatedChat = await getChatsCollection().findOne({ _id: chat._id });
+  await publishChatUpdated(updatedChat!, userId);
+  return res.status(200).json({ chat: await serializeChat(updatedChat!, { includeParticipants: true }) });
+});
+
 export const deleteGroup = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user?.userId;
   const chat = (req as any).chat;

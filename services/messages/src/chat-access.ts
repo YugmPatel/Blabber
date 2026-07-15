@@ -48,7 +48,11 @@ export async function assertChatMembership(chatId: ObjectId, userId: ObjectId): 
   return chat;
 }
 
-export async function assertChatWritable(chat: ChatDocument, userId?: ObjectId): Promise<void> {
+export async function assertChatWritable(
+  chat: ChatDocument,
+  userId?: ObjectId,
+  options: { enforceSendMode?: boolean } = {}
+): Promise<void> {
   if (chat.deletedAt) {
     throw new NotFoundError('Chat not found');
   }
@@ -73,14 +77,26 @@ export async function assertChatWritable(chat: ChatDocument, userId?: ObjectId):
   }
 
   if (chat.type === 'group') {
+    // A per-user mute always applies regardless of the call site — unlike
+    // admins-only mode below, it's a targeted moderation action, not a
+    // blanket "new content" gate, so it also covers reactions/votes/RSVPs.
     const isRestricted = chat.memberRestrictions?.some((restriction) => restriction.userId.equals(userId));
     if (isRestricted) {
       throw new ForbiddenError('You cannot send messages in this group right now');
     }
 
-    const isAdmin = chat.admins?.some((adminId) => adminId.equals(userId)) || chat.ownerId?.equals(userId);
-    if (chat.sendMode === 'admins_only' && !isAdmin) {
-      throw new ForbiddenError('Only group admins can send messages right now');
+    // admins_only restricts posting *new* content (messages, media, polls,
+    // events, forwards). Interacting with content that already exists
+    // (reacting, voting, RSVPing) is not "sending a message" in the way an
+    // admin-only channel is meant to restrict, so those call sites pass
+    // enforceSendMode: false to opt out of this specific check while still
+    // going through every other guard above (ended/deleted/blocked/muted).
+    const enforceSendMode = options.enforceSendMode !== false;
+    if (enforceSendMode) {
+      const isAdmin = chat.admins?.some((adminId) => adminId.equals(userId)) || chat.ownerId?.equals(userId);
+      if (chat.sendMode === 'admins_only' && !isAdmin) {
+        throw new ForbiddenError('Only group admins can send messages right now');
+      }
     }
   }
 }

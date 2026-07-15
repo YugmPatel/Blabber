@@ -454,4 +454,41 @@ describe('Composer', () => {
 
     expect(textarea.value).toBe('Test message');
   });
+
+  describe('canSend gating (admins-only groups, restricted members)', () => {
+    it('disables the text input, action menu, and mic/send button when canSend is false', () => {
+      render(<Composer chatId="chat-1" canSend={false} />);
+
+      expect(screen.getByPlaceholderText(messagePlaceholder)).toBeDisabled();
+      expect(screen.getByLabelText('Open composer actions')).toBeDisabled();
+      expect(screen.getByLabelText('Add emoji')).toBeDisabled();
+      expect(screen.getByLabelText('Voice message')).toBeDisabled();
+    });
+
+    it('does not send a typed message when canSend is false, even via Enter', async () => {
+      const user = userEvent.setup();
+      render(<Composer chatId="chat-1" canSend={false} />);
+
+      const textarea = screen.getByPlaceholderText(messagePlaceholder) as HTMLTextAreaElement;
+      // Disabled textareas don't accept input events from userEvent, mirroring
+      // real browser behavior — nothing should reach handleSend.
+      await user.type(textarea, 'Hello{Enter}');
+
+      expect(textarea).toBeDisabled();
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    it('re-enables the composer once canSend becomes true again (permission change without remount)', () => {
+      const { rerender } = render(<Composer chatId="chat-1" canSend={false} />);
+      expect(screen.getByPlaceholderText(messagePlaceholder)).toBeDisabled();
+
+      rerender(<Composer chatId="chat-1" canSend={true} />);
+      expect(screen.getByPlaceholderText(messagePlaceholder)).not.toBeDisabled();
+    });
+
+    it('defaults to enabled when canSend is not provided', () => {
+      render(<Composer chatId="chat-1" />);
+      expect(screen.getByPlaceholderText(messagePlaceholder)).not.toBeDisabled();
+    });
+  });
 });

@@ -136,4 +136,28 @@ describe('Group event actions', () => {
     expect(response.status).toBe(200);
     expect(response.headers['content-type']).toContain('text/calendar');
   });
+
+  it('allows a non-admin to RSVP in an admins-only group (RSVPing is not "sending a message")', async () => {
+    const adminOnlyChatId = new ObjectId();
+    await getDatabase().collection('chats').insertOne({
+      _id: adminOnlyChatId,
+      type: 'group',
+      participants: [CREATOR_ID, MEMBER_ID],
+      admins: [CREATOR_ID],
+      sendMode: 'admins_only',
+      title: 'Admin Only Group',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const messageId = await insertEventMessage(adminOnlyChatId, CREATOR_ID);
+    const token = generateToken(MEMBER_ID.toString());
+
+    const response = await request(app)
+      .post(`/${messageId.toString()}/event/rsvp`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'going' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.event.currentUserRsvp).toBe('going');
+  });
 });

@@ -631,39 +631,46 @@ describe('useSocketEvents', () => {
   });
 
   describe('chat:updated event', () => {
-    it('should update chat in cache', async () => {
+    // The gateway/pubsub payload for this event is intentionally thin
+    // ({chatId, name?, avatar?, updatedBy} — see ChatUpdatedEvent in
+    // packages/types/src/events.ts) for every publisher, including the
+    // sendMode/moderation changes this batch adds — there is no full `chat`
+    // object to splice into the cache. The handler must invalidate and
+    // refetch instead, which is what actually applies a permission or
+    // lifecycle change (admins-only toggle, group ended) on other members'
+    // clients without a manual page refresh.
+    it('invalidates the chat detail and list caches so the latest chat (e.g. an updated sendMode) is refetched', async () => {
       const chatId = 'chat-1';
-
-      // Set up initial cache with chat
       const originalChat: Chat = {
         _id: chatId,
         type: 'group',
         participants: ['user-1', 'user-2'],
         admins: ['user-1'],
+        sendMode: 'everyone',
         title: 'Original Title',
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-
       queryClient.setQueryData(chatKeys.detail(chatId), originalChat);
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      // Render hook
       renderHook(() => useSocketEvents(mockSocket), { wrapper });
 
-      // Simulate chat:updated event
-      const updatedChat: Chat = {
-        ...originalChat,
-        title: 'Updated Title',
-        updatedAt: new Date(),
-      };
+      eventHandlers['chat:updated']({ chatId, updatedBy: 'user-1' });
 
-      eventHandlers['chat:updated']({ chat: updatedChat });
-
-      // Verify chat was updated
       await waitFor(() => {
-        const data = queryClient.getQueryData<Chat>(chatKeys.detail(chatId));
-        expect(data?.title).toBe('Updated Title');
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: chatKeys.detail(chatId) });
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: chatKeys.lists() });
       });
+    });
+
+    it('does nothing when the payload has neither chatId nor chat', async () => {
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      renderHook(() => useSocketEvents(mockSocket), { wrapper });
+
+      eventHandlers['chat:updated']({});
+
+      expect(invalidateSpy).not.toHaveBeenCalled();
     });
   });
 

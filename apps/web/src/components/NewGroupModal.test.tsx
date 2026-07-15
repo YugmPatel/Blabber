@@ -97,7 +97,10 @@ describe('NewGroupModal', () => {
       </QueryClientProvider>
     );
 
-    const friendButton = await screen.findByText('friend');
+    // Display name takes priority over the raw username/email (see
+    // chat-permissions/member-display fix) — "Friend One" is the primary
+    // label, with "@friend" as secondary metadata underneath it.
+    const friendButton = await screen.findByText('Friend One');
     fireEvent.click(friendButton);
 
     fireEvent.click(screen.getByText(/Next \(1 selected\)/));
@@ -113,5 +116,60 @@ describe('NewGroupModal', () => {
 
     const cachedList = queryClient.getQueryData<Chat[]>(chatKeys.list(undefined));
     expect(cachedList?.some((chat) => chat._id === 'group-new')).toBe(true);
+  });
+
+  it('shows display name as the primary label with @username as secondary metadata, never a raw email as primary when a name exists', async () => {
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByText('Friend One');
+    expect(screen.getByText('@friend')).toBeInTheDocument();
+    // The raw email must not appear as the primary label anywhere it's shown.
+    expect(screen.queryByText('friend@example.com')).not.toBeInTheDocument();
+  });
+
+  it('falls back to username, then email, when a display name is missing', async () => {
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === '/api/chats') {
+        return Promise.resolve({
+          data: {
+            chats: [
+              {
+                _id: 'chat-no-name',
+                type: 'direct',
+                participants: ['me', 'usernameOnly-1'],
+                admins: [],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            ],
+          },
+        });
+      }
+      if (url === '/api/users/usernameOnly-1') {
+        return Promise.resolve({
+          data: { user: { _id: 'usernameOnly-1', username: 'nonamehere', email: 'noname@example.com' } },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    // No name field on this user — username becomes the primary label.
+    await screen.findByText('nonamehere');
   });
 });

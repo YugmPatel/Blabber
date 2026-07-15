@@ -142,7 +142,12 @@ export default function MyActionsPage() {
           : action.createdBy?.userId === user?._id;
       if (!belongs) return false;
       if (groupFilter !== 'all' && action.chatId !== groupFilter) return false;
-      if (statusFilter === 'active' && status === 'completed') return false;
+      // A truthy chatEndedAt means the source group ended (see
+      // services/chats's getMyChatActions) — keep it out of the default
+      // "active" view since it's no longer something to act on, but don't
+      // drop it from other filters so it stays visible/clearly marked
+      // (below) for history.
+      if (statusFilter === 'active' && (status === 'completed' || action.chatEndedAt)) return false;
       if (statusFilter !== 'active' && status !== statusFilter) return false;
       if (dueFilter === 'overdue' && !isOverdue(action)) return false;
       if (dueFilter === 'due_soon' && !isDueSoon(action)) return false;
@@ -318,6 +323,7 @@ export default function MyActionsPage() {
                             {statusLabel(action.status)}
                           </BrandBadge>
                           {isOverdue(action) && <BrandBadge tone="danger">Overdue</BrandBadge>}
+                          {action.chatEndedAt && <BrandBadge tone="warning">Group ended</BrandBadge>}
                         </div>
                         <h2 className="mt-1 text-base font-semibold text-[color:var(--bl-text)]">{action.title}</h2>
                         {action.description && <p className="mt-1 text-sm text-[color:var(--bl-text-secondary)]">{action.description}</p>}

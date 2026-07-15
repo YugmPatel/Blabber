@@ -34,6 +34,11 @@ interface ComposerProps {
   chat?: Chat;
   currentUserId?: string;
   mentionsEnabled?: boolean;
+  // False when the caller has already determined the current user cannot
+  // send into this chat right now (e.g. admins-only group, not an admin).
+  // Ended temporary groups are handled by the parent unmounting Composer
+  // entirely instead, since that state also disables reading actions.
+  canSend?: boolean;
 }
 
 // Simple emoji picker data
@@ -152,6 +157,7 @@ export const Composer = ({
   chat,
   currentUserId,
   mentionsEnabled = false,
+  canSend = true,
 }: ComposerProps) => {
   const [message, setMessage] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -314,6 +320,7 @@ export const Composer = ({
   const handleSend = async () => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !pastedImage) return;
+    if (!canSend) return;
 
     if (socket && isTypingRef.current) {
       socket.emit('typing:stop', { chatId });
@@ -481,6 +488,10 @@ export const Composer = ({
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!canSend) {
+      e.target.value = '';
+      return;
+    }
     setShowActionMenu(false);
 
     // A declared type the browser/OS couldn't determine (common for HEIC
@@ -529,6 +540,7 @@ export const Composer = ({
   };
 
   const handleCameraCapture = async (file: File) => {
+    if (!canSend) return;
     const media = await uploadAttachment(file);
     if (!media) {
       setAttachmentNotice({
@@ -552,6 +564,10 @@ export const Composer = ({
   };
 
   const handleVoiceSend = async (audioBlob: Blob, duration: number) => {
+    if (!canSend) {
+      setShowVoiceRecorder(false);
+      return;
+    }
     const audioType =
       audioBlob.type && audioBlob.type.startsWith('audio/') ? audioBlob.type : 'audio/webm';
     const audioExtension =
@@ -786,7 +802,7 @@ export const Composer = ({
             aria-label="Open composer actions"
             aria-expanded={showActionMenu}
             aria-haspopup="menu"
-            disabled={isUploading}
+            disabled={isUploading || !canSend}
             className={`bl-focus-ring flex h-9 w-9 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
               showActionMenu
                 ? 'bg-teal-100 text-teal-800 dark:bg-teal-500/25 dark:text-teal-100'
@@ -905,7 +921,7 @@ export const Composer = ({
             onKeyDown={handleKeyDown}
             placeholder="Type a message…"
             rows={1}
-            disabled={isUploading}
+            disabled={isUploading || !canSend}
             className="block max-h-32 min-h-[2.5rem] w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-teal-400 dark:focus:bg-slate-800"
           />
         </div>
@@ -915,7 +931,7 @@ export const Composer = ({
           <button
             type="button"
             onClick={() => setShowEmojiPicker((v) => !v)}
-            disabled={isUploading}
+            disabled={isUploading || !canSend}
             aria-label="Add emoji"
             aria-expanded={showEmojiPicker}
             className="bl-focus-ring flex h-9 w-9 items-center justify-center rounded-full text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-800 disabled:opacity-40 dark:text-teal-300 dark:hover:bg-teal-500/15 dark:hover:text-teal-100"
@@ -957,7 +973,7 @@ export const Composer = ({
           <button
             type="button"
             onClick={handleSend}
-            disabled={isUploading}
+            disabled={isUploading || !canSend}
             aria-label="Send message"
             className="bl-focus-ring flex h-9 w-9 flex-shrink-0 items-center justify-center self-end rounded-full bg-teal-600 text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
           >
@@ -969,7 +985,7 @@ export const Composer = ({
           <button
             type="button"
             onClick={() => setShowVoiceRecorder(true)}
-            disabled={isUploading}
+            disabled={isUploading || !canSend}
             aria-label="Voice message"
             className="bl-focus-ring flex h-9 w-9 flex-shrink-0 items-center justify-center self-end rounded-full text-teal-600 transition-colors hover:bg-teal-50 hover:text-teal-800 disabled:opacity-40 dark:text-teal-300 dark:hover:bg-teal-500/15 dark:hover:text-teal-100"
           >

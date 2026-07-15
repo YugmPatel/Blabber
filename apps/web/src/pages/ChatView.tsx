@@ -22,6 +22,7 @@ import MessageList from '@/components/MessageList';
 import TypingDots from '@/components/TypingDots';
 import { Composer } from '@/components/Composer';
 import { canJumpToSource, sourceJumpPath } from '@/lib/source-jump';
+import { canSendToChat, isChatEnded, isGroupAdmin } from '@/utils/chat-permissions';
 import type { Chat, ChatSummaryTask, Message, SourceReference } from '@repo/types';
 
 interface MessagesPage {
@@ -244,9 +245,7 @@ export default function ChatView() {
 
   // Determine if this is a group chat
   const isGroupChat = chat?.type === 'group';
-  const isEndedTemporaryGroup =
-    chat?.type === 'group' &&
-    (Boolean(chat.endedAt) || Boolean(chat.expiresAt && new Date(chat.expiresAt).getTime() <= Date.now()));
+  const isEndedTemporaryGroup = Boolean(chat && isChatEnded(chat));
   // Direct chats only — canMessage/blockedState are omitted for group chats,
   // which aren't subject to 1:1 block rules. blockedState never reveals that
   // the other participant specifically blocked us; only our own block choice
@@ -258,6 +257,18 @@ export default function ChatView() {
     chat?.blockedState === 'blocked_by_me'
       ? 'You blocked this user. Unblock to message again.'
       : "You can't message this user.";
+  // Composer stays mounted for admins-only (unlike the ended/blocked cases,
+  // which unmount it entirely) so it can show itself disabled with a reason,
+  // matching the requirement that a non-admin sees why they can't send
+  // rather than the input just disappearing.
+  const isAdminOnlyBlocked = Boolean(
+    chat &&
+    isGroupChat &&
+    !isEndedTemporaryGroup &&
+    chat.sendMode === 'admins_only' &&
+    !isGroupAdmin(chat, currentUser?._id)
+  );
+  const composerCanSend = chat ? canSendToChat(chat, currentUser?._id) : false;
   const participantProfiles = new Map(
     (chat?.participantProfiles || []).map((profile) => [profile._id, profile])
   );
@@ -652,6 +663,12 @@ export default function ChatView() {
         </div>
       )}
 
+      {isAdminOnlyBlocked && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          Only admins can send messages in this group.
+        </div>
+      )}
+
       <MessageList
         messages={messages}
         currentUserId={currentUser?._id || ''}
@@ -698,6 +715,7 @@ export default function ChatView() {
           onCancelReply={handleCancelReply}
           chat={chat}
           currentUserId={currentUser?._id}
+          canSend={composerCanSend}
           mentionsEnabled={chat.type === 'group' && !isEndedTemporaryGroup}
         />
       )}
@@ -732,9 +750,13 @@ export default function ChatView() {
         chats={allChats.filter(
           (candidate) =>
             candidate._id !== id &&
-            // Forwarding FROM a blocked chat is fine (it's just old content),
-            // but forwarding INTO one is a new message and must be excluded.
-            !(candidate.type === 'direct' && candidate.blockedState && candidate.blockedState !== 'none')
+            // Forwarding FROM a chat you can't currently send into is fine
+            // (it's just old content), but forwarding INTO one is a new
+            // message — exclude blocked direct chats, ended temporary
+            // groups, admins-only groups you're not an admin of, and groups
+            // you've been individually restricted in, same policy the
+            // backend enforces for the send itself.
+            canSendToChat(candidate, currentUser?._id)
         )}
         currentUserId={currentUser?._id}
         onClose={() => setForwardingMessage(null)}
