@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -34,14 +34,17 @@ import {
   fetchAuthorizedObjectUrl,
   fetchCommunities,
   fetchProfileByHandle,
+  fetchProfileFollowers,
+  fetchProfileFollowing,
   fetchProfilePosts,
   fetchProfileReels,
   fetchSavedPosts,
   followProfile,
   normalizeMediaUrl,
+  reelPosterUrl,
   unfollowProfile,
 } from '@/api/client';
-import type { Community, FeedPost, ReelItem } from '@/api/client';
+import type { Community, FeedPost, ProfileListItem, ReelItem, SocialProfile } from '@/api/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 type ProfileTab = 'posts' | 'reels' | 'communities' | 'saved' | 'about';
@@ -54,24 +57,48 @@ function formatCount(loaded: number, hasMore: boolean) {
   return hasMore ? `${loaded}+` : String(loaded);
 }
 
-/** Cover hero — no cover-image field exists in the product yet, so this is
- *  always the brand gradient (deep navy/teal in dark, mint/sky in light). */
-function ProfileCover() {
+function ProfileCover({ coverUrl }: { coverUrl?: string | null }) {
+  const normalizedCoverUrl = normalizeMediaUrl(coverUrl);
+  const [imageUrl, setImageUrl] = useState<string | undefined>();
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    let objectUrl: string | undefined;
+    setImageUrl(undefined);
+    setFailed(false);
+    if (!normalizedCoverUrl) return undefined;
+    fetchAuthorizedObjectUrl(normalizedCoverUrl)
+      .then((url) => {
+        if (!alive) return;
+        if (!url) {
+          setFailed(true);
+          return;
+        }
+        objectUrl = url;
+        setImageUrl(url);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+      if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
+    };
+  }, [normalizedCoverUrl]);
+
   return (
     <div className="relative h-40 w-full overflow-hidden sm:h-48">
-      {/* Light-mode gradient */}
       <div
         aria-hidden="true"
         className="absolute inset-0 dark:hidden"
         style={{ background: 'linear-gradient(120deg, #d8fbf1 0%, #b5f2e3 32%, #c2ecfb 68%, #e8fbff 100%)' }}
       />
-      {/* Dark-mode gradient */}
       <div
         aria-hidden="true"
         className="absolute inset-0 hidden dark:block"
         style={{ background: 'linear-gradient(120deg, #052e27 0%, #0a3f38 32%, #07304a 68%, #041420 100%)' }}
       />
-      {/* Soft radial accents shared by both modes */}
       <div
         aria-hidden="true"
         className="absolute inset-0 opacity-70"
@@ -80,16 +107,139 @@ function ProfileCover() {
             'radial-gradient(circle at 18% 30%, rgba(45,212,191,0.35) 0%, transparent 45%), radial-gradient(circle at 80% 75%, rgba(94,234,212,0.25) 0%, transparent 40%)',
         }}
       />
+      {imageUrl && !failed && (
+        <>
+          <img src={imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/5 to-transparent" />
+        </>
+      )}
     </div>
   );
 }
 
-function StatCard({ icon: Icon, value, label }: { icon: typeof Users; value: string; label: string }) {
+function StatCard({ icon: Icon, value, label, onClick }: { icon: typeof Users; value: string; label: string; onClick: () => void }) {
   return (
-    <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] px-2 py-3 text-center">
+    <button
+      type="button"
+      onClick={onClick}
+      className="bl-focus-ring flex min-w-0 cursor-pointer flex-col items-center gap-1 rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] px-2 py-3 text-center transition hover:border-teal-500/40 hover:bg-teal-50/70 dark:hover:bg-teal-500/10"
+    >
       <Icon size={15} className="text-teal-600 dark:text-teal-300" />
       <span className="text-sm font-bold leading-none text-[color:var(--bl-text)]">{value}</span>
       <span className="text-[11px] text-[color:var(--bl-text-muted)]">{label}</span>
+    </button>
+  );
+}
+
+function relationshipButtonLabel(status?: SocialProfile['relationship']) {
+  if (status === 'self') return 'You';
+  if (status === 'following') return 'Following';
+  if (status === 'requested_outgoing') return 'Requested';
+  return 'Follow';
+}
+
+function RelationshipListModal({
+  open,
+  title,
+  users,
+  loading,
+  error,
+  emptyText,
+  busyHandle,
+  onClose,
+  onOpenProfile,
+  onRelationshipAction,
+}: {
+  open: boolean;
+  title: string;
+  users: ProfileListItem[];
+  loading: boolean;
+  error: boolean;
+  emptyText: string;
+  busyHandle: string | null;
+  onClose: () => void;
+  onOpenProfile: (handle: string) => void;
+  onRelationshipAction: (user: ProfileListItem) => void;
+}) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 py-6" onMouseDown={onClose}>
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-relationship-list-title"
+        className="max-h-[82vh] w-full max-w-md overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-[color:var(--bl-border)] px-4 py-3">
+          <h2 id="profile-relationship-list-title" className="text-base font-semibold text-[color:var(--bl-text)]">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="bl-focus-ring rounded-lg p-2 text-[color:var(--bl-text-muted)] transition hover:bg-[color:var(--bl-hover)]"
+            aria-label={`Close ${title}`}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="max-h-[64vh] overflow-y-auto p-3">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-[color:var(--bl-text-muted)]">
+              <Loader2 size={16} className="animate-spin" /> Loading {title.toLowerCase()}...
+            </div>
+          ) : error ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+              Unable to load {title.toLowerCase()}.
+            </div>
+          ) : users.length === 0 ? (
+            <p className="py-10 text-center text-sm text-[color:var(--bl-text-muted)]">{emptyText}</p>
+          ) : (
+            <div className="space-y-2">
+              {users.map((user) => {
+                const handle = user.handle || user.username || '';
+                const actionLabel = relationshipButtonLabel(user.relationshipStatus);
+                const actionDisabled = user.relationshipStatus === 'self' || !user.handle || busyHandle === user.handle;
+                return (
+                  <div key={user.id || handle} className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-[color:var(--bl-hover)]">
+                    <button
+                      type="button"
+                      onClick={() => user.handle && onOpenProfile(user.handle)}
+                      disabled={!user.handle}
+                      className="bl-focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left disabled:cursor-default"
+                    >
+                      <Avatar src={normalizeMediaUrl(user.avatarUrl)} alt={user.name} size="md" />
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-[color:var(--bl-text)]">{user.name}</span>
+                        <span className="block truncate text-xs text-[color:var(--bl-text-muted)]">
+                          {user.displayHandle || (handle ? `@${handle}` : 'No username yet')}
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRelationshipAction(user)}
+                      disabled={actionDisabled}
+                      className="bl-focus-ring inline-flex min-w-[82px] justify-center rounded-lg border border-[color:var(--bl-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--bl-text-secondary)] transition hover:bg-[color:var(--bl-hover)] disabled:cursor-default disabled:opacity-60"
+                    >
+                      {busyHandle === user.handle ? <Loader2 size={13} className="animate-spin" /> : actionLabel}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -184,8 +334,37 @@ function ProfilePostCard({ post, onOpen }: { post: FeedPost; onOpen: () => void 
   );
 }
 
-function ProfileReelCard({ reel, onOpen }: { reel: ReelItem; onOpen: () => void }) {
+export function ProfileReelCard({ reel, onOpen }: { reel: ReelItem; onOpen: () => void }) {
   const ready = reel.processingStatus === 'ready' || !reel.processingStatus;
+  const posterSource = normalizeMediaUrl(reel.posterUrl || reel.thumbnailUrl || (ready ? reelPosterUrl(reel.id) : undefined));
+  const [posterUrl, setPosterUrl] = useState<string | undefined>();
+  const [posterFailed, setPosterFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    let objectUrl: string | undefined;
+    setPosterUrl(undefined);
+    setPosterFailed(false);
+    if (!posterSource) return undefined;
+    fetchAuthorizedObjectUrl(posterSource)
+      .then((url) => {
+        if (!alive) return;
+        if (!url) {
+          setPosterFailed(true);
+          return;
+        }
+        objectUrl = url;
+        setPosterUrl(url);
+      })
+      .catch(() => {
+        if (alive) setPosterFailed(true);
+      });
+    return () => {
+      alive = false;
+      if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
+    };
+  }, [posterSource]);
+
   return (
     <button
       type="button"
@@ -194,7 +373,12 @@ function ProfileReelCard({ reel, onOpen }: { reel: ReelItem; onOpen: () => void 
       className="bl-focus-ring group flex flex-col overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] text-left shadow-sm transition hover:[box-shadow:var(--bl-glow-sm)] disabled:cursor-default"
     >
       <div className="relative flex aspect-video w-full items-center justify-center bg-gradient-to-br from-teal-50 to-slate-100 dark:from-teal-500/10 dark:to-slate-900">
-        <Film size={26} className="text-teal-600/60 dark:text-teal-300/50" />
+        {posterUrl && !posterFailed ? (
+          <img src={posterUrl} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <Film size={26} className="text-teal-600/60 dark:text-teal-300/50" />
+        )}
+        <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/5 to-transparent opacity-80" />
         {ready && (
           <span className="absolute inset-0 flex items-center justify-center">
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition group-hover:bg-teal-600/80">
@@ -262,6 +446,9 @@ export default function SocialProfilePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [tab, setTab] = useState<ProfileTab>('posts');
+  const [relationshipModal, setRelationshipModal] = useState<'followers' | 'following' | null>(null);
+  const [relationshipBusyHandle, setRelationshipBusyHandle] = useState<string | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const cleanHandle = handle.replace(/^@/, '').toLowerCase();
   const queryKey = ['profiles', cleanHandle] as const;
 
@@ -284,6 +471,16 @@ export default function SocialProfilePage() {
     queryFn: () => fetchProfileReels(cleanHandle),
     enabled: Boolean(cleanHandle) && unlocked,
   });
+  const followersQuery = useQuery({
+    queryKey: ['profile-followers', cleanHandle],
+    queryFn: () => fetchProfileFollowers(cleanHandle),
+    enabled: Boolean(cleanHandle) && unlocked && relationshipModal === 'followers',
+  });
+  const followingQuery = useQuery({
+    queryKey: ['profile-following', cleanHandle],
+    queryFn: () => fetchProfileFollowing(cleanHandle),
+    enabled: Boolean(cleanHandle) && unlocked && relationshipModal === 'following',
+  });
   // Own communities only — there is no per-user communities API for other people.
   const communitiesQuery = useQuery({
     queryKey: ['communities'],
@@ -303,6 +500,22 @@ export default function SocialProfilePage() {
   const follow = useMutation({ mutationFn: followProfile, onSuccess: updateProfileCache });
   const unfollow = useMutation({ mutationFn: unfollowProfile, onSuccess: updateProfileCache });
   const cancel = useMutation({ mutationFn: cancelFollowRequest, onSuccess: updateProfileCache });
+  const relationshipAction = useMutation({
+    mutationFn: async (user: ProfileListItem) => {
+      if (!user.handle) return null;
+      setRelationshipBusyHandle(user.handle);
+      if (user.relationshipStatus === 'following') return unfollowProfile(user.handle);
+      if (user.relationshipStatus === 'requested_outgoing') return cancelFollowRequest(user.handle);
+      return followProfile(user.handle);
+    },
+    onSettled: async () => {
+      setRelationshipBusyHandle(null);
+      await Promise.all([
+        followersQuery.refetch(),
+        followingQuery.refetch(),
+      ]);
+    },
+  });
   const busy = follow.isPending || unfollow.isPending || cancel.isPending;
 
   const posts = postsQuery.data?.posts || [];
@@ -335,6 +548,15 @@ export default function SocialProfilePage() {
   }, [isSelf]);
 
   const goToConversations = () => navigate('/chats');
+
+  const selectContentTab = (nextTab: ProfileTab) => {
+    setTab(nextTab);
+    const schedule = window.requestAnimationFrame || ((callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 0));
+    schedule(() => {
+      contentRef.current?.focus({ preventScroll: true });
+      contentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
 
   const followAction = () => {
     if (!profile?.handle || profile.relationship === 'self') return null;
@@ -431,7 +653,7 @@ export default function SocialProfilePage() {
                 className="overflow-hidden rounded-3xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] shadow-sm"
                 style={{ boxShadow: 'var(--bl-glow-sm)' }}
               >
-                <ProfileCover />
+                <ProfileCover coverUrl={profile.profileBannerUrl} />
 
                 <div className="px-5 pb-5 sm:px-6">
                   {/* Avatar + identity + actions */}
@@ -483,14 +705,26 @@ export default function SocialProfilePage() {
                           icon={Newspaper}
                           value={postsQuery.isLoading ? '…' : formatCount(posts.length, Boolean(postsQuery.data?.nextCursor))}
                           label="Posts"
+                          onClick={() => selectContentTab('posts')}
                         />
                         <StatCard
                           icon={Clapperboard}
                           value={reelsQuery.isLoading ? '…' : formatCount(reels.length, Boolean(reelsQuery.data?.nextCursor))}
                           label="Reels"
+                          onClick={() => selectContentTab('reels')}
                         />
-                        <StatCard icon={Users} value={String(profile.counts?.followers ?? 0)} label="Followers" />
-                        <StatCard icon={UserCheck} value={String(profile.counts?.following ?? 0)} label="Following" />
+                        <StatCard
+                          icon={Users}
+                          value={String(profile.counts?.followers ?? 0)}
+                          label="Followers"
+                          onClick={() => setRelationshipModal('followers')}
+                        />
+                        <StatCard
+                          icon={UserCheck}
+                          value={String(profile.counts?.following ?? 0)}
+                          label="Following"
+                          onClick={() => setRelationshipModal('following')}
+                        />
                       </div>
 
                       {/* Bio + metadata */}
@@ -527,7 +761,7 @@ export default function SocialProfilePage() {
 
               {/* ── Tabs + content ────────────────────────────────────────── */}
               {!profile.locked && (
-                <>
+                <div ref={contentRef} tabIndex={-1} className="outline-none">
                   <div className="flex gap-1 overflow-x-auto border-b border-[color:var(--bl-border)]">
                     {tabs.map((item) => (
                       <button
@@ -674,8 +908,23 @@ export default function SocialProfilePage() {
                       </div>
                     </section>
                   )}
-                </>
+                </div>
               )}
+              <RelationshipListModal
+                open={relationshipModal !== null}
+                title={relationshipModal === 'following' ? 'Following' : 'Followers'}
+                users={relationshipModal === 'following' ? followingQuery.data?.users || [] : followersQuery.data?.users || []}
+                loading={relationshipModal === 'following' ? followingQuery.isLoading : followersQuery.isLoading}
+                error={relationshipModal === 'following' ? followingQuery.isError : followersQuery.isError}
+                emptyText={relationshipModal === 'following' ? 'Not following anyone yet.' : 'No followers yet.'}
+                busyHandle={relationshipBusyHandle}
+                onClose={() => setRelationshipModal(null)}
+                onOpenProfile={(nextHandle) => {
+                  setRelationshipModal(null);
+                  navigate(`/p/${nextHandle}`);
+                }}
+                onRelationshipAction={(user) => relationshipAction.mutate(user)}
+              />
             </>
           )}
         </div>

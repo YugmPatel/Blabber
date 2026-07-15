@@ -660,6 +660,8 @@ async function serializeReel(reel: ReelDocument, ownerView = false, viewerUserId
     durationSeconds: reel.durationSeconds || null,
     width: reel.width || null,
     height: reel.height || null,
+    posterUrl: reel.posterPath ? `/api/reels/${reel._id.toString()}/poster` : null,
+    thumbnailUrl: reel.posterPath ? `/api/reels/${reel._id.toString()}/poster` : null,
     publishedAt: reel.publishedAt || null,
     createdAt: reel.createdAt,
     updatedAt: reel.updatedAt,

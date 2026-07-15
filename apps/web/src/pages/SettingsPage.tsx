@@ -338,6 +338,10 @@ function ProfileSection() {
   const [localPreview, setLocalPreview] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [savedBannerUrl, setSavedBannerUrl] = useState('');
+  const [localBannerPreview, setLocalBannerPreview] = useState('');
+  const [bannerUploadError, setBannerUploadError] = useState('');
+  const [isUploadingBanner, setIsUploadingBanner] = useState(false);
   const [showCameraCapture, setShowCameraCapture] = useState(false);
   const [saved, setSaved] = useState(false);
   const [isSavingAll, setIsSavingAll] = useState(false);
@@ -348,8 +352,10 @@ function ProfileSection() {
   const [profileNotice, setProfileNotice] = useState('');
   const [profileError, setProfileError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
 
   const displayedAvatar = normalizeMediaUrl(localPreview || savedAvatarUrl);
+  const displayedBanner = normalizeMediaUrl(localBannerPreview || savedBannerUrl);
   const socialProfileQuery = useQuery({
     queryKey: ['profiles', 'me'],
     queryFn: fetchMyProfile,
@@ -367,6 +373,7 @@ function ProfileSection() {
     onSuccess: async (profile) => {
       setProfileBio(profile.bio || '');
       setProfileWebsite(profile.website || '');
+      setSavedBannerUrl(profile.profileBannerUrl || '');
       setProfileVisibility(profile.visibility || 'private');
       setProfileNotice('Profile saved.');
       setProfileError('');
@@ -434,6 +441,7 @@ function ProfileSection() {
     setProfileHandle(profile.handle || '');
     setProfileBio(profile.bio || '');
     setProfileWebsite(profile.website || '');
+    setSavedBannerUrl(profile.profileBannerUrl || '');
     setProfileVisibility(profile.visibility || 'private');
   }, [socialProfileQuery.data]);
 
@@ -479,6 +487,46 @@ function ProfileSection() {
     }
   };
 
+  const uploadBanner = async (
+    file: File
+  ): Promise<{ mediaUrl: string | null; errorMessage?: string }> => {
+    setIsUploadingBanner(true);
+    try {
+      const { data: presignData } = await apiClient.post<AvatarPresignResponse>('/api/media/presign', {
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+      });
+
+      const uploadHeaders: Record<string, string> = { 'Content-Type': file.type };
+      if (presignData.uploadAuthRequired) {
+        const token = getAccessToken();
+        if (token) uploadHeaders.Authorization = `Bearer ${token}`;
+      }
+
+      await axios.put(presignData.uploadUrl, file, {
+        headers: uploadHeaders,
+        withCredentials: Boolean(presignData.uploadAuthRequired),
+      });
+
+      return {
+        mediaUrl:
+          presignData.mediaUrl ||
+          presignData.publicUrl ||
+          presignData.url ||
+          presignData.uploadUrl.split('?')[0] ||
+          null,
+      };
+    } catch (err) {
+      const errorMessage = axios.isAxiosError(err)
+        ? err.response?.data?.message || err.message
+        : 'Banner upload failed';
+      return { mediaUrl: null, errorMessage };
+    } finally {
+      setIsUploadingBanner(false);
+    }
+  };
+
   const handleCancel = () => {
     setName(user?.name || '');
     setAbout(profileUser?.about || '');
@@ -491,6 +539,9 @@ function ProfileSection() {
     setProfileHandle(profile?.handle || '');
     setProfileBio(profile?.bio || '');
     setProfileWebsite(profile?.website || '');
+    setSavedBannerUrl(profile?.profileBannerUrl || '');
+    setLocalBannerPreview('');
+    setBannerUploadError('');
     setProfileVisibility(profile?.visibility || 'private');
     setProfileNotice('');
     setProfileError('');
@@ -509,6 +560,7 @@ function ProfileSection() {
         name,
         bio: profileBio,
         website: profileWebsite,
+        profileBannerUrl: savedBannerUrl,
         visibility: profileVisibility,
       });
       const currentHandle = (socialProfileQuery.data?.handle || '').replace(/^@/, '').toLowerCase();
@@ -572,6 +624,35 @@ function ProfileSection() {
     await handleAvatarFile(file);
   };
 
+  const handleBannerFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) { alert('Please select an image file'); return; }
+    if (file.size > 5 * 1024 * 1024) { alert('Image must be less than 5MB'); return; }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => setLocalBannerPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+
+    setBannerUploadError('');
+    const uploadResult = await uploadBanner(file);
+    if (uploadResult.mediaUrl) {
+      setSavedBannerUrl(uploadResult.mediaUrl);
+      setLocalBannerPreview('');
+    } else {
+      setBannerUploadError(
+        uploadResult.errorMessage ||
+          'Banner upload failed. Changes to your banner will not be saved. Other profile fields can still be saved.'
+      );
+    }
+
+    if (bannerInputRef.current) bannerInputRef.current.value = '';
+  };
+
+  const handleBannerFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handleBannerFile(file);
+  };
+
   const publicHandle = socialProfileQuery.data?.handle?.replace(/^@/, '') || '';
   const profileLoaded = Boolean(socialProfileQuery.data);
 
@@ -619,6 +700,47 @@ function ProfileSection() {
           {profileError || profileNotice}
         </div>
       )}
+
+      {/* Profile banner */}
+      <SecurityCard>
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Profile banner</h2>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Shown at the top of your public profile.</p>
+          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-r from-teal-100 via-sky-100 to-cyan-50 dark:border-slate-700 dark:from-teal-950 dark:via-slate-900 dark:to-sky-950">
+            {displayedBanner ? (
+              <img src={displayedBanner} alt="Profile banner preview" className="h-36 w-full object-cover sm:h-44" />
+            ) : (
+              <div className="h-36 w-full sm:h-44" />
+            )}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => bannerInputRef.current?.click()}
+              disabled={isUploadingBanner}
+              className="inline-flex items-center gap-2 rounded-xl border border-teal-500/50 px-3.5 py-2 text-sm font-semibold text-teal-700 transition hover:bg-teal-50 disabled:opacity-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
+            >
+              {isUploadingBanner ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+              Change banner
+            </button>
+            {(savedBannerUrl || localBannerPreview) && (
+              <button
+                onClick={() => {
+                  setSavedBannerUrl('');
+                  setLocalBannerPreview('');
+                  setBannerUploadError('');
+                }}
+                className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-600 dark:border-slate-600 dark:text-slate-200 dark:hover:border-rose-500/50 dark:hover:text-rose-300"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+            JPG, PNG, WebP or GIF. Max size 5MB. Changes take effect when you save.
+          </p>
+          {bannerUploadError && <p className="mt-2 text-xs text-rose-500">{bannerUploadError}</p>}
+        </div>
+      </SecurityCard>
 
       {/* Profile photo */}
       <SecurityCard>
@@ -966,6 +1088,7 @@ function ProfileSection() {
       </div>
 
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
+      <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerFileSelect} className="hidden" />
       <CameraModal
         isOpen={showCameraCapture}
         onClose={() => setShowCameraCapture(false)}

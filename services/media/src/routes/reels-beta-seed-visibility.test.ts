@@ -110,14 +110,15 @@ async function seedFixture() {
   const blockedCreatorId = new ObjectId();
   createdUserIds = [viewerId, creatorId, blockedCreatorId];
   const now = new Date();
+  const creator = userDoc(creatorId, `${runId}-creator`, {
+    creatorDiscoveryEnabled: true,
+    creatorDiscoveryEnabledAt: now,
+    creatorTopicIds: ['campus_life'],
+    discoveryShowReels: true,
+  });
   await db.collection('users').insertMany([
     userDoc(viewerId, `${runId}-viewer`),
-    userDoc(creatorId, `${runId}-creator`, {
-      creatorDiscoveryEnabled: true,
-      creatorDiscoveryEnabledAt: now,
-      creatorTopicIds: ['campus_life'],
-      discoveryShowReels: true,
-    }),
+    creator,
     userDoc(blockedCreatorId, `${runId}-blocked`, {
       creatorDiscoveryEnabled: true,
       creatorDiscoveryEnabledAt: now,
@@ -138,6 +139,7 @@ async function seedFixture() {
   });
   return {
     token: signTestToken(viewerId.toString()),
+    creatorHandle: creator.profileHandle,
     visibleReelId,
     privateReelId,
     deletedReelId,
@@ -193,5 +195,16 @@ describe('beta seed reel visibility', () => {
     const ids = response.body.reels.map((reel: any) => reel.id);
     expect(ids).toContain(fixture.visibleReelId);
     expect(ids).not.toContain(fixture.blockedReelId);
+  });
+
+  it('Profile Reels returns poster and thumbnail URLs for ready reels', async () => {
+    const fixture = await seedFixture();
+    const response = await request(app)
+      .get(`/profiles/${fixture.creatorHandle}/reels`)
+      .set('Authorization', `Bearer ${fixture.token}`)
+      .expect(200);
+    const reel = response.body.reels.find((item: any) => item.id === fixture.visibleReelId);
+    expect(reel?.posterUrl).toBe(`/api/reels/${fixture.visibleReelId}/poster`);
+    expect(reel?.thumbnailUrl).toBe(`/api/reels/${fixture.visibleReelId}/poster`);
   });
 });

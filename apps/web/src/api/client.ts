@@ -483,6 +483,7 @@ export interface SocialProfile {
   handle: string | null;
   displayHandle: string | null;
   avatarUrl: string | null;
+  profileBannerUrl?: string | null;
   bio?: string;
   website?: string | null;
   visibility?: 'private' | 'public';
@@ -559,6 +560,7 @@ export interface ProfileListItem {
   handle: string | null;
   displayHandle: string | null;
   avatarUrl: string | null;
+  relationshipStatus?: SocialProfile['relationship'];
 }
 
 export async function fetchMyProfile(): Promise<SocialProfile> {
@@ -570,6 +572,7 @@ export async function updateSocialProfile(payload: {
   name?: string;
   bio?: string;
   website?: string;
+  profileBannerUrl?: string;
   visibility?: 'private' | 'public';
 }): Promise<SocialProfile> {
   const { data } = await apiClient.patch<{ profile: SocialProfile }>('/api/profiles/me', payload);
@@ -603,6 +606,22 @@ export async function cancelFollowRequest(handle: string): Promise<SocialProfile
 
 export async function fetchIncomingFollowRequests(): Promise<{ requests: Array<{ requester: ProfileListItem; requestedAt: string }>; nextCursor: string | null }> {
   const { data } = await apiClient.get<{ requests: Array<{ requester: ProfileListItem; requestedAt: string }>; nextCursor: string | null }>('/api/profiles/requests/incoming');
+  return data;
+}
+
+export async function fetchProfileFollowers(handle: string, cursor?: string | null): Promise<{ users: ProfileListItem[]; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ users: ProfileListItem[]; nextCursor: string | null }>(
+    `/api/profiles/${encodeURIComponent(handle)}/followers`,
+    { params: { cursor: cursor || undefined } }
+  );
+  return data;
+}
+
+export async function fetchProfileFollowing(handle: string, cursor?: string | null): Promise<{ users: ProfileListItem[]; nextCursor: string | null }> {
+  const { data } = await apiClient.get<{ users: ProfileListItem[]; nextCursor: string | null }>(
+    `/api/profiles/${encodeURIComponent(handle)}/following`,
+    { params: { cursor: cursor || undefined } }
+  );
   return data;
 }
 
@@ -1352,6 +1371,8 @@ export interface ReelItem {
   durationSeconds: number | null;
   width: number | null;
   height: number | null;
+  posterUrl?: string | null;
+  thumbnailUrl?: string | null;
   author?: { name: string; handle: string | null; displayHandle: string | null; avatarUrl?: string | null } | null;
   sourceAttribution?: { label: string; creatorName: string | null };
   reelDiscoverable?: boolean;

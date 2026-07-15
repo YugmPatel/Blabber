@@ -246,6 +246,45 @@ describe('Release D profiles', () => {
     expect(user?.profileHandle).toBe('yugm_patel');
   });
 
+  it('saves, returns, and removes a profile banner URL without Mongo update conflicts', async () => {
+    const bannerUrl = '/api/media/local/507f1f77bcf86cd799439012';
+    const savedBanner = await request(app)
+      .patch('/profiles/me')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        profileBannerUrl: bannerUrl,
+        bio: '',
+        website: '',
+        visibility: 'public',
+      });
+    expect(savedBanner.status).toBe(200);
+    expect(savedBanner.body.profile.profileBannerUrl).toBe(bannerUrl);
+
+    const publicProfile = await request(app)
+      .get('/profiles/viewer_test')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .expect(200);
+    expect(publicProfile.body.profile.profileBannerUrl).toBe(bannerUrl);
+
+    const removedBanner = await request(app)
+      .patch('/profiles/me')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ profileBannerUrl: '' });
+    expect(removedBanner.status).toBe(200);
+    expect(removedBanner.body.profile.profileBannerUrl).toBeNull();
+
+    const user = await getDatabase().collection<User>('users').findOne({ _id: viewerId });
+    expect(user?.profileBannerUrl).toBeUndefined();
+  });
+
+  it('rejects invalid profile banner URLs with validation errors', async () => {
+    const response = await request(app)
+      .patch('/profiles/me')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ profileBannerUrl: 'javascript:alert(1)' });
+    expect(response.status).toBe(400);
+  });
+
   it('saves profile fields used by Edit Profile, including relative local avatar URLs', async () => {
     const basic = await request(app)
       .patch('/me')
@@ -282,6 +321,90 @@ describe('Release D profiles', () => {
       website: 'https://example.com/profile',
       visibility: 'public',
     });
+  });
+
+  it('lists public profile followers/following and excludes inactive users', async () => {
+    const db = getDatabase();
+    const now = new Date();
+    const activeFollowerId = new ObjectId();
+    const deletedFollowerId = new ObjectId();
+    const deactivatedFollowerId = new ObjectId();
+    await db.collection<User>('users').insertMany([
+      {
+        _id: activeFollowerId,
+        username: 'rdprofile-active-follower',
+        email: 'rdprofile-active-follower@example.com',
+        passwordHash: 'hashed',
+        name: 'Active Follower',
+        profileHandle: 'active_follower',
+        profileVisibility: 'public',
+        contacts: [],
+        blocked: [],
+        lastSeen: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        _id: deletedFollowerId,
+        username: 'rdprofile-deleted-follower',
+        email: 'rdprofile-deleted-follower@example.com',
+        passwordHash: 'hashed',
+        name: 'Deleted Follower',
+        profileHandle: 'deleted_follower',
+        profileVisibility: 'public',
+        contacts: [],
+        blocked: [],
+        lastSeen: now,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: now,
+      },
+      {
+        _id: deactivatedFollowerId,
+        username: 'rdprofile-deactivated-follower',
+        email: 'rdprofile-deactivated-follower@example.com',
+        passwordHash: 'hashed',
+        name: 'Deactivated Follower',
+        profileHandle: 'deactivated_follower',
+        profileVisibility: 'public',
+        contacts: [],
+        blocked: [],
+        lastSeen: now,
+        createdAt: now,
+        updatedAt: now,
+        deactivatedAt: now,
+      },
+    ] as User[]);
+    await db.collection('profile_relationships').insertMany([
+      { _id: new ObjectId(), followerUserId: activeFollowerId, targetUserId: otherId, state: 'following', createdAt: now, updatedAt: now, approvedAt: now },
+      { _id: new ObjectId(), followerUserId: deletedFollowerId, targetUserId: otherId, state: 'following', createdAt: now, updatedAt: now, approvedAt: now },
+      { _id: new ObjectId(), followerUserId: deactivatedFollowerId, targetUserId: otherId, state: 'following', createdAt: now, updatedAt: now, approvedAt: now },
+    ]);
+
+    const followers = await request(app)
+      .get('/profiles/other_test/followers')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(followers.body.users).toHaveLength(1);
+    expect(followers.body.users[0]).toMatchObject({
+      id: activeFollowerId.toString(),
+      username: 'rdprofile-active-follower',
+      name: 'Active Follower',
+      handle: 'active_follower',
+      relationshipStatus: 'none',
+    });
+
+    const following = await request(app)
+      .get('/profiles/other_test/following')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .expect(200);
+    expect(following.body.users).toEqual([]);
+    expect(following.body.nextCursor).toBeNull();
+
+    const privateList = await request(app)
+      .get('/profiles/owner_test/followers')
+      .set('Authorization', `Bearer ${viewerToken}`);
+    expect(privateList.status).toBe(403);
   });
 
   it('approves and declines follow requests by requester id when requester has no handle', async () => {

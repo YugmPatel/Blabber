@@ -71,6 +71,7 @@ const UpdateProfileSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   bio: z.string().trim().max(160).optional(),
   website: z.string().trim().max(2048).optional(),
+  profileBannerUrl: z.string().trim().max(2048).optional(),
   visibility: z.enum(['private', 'public']).optional(),
   avatarMediaId: z.string().trim().optional(),
 });
@@ -107,6 +108,18 @@ function validateWebsite(value?: string) {
   }
   if (parsed.protocol !== 'https:') throw new ValidationError('Website must be a valid HTTPS URL.');
   return parsed.toString();
+}
+
+function validateProfileImageUrl(value?: string) {
+  if (!value) return undefined;
+  if (value.startsWith('/api/media/local/')) return value;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.toString();
+  } catch {
+    // handled below
+  }
+  throw new ValidationError('Profile banner image is invalid.');
 }
 
 function createProfileUpdateOps(initialSet: Record<string, unknown> = {}) {
@@ -170,6 +183,7 @@ function userIdentity(user: User) {
     handle: user.profileHandle || null,
     displayHandle: user.profileHandle ? `@${user.profileHandle}` : null,
     avatarUrl: user.avatarUrl || null,
+    profileBannerUrl: user.profileBannerUrl || null,
   };
 }
 
@@ -332,6 +346,11 @@ export const updateMyProfile = asyncHandler(async (req: Request, res: Response) 
     if (website) update.setField('profileWebsite', website);
     else update.unsetField('profileWebsite');
   }
+  if (parsed.profileBannerUrl !== undefined) {
+    const profileBannerUrl = validateProfileImageUrl(parsed.profileBannerUrl);
+    if (profileBannerUrl) update.setField('profileBannerUrl', profileBannerUrl);
+    else update.unsetField('profileBannerUrl');
+  }
   if (parsed.visibility !== undefined) update.setField('profileVisibility', parsed.visibility);
   const avatarUrl = await avatarUrlFromApprovedMedia(userId, parsed.avatarMediaId);
   if (avatarUrl) {
@@ -490,13 +509,18 @@ function cursorFilter(cursor?: string) {
   return { _id: { $gt: new ObjectId(cursor) } };
 }
 
-function serializeListUser(user: User) {
-  return userIdentity(user);
+async function serializeListUser(user: User, viewerUserId: ObjectId) {
+  const relationship = await relationshipBetween(viewerUserId, user._id);
+  return {
+    ...userIdentity(user),
+    relationshipStatus: relationship.kind,
+  };
 }
 
 async function assertCanSeeLists(viewerUserId: ObjectId, target: User) {
   if (await hasBlockBetween(viewerUserId, target._id)) throw new AppError(404, 'Profile is unavailable.', 'PROFILE_UNAVAILABLE');
   if (viewerUserId.equals(target._id)) return;
+  if ((target.profileVisibility || 'private') === 'public') return;
   const rel = await getProfileRelationshipsCollection().findOne({ followerUserId: viewerUserId, targetUserId: target._id, state: 'following' });
   if (!rel) throw new AppError(403, 'This list is private.', 'PROFILE_LIST_PRIVATE');
 }
@@ -519,14 +543,14 @@ async function listRelationships(params: {
   const ids = page.map((relationship: any) => relationship[projectionField] as ObjectId);
   const users = await getUsersCollection()
     .find(activeUserQuery({ _id: { $in: ids } }) as any)
-    .project<User>({ name: 1, profileHandle: 1, avatarUrl: 1 })
+    .project<User>({ username: 1, name: 1, profileHandle: 1, avatarUrl: 1 })
     .toArray();
   const byId = new Map(users.map((user) => [user._id.toString(), user]));
   const visibleUsers = page
     .map((relationship: any) => byId.get(relationship[projectionField].toString()))
     .filter((user): user is User => Boolean(user));
   return {
-    users: visibleUsers.map(serializeListUser),
+    users: await Promise.all(visibleUsers.map((user) => serializeListUser(user, params.viewerUserId))),
     nextCursor: relationships.length > PAGE_LIMIT ? page[page.length - 1]._id.toString() : null,
   };
 }
@@ -558,13 +582,13 @@ export const listIncomingFollowRequests = asyncHandler(async (req: Request, res:
   const page = requests.slice(0, PAGE_LIMIT);
   const users = await getUsersCollection()
     .find(activeUserQuery({ _id: { $in: page.map((request) => request.followerUserId) } }) as any)
-    .project<User>({ name: 1, profileHandle: 1, avatarUrl: 1 })
+    .project<User>({ username: 1, name: 1, profileHandle: 1, avatarUrl: 1 })
     .toArray();
   const byId = new Map(users.map((user) => [user._id.toString(), user]));
   res.status(200).json({
     requests: page.flatMap((request: ProfileRelationship) => {
       const user = byId.get(request.followerUserId.toString());
-      return user ? [{ requester: serializeListUser(user), requestedAt: request.createdAt }] : [];
+      return user ? [{ requester: userIdentity(user), requestedAt: request.createdAt }] : [];
     }),
     nextCursor: requests.length > PAGE_LIMIT ? page[page.length - 1]._id.toString() : null,
   });
