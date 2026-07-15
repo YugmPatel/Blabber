@@ -183,9 +183,9 @@ describe('Release D profiles', () => {
     const firstHandle = await request(app)
       .patch('/profiles/me/handle')
       .set('Authorization', `Bearer ${viewerToken}`)
-      .send({ handle: '@viewer_first' });
+      .send({ handle: '@yugmpatel' });
     expect(firstHandle.status).toBe(200);
-    expect(firstHandle.body.profile.handle).toBe('viewer_first');
+    expect(firstHandle.body.profile.handle).toBe('yugmpatel');
 
     const duplicate = await request(app)
       .patch('/profiles/me/handle')
@@ -204,6 +204,46 @@ describe('Release D profiles', () => {
       .set('Authorization', `Bearer ${otherToken}`)
       .send({ handle: '1_bad' });
     expect(invalid.status).toBe(400);
+  });
+
+  it('saves a handle with empty optional profile fields without creating Mongo update conflicts', async () => {
+    await getDatabase().collection('users').updateOne(
+      { _id: viewerId },
+      {
+        $unset: { profileBio: '', profileHandle: '', profileWebsite: '' },
+        $set: { googleId: 'google-empty-profile-viewer', profileHandleChangedAt: new Date(), updatedAt: new Date() },
+      } as any
+    );
+
+    const emptyProfile = await request(app)
+      .patch('/profiles/me')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        name: 'Profile Viewer',
+        bio: '',
+        profileBio: '',
+        website: '',
+        visibility: 'public',
+      });
+    expect(emptyProfile.status).toBe(200);
+    expect(emptyProfile.body.profile).toMatchObject({
+      name: 'Profile Viewer',
+      bio: '',
+      website: null,
+      visibility: 'public',
+    });
+
+    const firstHandle = await request(app)
+      .patch('/profiles/me/handle')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ handle: 'yugm_patel' });
+    expect(firstHandle.status).toBe(200);
+    expect(firstHandle.body.profile.handle).toBe('yugm_patel');
+
+    const user = await getDatabase().collection<User>('users').findOne({ _id: viewerId });
+    expect(user?.profileBio).toBeUndefined();
+    expect(user?.profileWebsite).toBeUndefined();
+    expect(user?.profileHandle).toBe('yugm_patel');
   });
 
   it('saves profile fields used by Edit Profile, including relative local avatar URLs', async () => {

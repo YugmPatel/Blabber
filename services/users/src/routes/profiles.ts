@@ -70,12 +70,7 @@ const RESERVED_HANDLES = new Set([
 const UpdateProfileSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   bio: z.string().trim().max(160).optional(),
-  website: z
-    .string()
-    .trim()
-    .max(2048)
-    .optional()
-    .transform((value) => (value ? value : undefined)),
+  website: z.string().trim().max(2048).optional(),
   visibility: z.enum(['private', 'public']).optional(),
   avatarMediaId: z.string().trim().optional(),
 });
@@ -91,7 +86,7 @@ function requireUserId(req: Request) {
 }
 
 function canonicalHandle(value: string) {
-  return value.trim().replace(/^@/, '').toLowerCase();
+  return value.trim().replace(/^@+/, '').toLowerCase();
 }
 
 function validateHandle(value: string) {
@@ -112,6 +107,37 @@ function validateWebsite(value?: string) {
   }
   if (parsed.protocol !== 'https:') throw new ValidationError('Website must be a valid HTTPS URL.');
   return parsed.toString();
+}
+
+function createProfileUpdateOps(initialSet: Record<string, unknown> = {}) {
+  const set: Record<string, unknown> = { ...initialSet };
+  const unset: Record<string, ''> = {};
+
+  const setField = (key: string, value: unknown) => {
+    delete unset[key];
+    set[key] = value;
+  };
+
+  const unsetField = (key: string) => {
+    delete set[key];
+    unset[key] = '';
+  };
+
+  const setOptionalText = (key: string, value: string | undefined) => {
+    if (value === undefined) return;
+    if (value.trim().length > 0) {
+      setField(key, value);
+    } else {
+      unsetField(key);
+    }
+  };
+
+  const build = () => ({
+    ...(Object.keys(set).length ? { $set: set } : {}),
+    ...(Object.keys(unset).length ? { $unset: unset } : {}),
+  });
+
+  return { setField, unsetField, setOptionalText, build };
 }
 
 function activeUserQuery(extra: Record<string, unknown> = {}) {
@@ -297,27 +323,29 @@ export const updateMyProfile = asyncHandler(async (req: Request, res: Response) 
   const userId = requireUserId(req);
   await requireActiveUser(userId);
   const parsed = UpdateProfileSchema.parse(req.body);
-  const update: any = { updatedAt: new Date(), profileUpdatedAt: new Date() };
-  if (parsed.name !== undefined) update.name = parsed.name;
-  if (parsed.bio !== undefined) update.profileBio = parsed.bio || undefined;
-  if (parsed.website !== undefined) update.profileWebsite = validateWebsite(parsed.website);
-  if (parsed.visibility !== undefined) update.profileVisibility = parsed.visibility;
+  const now = new Date();
+  const update = createProfileUpdateOps({ updatedAt: now, profileUpdatedAt: now });
+  if (parsed.name !== undefined) update.setField('name', parsed.name);
+  update.setOptionalText('profileBio', parsed.bio);
+  if (parsed.website !== undefined) {
+    const website = validateWebsite(parsed.website);
+    if (website) update.setField('profileWebsite', website);
+    else update.unsetField('profileWebsite');
+  }
+  if (parsed.visibility !== undefined) update.setField('profileVisibility', parsed.visibility);
   const avatarUrl = await avatarUrlFromApprovedMedia(userId, parsed.avatarMediaId);
   if (avatarUrl) {
-    update.avatarUrl = avatarUrl;
-    update.avatarSource = 'upload';
+    update.setField('avatarUrl', avatarUrl);
+    update.setField('avatarSource', 'upload');
   }
   if (parsed.visibility === 'private') {
-    update.creatorDiscoveryEnabled = false;
-    update.creatorDiscoveryUpdatedAt = new Date();
+    update.setField('creatorDiscoveryEnabled', false);
+    update.setField('creatorDiscoveryUpdatedAt', now);
+    update.unsetField('creatorDiscoveryEnabledAt');
   }
-  const unset: Record<string, ''> = {};
-  if (parsed.bio === '') unset.profileBio = '';
-  if (!parsed.website && 'website' in parsed) unset.profileWebsite = '';
-  if (parsed.visibility === 'private') unset.creatorDiscoveryEnabledAt = '';
   const result = await getUsersCollection().findOneAndUpdate(
     { _id: userId },
-    { $set: update, ...(Object.keys(unset).length ? { $unset: unset } : {}) },
+    update.build(),
     { returnDocument: 'after' }
   );
   await publishProfileUpdate([userId.toString()], EventType.PROFILE_UPDATED);
@@ -338,17 +366,15 @@ export const updateMyHandle = asyncHandler(async (req: Request, res: Response) =
   await ensureHandleAvailable(handle, userId);
   const now = new Date();
   if (user.profileHandle) await reserveHandle(user.profileHandle, 'changed', now);
+  const update = createProfileUpdateOps();
+  update.setField('profileHandle', handle);
+  update.setField('profileHandleChangedAt', now);
+  update.setField('profileUpdatedAt', now);
+  update.setField('profileVisibility', user.profileVisibility || 'private');
+  update.setField('updatedAt', now);
   const result = await getUsersCollection().findOneAndUpdate(
     { _id: userId },
-    {
-      $set: {
-        profileHandle: handle,
-        profileHandleChangedAt: now,
-        profileUpdatedAt: now,
-        profileVisibility: user.profileVisibility || 'private',
-        updatedAt: now,
-      },
-    },
+    update.build(),
     { returnDocument: 'after' }
   );
   await publishProfileUpdate([userId.toString()], EventType.PROFILE_UPDATED);
