@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { MongoClient } from 'mongodb';
 import dotenv from 'dotenv';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mongoDbName, mongoUri } from './config.mjs';
 import { BETA_TOPICS } from './topics.mjs';
-
-dotenv.config();
+import { countSeedVisibilityTombstones } from './repair-visibility.mjs';
 
 const topicIds = BETA_TOPICS.map((topic) => topic.slug);
 const reelTopicIds = new Set([
@@ -46,85 +47,123 @@ async function approvedReelMedia(db, reel) {
   return Boolean(media);
 }
 
+function idsByKind(records, kind) {
+  return records.filter((record) => record.kind === kind && record.mongoId).map((record) => record.mongoId);
+}
+
+export async function buildEligibilityDiagnostic(db, { dbName = mongoDbName() } = {}) {
+  const seedRecords = await db.collection('beta_content_seed_records').find({
+    kind: { $in: ['user', 'post', 'reel'] },
+  }).toArray();
+  const seedUserIds = idsByKind(seedRecords, 'user');
+  const seedPostIds = idsByKind(seedRecords, 'post');
+  const seedReelIds = idsByKind(seedRecords, 'reel');
+  const tombstoneReport = await countSeedVisibilityTombstones(db, seedRecords);
+
+  const eligibleCreators = seedUserIds.length
+    ? await db.collection('users').find({
+        _id: { $in: seedUserIds },
+        ...activeUserQuery,
+        creatorTopicIds: { $in: topicIds },
+      }).project({ _id: 1 }).toArray()
+    : [];
+  const eligibleCreatorIds = new Set(eligibleCreators.map((user) => user._id.toString()));
+
+  const postCandidates = seedPostIds.length
+    ? await db.collection('posts').find({
+        _id: { $in: seedPostIds },
+        discoverable: true,
+        visibility: 'public',
+        deletedAt: { $exists: false },
+        authorUserId: { $in: eligibleCreators.map((user) => user._id) },
+        discoveryTopicIds: { $in: topicIds },
+      }).toArray()
+    : [];
+  let feedDiscoverEligiblePosts = 0;
+  let postMediaRejected = 0;
+  for (const post of postCandidates) {
+    if (!eligibleCreatorIds.has(post.authorUserId.toString())) continue;
+    if (post.hiddenAt || post.isHidden) continue;
+    if (!Array.isArray(post.discoveryTopicIds) || post.discoveryTopicIds.length < 1 || post.discoveryTopicIds.length > 3) continue;
+    if (await approvedPostMedia(db, post)) feedDiscoverEligiblePosts += 1;
+    else postMediaRejected += 1;
+  }
+
+  const reelCandidates = seedReelIds.length
+    ? await db.collection('reels').find({
+        _id: { $in: seedReelIds },
+        reelDiscoverable: true,
+        publishState: 'published',
+        processingStatus: 'ready',
+        visibility: 'public',
+        deletedAt: { $exists: false },
+        moderationRemovedAt: { $exists: false },
+        authorUserId: { $in: eligibleCreators.map((user) => user._id) },
+      }).toArray()
+    : [];
+  let browseEligibleReels = 0;
+  let reelTopicRejected = 0;
+  let reelMediaRejected = 0;
+  for (const reel of reelCandidates) {
+    if (reel.hiddenAt || reel.isHidden) continue;
+    const validTopics = Array.isArray(reel.reelTopicIds)
+      ? reel.reelTopicIds.filter((topicId) => reelTopicIds.has(topicId))
+      : [];
+    if (validTopics.length < 1 || validTopics.length > 3) {
+      reelTopicRejected += 1;
+      continue;
+    }
+    if (await approvedReelMedia(db, reel)) browseEligibleReels += 1;
+    else reelMediaRejected += 1;
+  }
+
+  const byKind = {};
+  for (const record of seedRecords) byKind[record.kind] = (byKind[record.kind] || 0) + 1;
+  const sourceMix = {};
+  const allSeedRecords = await db.collection('beta_content_seed_records').find({}).toArray();
+  for (const record of allSeedRecords) {
+    const source = record.source?.source || 'unknown';
+    sourceMix[source] = (sourceMix[source] || 0) + 1;
+  }
+
+  return {
+    database: dbName,
+    topicsConfiguredForDiscover: topicIds.length,
+    betaSeedRecordsByKind: byKind,
+    betaSeedSourceMix: sourceMix,
+    seedVisibilityRecords: tombstoneReport.seedRecords,
+    eligibleForColdStart: {
+      discoverCreators: eligibleCreators.length,
+      feedFeaturedPosts: feedDiscoverEligiblePosts,
+      discoverPosts: feedDiscoverEligiblePosts,
+      reelsBrowse: browseEligibleReels,
+      reelsForYouFallback: browseEligibleReels,
+    },
+    tombstoneReasons: tombstoneReport.tombstones,
+    missingSeedDocs: tombstoneReport.missingSeedDocs,
+    rejectedByEligibilityProbe: {
+      postMedia: postMediaRejected,
+      reelTopics: reelTopicRejected,
+      reelMediaOrDerivatives: reelMediaRejected,
+    },
+  };
+}
+
 async function main() {
+  dotenv.config({ quiet: true });
   const client = new MongoClient(mongoUri());
   await client.connect();
   try {
     const db = client.db(mongoDbName());
-    const eligibleCreators = await db.collection('users').find({
-      ...activeUserQuery,
-      creatorTopicIds: { $in: topicIds },
-    }).project({ _id: 1 }).toArray();
-    const eligibleCreatorIds = new Set(eligibleCreators.map((user) => user._id.toString()));
-
-    const postCandidates = await db.collection('posts').find({
-      discoverable: true,
-      visibility: 'public',
-      deletedAt: { $exists: false },
-      authorUserId: { $in: eligibleCreators.map((user) => user._id) },
-      discoveryTopicIds: { $in: topicIds },
-    }).toArray();
-    let feedDiscoverEligiblePosts = 0;
-    let postMediaRejected = 0;
-    for (const post of postCandidates) {
-      if (!eligibleCreatorIds.has(post.authorUserId.toString())) continue;
-      if (!Array.isArray(post.discoveryTopicIds) || post.discoveryTopicIds.length < 1 || post.discoveryTopicIds.length > 3) continue;
-      if (await approvedPostMedia(db, post)) feedDiscoverEligiblePosts += 1;
-      else postMediaRejected += 1;
-    }
-
-    const reelCandidates = await db.collection('reels').find({
-      reelDiscoverable: true,
-      publishState: 'published',
-      processingStatus: 'ready',
-      visibility: 'public',
-      deletedAt: { $exists: false },
-      moderationRemovedAt: { $exists: false },
-      authorUserId: { $in: eligibleCreators.map((user) => user._id) },
-    }).toArray();
-    let browseEligibleReels = 0;
-    let reelTopicRejected = 0;
-    let reelMediaRejected = 0;
-    for (const reel of reelCandidates) {
-      const validTopics = Array.isArray(reel.reelTopicIds)
-        ? reel.reelTopicIds.filter((topicId) => reelTopicIds.has(topicId))
-        : [];
-      if (validTopics.length < 1 || validTopics.length > 3) {
-        reelTopicRejected += 1;
-        continue;
-      }
-      if (await approvedReelMedia(db, reel)) browseEligibleReels += 1;
-      else reelMediaRejected += 1;
-    }
-
-    const seedRecords = await db.collection('beta_content_seed_records').aggregate([
-      { $group: { _id: '$kind', count: { $sum: 1 } } },
-      { $sort: { _id: 1 } },
-    ]).toArray();
-
-    console.log(JSON.stringify({
-      database: mongoDbName(),
-      topicsConfiguredForDiscover: topicIds.length,
-      betaSeedRecordsByKind: Object.fromEntries(seedRecords.map((row) => [row._id, row.count])),
-      eligibleForColdStart: {
-        discoverCreators: eligibleCreators.length,
-        feedFeaturedPosts: feedDiscoverEligiblePosts,
-        discoverPosts: feedDiscoverEligiblePosts,
-        reelsBrowse: browseEligibleReels,
-        reelsForYouFallback: browseEligibleReels,
-      },
-      rejectedByEligibilityProbe: {
-        postMedia: postMediaRejected,
-        reelTopics: reelTopicRejected,
-        reelMediaOrDerivatives: reelMediaRejected,
-      },
-    }, null, 2));
+    console.log(JSON.stringify(await buildEligibilityDiagnostic(db), null, 2));
   } finally {
     await client.close();
   }
 }
 
-main().catch((error) => {
-  console.error(error?.stack || error?.message || error);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || error);
+    process.exit(1);
+  });
+}

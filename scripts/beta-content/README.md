@@ -71,6 +71,11 @@ pnpm seed:beta-content:apply
 # tracking collection), grouped by kind and by source provider.
 pnpm seed:beta-content:report
 
+# Restore visibility for already-tracked beta seed users/posts/reels after an
+# intentional reset or accidental tombstone mismatch. This does not create
+# content, fetch providers, or touch non-seed documents.
+pnpm seed:beta-content --repair-visibility
+
 # Read-only eligibility probe for the web surfaces. This does not reset,
 # apply, or mutate seed data; it prints counts for content that should pass
 # the broad Feed Featured, Reels Browse/For You fallback, and Discover
@@ -195,6 +200,15 @@ Reactions/comments/follow edges tied to seeded content are hard-deleted
 since they're pure demo interaction data with no independent value. See
 `reset.mjs` for the exact behavior.
 
+Because reset intentionally leaves tombstones, a later apply is responsible
+for restoring seed-owned visibility as part of its idempotent upserts:
+seeded users have `deactivatedAt`/`deletedAt` cleared, seeded posts have
+`deletedAt`/`hiddenAt`/`isHidden` cleared, and seeded Reels have the same
+visibility tombstones cleared while returning to `published`/`ready`.
+Use `--repair-visibility` when content already exists and you only need to
+restore tracked seed-owned documents; do not use `--reset` unless you are
+intentionally removing beta seed content from the app surfaces.
+
 ### After a failed apply
 
 If an apply run fails after writing partial seed records, inspect the current
@@ -208,6 +222,14 @@ For production cleanup, use the strict beta-content-only reset command:
 
 ```bash
 BLABBER_SEED_TARGET=production pnpm seed:beta-content --reset --allow-production --confirm-production-beta-seed-content --confirm-reset-beta-seed-content --confirm-delete-production-beta-seed-content
+```
+
+If the report shows seed records but the app surfaces are empty, run the
+read-only eligibility diagnostic first. If it reports deactivated/deleted
+seed-owned users, posts, or Reels, restore only tracked seed documents with:
+
+```bash
+pnpm seed:beta-content --repair-visibility --allow-production --confirm-production-beta-seed-content
 ```
 
 ## Production

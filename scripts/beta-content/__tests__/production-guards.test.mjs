@@ -9,6 +9,7 @@ import {
   mongoBackupCommand,
   parseArgs,
   productionApplyRequirements,
+  productionRepairRequirements,
   productionResetRequirements,
   productionWarningPayload,
   publicMongoTarget,
@@ -84,6 +85,19 @@ describe('production reset guard', () => {
       '--confirm-delete-production-beta-seed-content',
     ]);
     expect(assertProductionModeAllowed(full, prodEnv)).toEqual({ production: true });
+  });
+});
+
+describe('production repair visibility guard', () => {
+  it('parses and allows production repair with the lightweight explicit confirmations', () => {
+    const args = parseArgs(['--repair-visibility', '--allow-production', '--confirm-production-beta-seed-content']);
+    expect(productionRepairRequirements(args, prodEnv).every((item) => item.ok)).toBe(true);
+    expect(assertProductionModeAllowed(args, prodEnv)).toEqual({ production: true });
+  });
+
+  it('blocks production repair without the production confirmation flag', () => {
+    const args = parseArgs(['--repair-visibility', '--allow-production']);
+    expect(() => assertProductionModeAllowed(args, prodEnv)).toThrow(/--confirm-production-beta-seed-content/);
   });
 });
 

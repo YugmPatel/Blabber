@@ -4,6 +4,7 @@
 //   pnpm seed:beta-content --dry-run
 //   pnpm seed:beta-content --apply
 //   pnpm seed:beta-content --report
+//   pnpm seed:beta-content --repair-visibility
 //   pnpm seed:beta-content --reset --confirm-reset-beta-seed-content
 //
 // See scripts/beta-content/README.md for full documentation. Modeled
@@ -28,7 +29,7 @@ import { failureSummary, pickFirstValidCandidate } from './beta-content/media-pr
 import { resolveBetaSeedFontFile } from './beta-content/local-assets.mjs';
 import { assertSeedMediaRegistrationAvailable } from './beta-content/seed-media-ingest.mjs';
 
-const MODE_FLAGS = ['--dry-run', '--apply', '--report', '--reset'];
+const MODE_FLAGS = ['--dry-run', '--apply', '--report', '--reset', '--repair-visibility'];
 
 export function parseArgs(argv) {
   const flags = new Set(argv.filter((arg) => arg.startsWith('--')));
@@ -90,13 +91,25 @@ export function productionResetRequirements(args, env) {
   ];
 }
 
+export function productionRepairRequirements(args, env) {
+  return [
+    { ok: args.mode === 'repair-visibility', label: 'CLI mode must be --repair-visibility' },
+    { ok: Boolean(args.allowProduction), label: 'CLI flag --allow-production is required' },
+    { ok: Boolean(args.confirmProduction), label: 'CLI flag --confirm-production-beta-seed-content is required' },
+  ];
+}
+
 function formatMissingRequirements(requirements) {
   return requirements.filter((item) => !item.ok).map((item) => `  - ${item.label}`).join('\n');
 }
 
 export function assertProductionModeAllowed(args, env) {
   if (!isProductionLike(env)) return { production: false };
-  const requirements = args.mode === 'reset' ? productionResetRequirements(args, env) : productionApplyRequirements(args, env);
+  const requirements = args.mode === 'reset'
+    ? productionResetRequirements(args, env)
+    : args.mode === 'repair-visibility'
+      ? productionRepairRequirements(args, env)
+      : productionApplyRequirements(args, env);
   const missing = requirements.filter((item) => !item.ok);
   if (missing.length > 0) {
     throw new Error(
@@ -276,7 +289,7 @@ async function runDryRun() {
 }
 
 // ---------------------------------------------------------------------------
-// --apply / --report / --reset: run inside the media Docker container.
+// --apply / --report / --reset / --repair-visibility: run inside the media Docker container.
 // ---------------------------------------------------------------------------
 
 async function runInsideContainer(args) {
@@ -301,6 +314,13 @@ async function runInsideContainer(args) {
       const { resetBetaContent } = await import('./beta-content/reset.mjs');
       const result = await resetBetaContent(db);
       console.log(JSON.stringify({ mode: 'reset', result }, null, 2));
+      return;
+    }
+
+    if (mode === 'repair-visibility') {
+      const { repairSeedVisibility } = await import('./beta-content/repair-visibility.mjs');
+      const result = await repairSeedVisibility(db);
+      console.log(JSON.stringify({ mode: 'repair-visibility', result }, null, 2));
       return;
     }
 

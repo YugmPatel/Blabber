@@ -128,6 +128,10 @@ export async function ensureAccount(db, { ObjectId, accountSpec, now }) {
         lastSeen: now,
         updatedAt: now,
       },
+      $unset: {
+        deactivatedAt: '',
+        deletedAt: '',
+      },
     },
     { upsert: true }
   );
@@ -209,7 +213,17 @@ export async function applyPost(db, ObjectId, { author, postSpec, picked, valida
   const mediaId = idFor(ObjectId, postSpec.seedKey, 'media');
   const postId = idFor(ObjectId, postSpec.seedKey, 'post');
   const existing = await db.collection('posts').findOne({ _id: postId, discoverable: true });
-  if (existing) return { status: 'existing', postId, mediaId };
+  if (existing) {
+    await db.collection('posts').updateOne(
+      { _id: postId },
+      {
+        $set: { visibility: 'public', discoverable: true, updatedAt: now },
+        $unset: { deletedAt: '', hiddenAt: '', isHidden: '' },
+      }
+    );
+    await recordSeedTracking(db, { seedKey: postSpec.seedKey, kind: 'post', mongoId: postId, collection: 'posts', source: existing.importer || { source: 'generated' } });
+    return { status: 'existing', postId, mediaId };
+  }
 
   const mediaRoot = localMediaRoot(env);
   const localPath = join(mediaRoot, 'beta-content', 'photos', `${mediaId}.jpg`);
@@ -261,6 +275,7 @@ export async function applyPost(db, ObjectId, { author, postSpec, picked, valida
         importer: provenance,
         updatedAt: now,
       },
+      $unset: { deletedAt: '', hiddenAt: '', isHidden: '' },
     },
     { upsert: true }
   );
@@ -284,7 +299,23 @@ export async function applyReel(db, ObjectId, { author, reelSpec, picked, valida
   const mediaId = idFor(ObjectId, reelSpec.seedKey, 'media');
   const reelId = idFor(ObjectId, reelSpec.seedKey, 'reel');
   const existing = await db.collection('reels').findOne({ _id: reelId, processingStatus: 'ready', reelDiscoverable: true });
-  if (existing) return { status: 'existing', reelId, mediaId };
+  if (existing) {
+    await db.collection('reels').updateOne(
+      { _id: reelId },
+      {
+        $set: {
+          visibility: 'public',
+          reelDiscoverable: true,
+          publishState: 'published',
+          processingStatus: 'ready',
+          updatedAt: now,
+        },
+        $unset: { deletedAt: '', hiddenAt: '', isHidden: '' },
+      }
+    );
+    await recordSeedTracking(db, { seedKey: reelSpec.seedKey, kind: 'reel', mongoId: reelId, collection: 'reels', source: existing.importer || { source: 'generated' } });
+    return { status: 'existing', reelId, mediaId };
+  }
 
   const mediaRoot = localMediaRoot(env);
   const sourcePath = join(mediaRoot, 'reel-sources', `${mediaId}.mp4`);
@@ -341,7 +372,7 @@ export async function applyReel(db, ObjectId, { author, reelSpec, picked, valida
         importer: provenance,
         updatedAt: now,
       },
-      $unset: { fallbackPath: '', posterPath: '', hlsPlaylistPath: '', hlsSegments: '', deletedAt: '', moderationRemovedAt: '' },
+      $unset: { fallbackPath: '', posterPath: '', hlsPlaylistPath: '', hlsSegments: '', deletedAt: '', hiddenAt: '', isHidden: '', moderationRemovedAt: '' },
     },
     { upsert: true }
   );
@@ -379,10 +410,12 @@ export async function applyReel(db, ObjectId, { author, reelSpec, picked, valida
         reactionCounts: ready.reactionCounts || {},
         commentCount: ready.commentCount || 0,
         publishState: 'published',
+        processingStatus: 'ready',
         publishedAt: ready.publishedAt || new Date(now.getTime() - ordinal * 450_000),
         importer: provenance,
         updatedAt: now,
       },
+      $unset: { deletedAt: '', hiddenAt: '', isHidden: '' },
     }
   );
 
