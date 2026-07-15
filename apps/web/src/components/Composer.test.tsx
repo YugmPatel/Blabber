@@ -229,7 +229,7 @@ describe('Composer', () => {
 
     render(<Composer chatId="chat-1" />);
 
-    const fileInput = document.querySelector('input[accept="image/*"]') as HTMLInputElement;
+    const fileInput = screen.getByTestId('image-file-input') as HTMLInputElement;
     const file = new File(['test'], 'test.png', { type: 'image/png' });
 
     await user.upload(fileInput, file);
@@ -248,7 +248,7 @@ describe('Composer', () => {
     const input = screen.getByPlaceholderText(messagePlaceholder);
     await user.type(input, 'Check this out');
 
-    const fileInput = document.querySelector('input[accept="image/*"]') as HTMLInputElement;
+    const fileInput = screen.getByTestId('image-file-input') as HTMLInputElement;
     const file = new File(['test'], 'test.png', { type: 'image/png' });
 
     await user.upload(fileInput, file);
@@ -262,6 +262,97 @@ describe('Composer', () => {
         replyToId: undefined,
       }));
     });
+  });
+
+  it('sends message with mediaId after a successful document upload', async () => {
+    const user = userEvent.setup();
+    mockUploadFile.mockResolvedValue('media-doc-1');
+
+    render(<Composer chatId="chat-1" />);
+
+    const fileInput = screen.getByTestId('document-file-input') as HTMLInputElement;
+    const file = new File(['%PDF-1.4'], 'report.pdf', { type: 'application/pdf' });
+
+    await user.upload(fileInput, file);
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: 'chat-1',
+        body: 'report.pdf',
+        mediaId: 'media-doc-1',
+        mediaKind: 'document',
+        mediaFileName: 'report.pdf',
+        replyToId: undefined,
+      }));
+    });
+  });
+
+  it('shows a specific error and sends no message when a document upload fails', async () => {
+    const user = userEvent.setup();
+    mockUploadFile.mockResolvedValueOnce(null);
+    vi.mocked(useFileUpload).mockReturnValue({
+      uploadFile: mockUploadFile,
+      isUploading: false,
+      uploadProgress: null,
+      error: 'Upload rejected: too_large',
+      reset: vi.fn(),
+    });
+
+    render(<Composer chatId="chat-1" />);
+
+    const fileInput = screen.getByTestId('document-file-input') as HTMLInputElement;
+    const file = new File(['%PDF-1.4'], 'huge.pdf', { type: 'application/pdf' });
+
+    await user.upload(fileInput, file);
+
+    await waitFor(() => {
+      expect(screen.getByText('Document upload failed')).toBeInTheDocument();
+      expect(screen.getByText('Upload rejected: too_large')).toBeInTheDocument();
+    });
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('sends message with mediaId after a successful video upload', async () => {
+    const user = userEvent.setup();
+    mockUploadFile.mockResolvedValue('media-video-1');
+
+    render(<Composer chatId="chat-1" />);
+
+    const fileInput = screen.getByTestId('video-file-input') as HTMLInputElement;
+    const file = new File(['fake-mp4'], 'clip.mp4', { type: 'video/mp4' });
+
+    await user.upload(fileInput, file);
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: 'chat-1',
+        body: 'Video',
+        mediaId: 'media-video-1',
+        mediaKind: 'video',
+        replyToId: undefined,
+      }));
+    });
+  });
+
+  it('rejects an unsupported video type client-side with a clear message before uploading', async () => {
+    const user = userEvent.setup();
+
+    render(<Composer chatId="chat-1" />);
+
+    const fileInput = screen.getByTestId('video-file-input') as HTMLInputElement;
+    // Extension matches the input's accept list (so the browser/jsdom itself
+    // wouldn't filter the file out at the picker level), but the declared
+    // type is a trustworthy, genuinely unsupported one — this is the case
+    // Composer's own client-side type check is meant to catch.
+    const file = new File(['not really a video'], 'clip.mp4', { type: 'video/x-flv' });
+
+    await user.upload(fileInput, file);
+
+    await waitFor(() => {
+      expect(screen.getByText('Video not supported')).toBeInTheDocument();
+    });
+    expect(mockUploadFile).not.toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
   });
 
   it('shows upload progress during file upload', () => {

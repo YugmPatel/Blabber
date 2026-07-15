@@ -8,6 +8,7 @@ import {
   BarChart2,
   Calendar,
   Smile as SmileIcon,
+  Video as VideoIcon,
   X,
 } from 'lucide-react';
 import { useSendMessage } from '@/hooks/useSendMessage';
@@ -109,25 +110,39 @@ const STICKERS = [
   { emoji: '🚀', label: 'Launch' },
 ];
 
+// Kept in sync with services/media/src/media-policy.ts's DOCUMENT_TYPES —
+// RTF is deliberately NOT included: the backend has no RTF support, so
+// "accepting" it client-side would just fail server-side with a confusing
+// mismatch instead of a clear "unsupported type" message.
 const SUPPORTED_DOCUMENT_TYPES = new Set([
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'text/plain',
   'text/csv',
-  'application/rtf',
-  'text/rtf',
 ]);
 
 const SUPPORTED_IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'image/gif',
   'image/heic',
   'image/heif',
 ]);
+
+const SUPPORTED_VIDEO_TYPES = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
+
+// iOS Safari and various share-sheet apps frequently report a generic/blank
+// type instead of the real one — most often for HEIC photos and Office
+// documents. Treat these the same way the backend does: as "unknown," not
+// "wrong," so a real file with a trustworthy extension isn't rejected
+// client-side before it even reaches the upload that would have accepted it.
+const UNKNOWN_DECLARED_TYPES = new Set(['application/octet-stream', 'binary/octet-stream', '']);
 
 export const Composer = ({
   chatId,
@@ -166,6 +181,7 @@ export const Composer = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const actionMenuRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
 
@@ -321,7 +337,7 @@ export const Composer = ({
       if (!media) {
         setAttachmentNotice({
           title: 'Photo upload failed',
-          message: 'This photo could not be uploaded. Try another image.',
+          message: uploadError || 'This photo could not be uploaded. Try another image.',
         });
         return;
       }
@@ -444,28 +460,40 @@ export const Composer = ({
 
   // ── File / media handlers ─────────────────────────────────────────────
 
+  const fileTypeLabels: Record<'image' | 'document' | 'video', string> = {
+    image: 'Photo',
+    document: 'Document',
+    video: 'Video',
+  };
+
+  const supportedSetFor = (fileType: 'image' | 'document' | 'video') =>
+    fileType === 'image' ? SUPPORTED_IMAGE_TYPES : fileType === 'video' ? SUPPORTED_VIDEO_TYPES : SUPPORTED_DOCUMENT_TYPES;
+
+  const unsupportedTypeMessage: Record<'image' | 'document' | 'video', string> = {
+    image: 'This image type is not supported. JPG, PNG, GIF, WebP, and HEIC/HEIF photos can be sent.',
+    document: 'This document type is not supported. PDF, Word, Excel, PowerPoint, CSV, and TXT files can be sent.',
+    video: 'This video format is not supported. MP4, MOV, and WebM videos can be sent.',
+  };
+
   const handleFileSelect = async (
     e: ChangeEvent<HTMLInputElement>,
-    fileType: 'image' | 'document'
+    fileType: 'image' | 'document' | 'video'
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setShowActionMenu(false);
 
-    if (fileType === 'image' && file.type.startsWith('video/')) {
+    // A declared type the browser/OS couldn't determine (common for HEIC
+    // photos and Office documents, especially on iOS Safari) carries no
+    // signal — defer to the upload itself, which sniffs the actual file
+    // content, rather than rejecting a possibly-valid file on our own
+    // client-side guess.
+    const declaredType = (file.type || '').toLowerCase();
+    const hasTrustworthyDeclaredType = Boolean(declaredType) && !UNKNOWN_DECLARED_TYPES.has(declaredType);
+    if (hasTrustworthyDeclaredType && !supportedSetFor(fileType).has(declaredType)) {
       setAttachmentNotice({
-        title: 'Photos & videos',
-        message: 'Video upload is coming soon. Photos can be sent now.',
-      });
-      e.target.value = '';
-      return;
-    }
-
-    if (fileType === 'document' && file.type && !SUPPORTED_DOCUMENT_TYPES.has(file.type)) {
-      setAttachmentNotice({
-        title: 'Document upload coming soon',
-        message:
-          'This document type is not supported yet. PDF, Word, Excel, CSV, TXT, and RTF files can be sent now.',
+        title: `${fileTypeLabels[fileType]} not supported`,
+        message: unsupportedTypeMessage[fileType],
       });
       e.target.value = '';
       return;
@@ -474,14 +502,11 @@ export const Composer = ({
     const media = await uploadAttachment(file);
     if (!media) {
       setAttachmentNotice({
-        title: fileType === 'image' ? 'Photo upload failed' : 'Document upload failed',
-        message:
-          fileType === 'image'
-            ? 'This photo could not be uploaded. Try another image.'
-            : uploadError || 'We could not upload this document. Try again.',
+        title: `${fileTypeLabels[fileType]} upload failed`,
+        message: uploadError || `This ${fileType} could not be uploaded. Try again.`,
       });
     } else {
-      const body = message.trim() || (fileType === 'image' ? 'Photo' : file.name);
+      const body = message.trim() || (fileType === 'document' ? file.name : fileTypeLabels[fileType]);
       sendMessage({
         chatId,
         body,
@@ -500,6 +525,7 @@ export const Composer = ({
 
     if (imageInputRef.current) imageInputRef.current.value = '';
     if (documentInputRef.current) documentInputRef.current.value = '';
+    if (videoInputRef.current) videoInputRef.current.value = '';
   };
 
   const handleCameraCapture = async (file: File) => {
@@ -507,7 +533,7 @@ export const Composer = ({
     if (!media) {
       setAttachmentNotice({
         title: 'Camera upload failed',
-        message: 'This photo could not be uploaded. Try another image.',
+        message: uploadError || 'This photo could not be uploaded. Try another image.',
       });
     } else {
       sendMessage({
@@ -651,6 +677,12 @@ export const Composer = ({
       icon: Image,
       iconBg: 'bg-blue-500',
       action: () => imageInputRef.current?.click(),
+    },
+    {
+      label: 'Video',
+      icon: VideoIcon,
+      iconBg: 'bg-indigo-500',
+      action: () => videoInputRef.current?.click(),
     },
     {
       label: 'Camera',
@@ -814,16 +846,26 @@ export const Composer = ({
         <input
           ref={imageInputRef}
           type="file"
+          data-testid="image-file-input"
           className="hidden"
           onChange={(e) => handleFileSelect(e, 'image')}
-          accept=".jpg,.jpeg,.jpe,.jfif,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
+          accept=".jpg,.jpeg,.jpe,.jfif,.png,.webp,.gif,.heic,.heif,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif"
         />
         <input
           ref={documentInputRef}
           type="file"
+          data-testid="document-file-input"
           className="hidden"
           onChange={(e) => handleFileSelect(e, 'document')}
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv,application/rtf"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv"
+        />
+        <input
+          ref={videoInputRef}
+          type="file"
+          data-testid="video-file-input"
+          className="hidden"
+          onChange={(e) => handleFileSelect(e, 'video')}
+          accept=".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm"
         />
 
         {/* ── Text input ── */}

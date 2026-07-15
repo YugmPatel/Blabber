@@ -59,11 +59,34 @@ vi.mock('child_process', async () => {
 
 vi.mock('@repo/utils', () => ({
   asyncHandler: (fn: any) => fn,
+  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
 const userId = '507f1f77bcf86cd799439012';
 const otherUserId = '507f1f77bcf86cd799439013';
 const genericUploadMessage = 'This file could not be uploaded.';
+
+function makeMp4Buffer(size = 128) {
+  const buffer = Buffer.alloc(size, 1);
+  buffer.writeUInt32BE(24, 0);
+  buffer.write('ftyp', 4, 'ascii');
+  buffer.write('isom', 8, 'ascii');
+  return buffer;
+}
+
+function makeQuickTimeBuffer(size = 128) {
+  const buffer = Buffer.alloc(size, 1);
+  buffer.writeUInt32BE(24, 0);
+  buffer.write('ftyp', 4, 'ascii');
+  buffer.write('qt  ', 8, 'ascii');
+  return buffer;
+}
+
+function makeWebmBuffer(size = 128) {
+  const buffer = Buffer.alloc(size, 1);
+  Buffer.from([0x1a, 0x45, 0xdf, 0xa3]).copy(buffer, 0);
+  return buffer;
+}
 
 type StoredMedia = Record<string, any>;
 
@@ -210,7 +233,7 @@ describe('media local upload contract', () => {
     });
   });
 
-  it('returns generic validation errors for unsupported initiation metadata', async () => {
+  it('returns a specific "unsupported type" error for unsupported initiation metadata', async () => {
     const response = await request(app).post('/presign').send({
       fileName: 'test.exe',
       fileType: 'application/x-msdownload',
@@ -218,10 +241,11 @@ describe('media local upload contract', () => {
     });
 
     expect(response.status).toBe(400);
-    expect(response.body).toEqual({ error: 'Validation Error', message: genericUploadMessage });
+    expect(response.body.code).toBe('unsafe_type');
+    expect(response.body.message).not.toBe(genericUploadMessage);
   });
 
-  it('rejects video metadata from the general message upload initiation contract', async () => {
+  it('rejects video metadata from the avatar-only presign initiation contract (chat attachments use /multipart instead)', async () => {
     const response = await request(app).post('/presign').send({
       fileName: 'ordinary.mp4',
       fileType: 'video/mp4',
@@ -229,22 +253,30 @@ describe('media local upload contract', () => {
     });
 
     expect(response.status).toBe(400);
-    expect(response.body.message).toBe(genericUploadMessage);
+    expect(response.body.code).toBe('unsafe_type');
   });
 
-  it('rejects missing, zero, negative, and total-limit file sizes at initiation', async () => {
-    const cases = [
+  it('rejects missing/zero/negative file sizes with a specific error, and oversized ones as too_large', async () => {
+    const invalidSizeCases = [
       { fileName: 'test.png', fileType: 'image/png' },
       { fileName: 'test.png', fileType: 'image/png', fileSize: 0 },
       { fileName: 'test.png', fileType: 'image/png', fileSize: -1 },
-      { fileName: 'test.png', fileType: 'image/png', fileSize: 31 * 1024 * 1024 },
     ];
 
-    for (const body of cases) {
+    for (const body of invalidSizeCases) {
       const response = await request(app).post('/presign').send(body);
       expect(response.status).toBe(400);
-      expect(response.body.message).toBe(genericUploadMessage);
+      expect(response.body.code).toBe('unsafe_type');
     }
+
+    // beforeEach pins MEDIA_MESSAGE_TOTAL_BYTES to 30mb for this file's tests.
+    const tooLarge = await request(app).post('/presign').send({
+      fileName: 'test.png',
+      fileType: 'image/png',
+      fileSize: 31 * 1024 * 1024,
+    });
+    expect(tooLarge.status).toBe(400);
+    expect(tooLarge.body.code).toBe('too_large');
   });
 
   it('rejects unauthenticated initiation requests', async () => {
@@ -375,7 +407,7 @@ describe('media local upload contract', () => {
     for (const id of [validId, quarantinedId, deletedId, otherId, new ObjectId()]) {
       const response = await request(app).put(`/local/${id.toString()}`).set('Content-Type', 'image/png').send(makePngBuffer());
       expect(response.status).toBe(404);
-      expect(response.body.message).toBe(genericUploadMessage);
+      expect(response.body.code).toBe('not_found');
     }
 
     const retryRejected = await request(app).put(`/local/${rejectedId.toString()}`).set('Content-Type', 'image/png').send(makePngBuffer());
@@ -406,12 +438,12 @@ describe('media local upload contract', () => {
       .send(makePdfBuffer(128));
 
     expect(categoryLimit.status).toBe(400);
-    expect(categoryLimit.body.message).toBe(genericUploadMessage);
+    expect(categoryLimit.body.code).toBe('too_large');
     expect(declaredSize.status).toBe(400);
-    expect(declaredSize.body.message).toBe(genericUploadMessage);
+    expect(declaredSize.body.code).toBe('too_large');
   });
 
-  it('rejects malformed content and scanner failures with generic upload errors', async () => {
+  it('rejects malformed content with a mime_mismatch error and infected content with a malware_detected error', async () => {
     const malformed = await request(app).post('/presign').send({
       fileName: 'safe.png',
       fileType: 'image/png',
@@ -433,14 +465,28 @@ describe('media local upload contract', () => {
       .set('Content-Type', 'image/png')
       .send(makePngBuffer());
 
+    const unavailable = await request(app).post('/presign').send({
+      fileName: 'scanner-down.png',
+      fileType: 'image/png',
+      fileSize: 1024,
+    });
+    vi.mocked(scanBuffer).mockResolvedValueOnce({ ok: false, mode: 'clamav', category: 'scanner_unavailable' });
+    const unavailableUpload = await request(app)
+      .put(`/local/${unavailable.body.mediaId}`)
+      .set('Content-Type', 'image/png')
+      .send(makePngBuffer());
+
     expect(malformedUpload.status).toBe(400);
-    expect(malformedUpload.body.message).toBe(genericUploadMessage);
+    expect(malformedUpload.body.code).toBe('mime_mismatch');
+    expect(malformedUpload.body.message).not.toBe(genericUploadMessage);
     expect(infectedUpload.status).toBe(400);
-    expect(infectedUpload.body.message).toBe(genericUploadMessage);
+    expect(infectedUpload.body.code).toBe('malware_detected');
     expect(mediaDocs.find((doc) => doc._id.toString() === infected.body.mediaId)?.status).toBe('quarantined');
+    expect(unavailableUpload.status).toBe(400);
+    expect(unavailableUpload.body.code).toBe('scanner_unavailable');
   });
 
-  it('supports direct multipart upload only for the expected file field', async () => {
+  it('supports direct multipart upload only for the expected file field, with a specific "no file" error otherwise', async () => {
     const approved = await request(app)
       .post('/multipart')
       .attach('file', makePngBuffer(), { filename: 'direct.png', contentType: 'image/png' });
@@ -451,6 +497,96 @@ describe('media local upload contract', () => {
     expect(approved.status).toBe(201);
     expect(approved.body.status).toBe('approved');
     expect(wrongField.status).toBe(400);
-    expect(wrongField.body.message).toBe(genericUploadMessage);
+    expect(wrongField.body.code).toBe('no_file');
+  });
+
+  it('accepts a general chat-attachment video upload (mp4) — no longer gated behind reel_source', async () => {
+    const response = await request(app)
+      .post('/multipart')
+      .attach('file', makeMp4Buffer(), { filename: 'clip.mp4', contentType: 'video/mp4' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.status).toBe('approved');
+    expect(response.body.mimeType).toBe('video/mp4');
+  });
+
+  it('accepts .mov (video/quicktime) chat-attachment uploads', async () => {
+    const response = await request(app)
+      .post('/multipart')
+      .attach('file', makeQuickTimeBuffer(), { filename: 'clip.mov', contentType: 'video/quicktime' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.mimeType).toBe('video/quicktime');
+  });
+
+  it('categorizes a declared video/webm upload as video, not audio', async () => {
+    const response = await request(app)
+      .post('/multipart')
+      .attach('file', makeWebmBuffer(), { filename: 'clip.webm', contentType: 'video/webm' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.mimeType).toBe('video/webm');
+  });
+
+  it('still categorizes an undeclared/audio-declared .webm as audio (voice messages keep working)', async () => {
+    const response = await request(app)
+      .post('/multipart')
+      .attach('file', makeWebmBuffer(), { filename: 'voice.webm', contentType: 'audio/webm' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.mimeType).toBe('audio/webm');
+  });
+
+  it('accepts a GIF image upload', async () => {
+    const buffer = Buffer.alloc(64, 1);
+    buffer.write('GIF89a', 0, 'ascii');
+    const response = await request(app)
+      .post('/multipart')
+      .attach('file', buffer, { filename: 'funny.gif', contentType: 'image/gif' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.mimeType).toBe('image/gif');
+  });
+
+  it('accepts a PPTX document upload', async () => {
+    // A real .pptx is a zip container — reuse the OOXML detection path the
+    // same way .docx/.xlsx already do.
+    const buffer = Buffer.alloc(64, 1);
+    Buffer.from([0x50, 0x4b, 0x03, 0x04]).copy(buffer, 0);
+    const response = await request(app)
+      .post('/multipart')
+      .attach('file', buffer, {
+        filename: 'deck.pptx',
+        contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.mimeType).toBe(
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    );
+  });
+
+  it('accepts an iOS-style upload declared as application/octet-stream when the extension and content sniff agree', async () => {
+    const response = await request(app)
+      .post('/multipart')
+      .attach('file', makeHeicBuffer(), { filename: 'IMG_0001.heic', contentType: 'application/octet-stream' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.status).toBe('approved');
+  });
+
+  it('falls back to storing the original HEIC file when JPEG normalization fails, instead of rejecting the upload', async () => {
+    vi.mocked(execFile).mockImplementationOnce((command: string, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(new Error('heif-info not installed'));
+    });
+
+    const response = await request(app)
+      .post('/multipart')
+      .attach('file', makeHeicBuffer(), { filename: 'phone-photo.heic', contentType: 'image/heic' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.status).toBe('approved');
+    expect(response.body.mimeType).toBe('image/heic');
   });
 });

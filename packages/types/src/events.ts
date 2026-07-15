@@ -76,7 +76,7 @@ export interface MessageSentEvent extends BaseEvent {
     clientMessageId?: string;
     content: string;
     mediaUrl?: string;
-    mediaType?: 'image' | 'audio' | 'document';
+    mediaType?: 'image' | 'audio' | 'document' | 'video';
     chatType?: 'direct' | 'group';
     chatTitle?: string;
     participants?: string[];

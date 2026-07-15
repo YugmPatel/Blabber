@@ -44,8 +44,21 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
+const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  'application/pdf': 'PDF',
+  'application/msword': 'DOC',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+  'application/vnd.ms-excel': 'XLS',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
+  'application/vnd.ms-powerpoint': 'PPT',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PPTX',
+  'text/plain': 'TXT',
+  'text/csv': 'CSV',
+};
+
 function documentTypeLabel(mimeType?: string) {
   if (!mimeType) return 'Document';
+  if (DOCUMENT_TYPE_LABELS[mimeType]) return DOCUMENT_TYPE_LABELS[mimeType];
   const subtype = mimeType.split('/')[1]?.split(';')[0];
   return subtype ? subtype.toUpperCase() : 'Document';
 }
@@ -315,6 +328,44 @@ export default function MessageBubble({
     if (!mediaUrl) return null;
 
     if (type === 'image') {
+      // A HEIC/HEIF file here means server-side JPEG conversion couldn't run
+      // (see presign.ts's normalizeImageToJpeg fallback) — most browsers
+      // can't decode HEIC/HEIF in an <img> tag, so show an explicit
+      // "open original" card instead of a broken image icon.
+      const isUnpreviewableHeic = mimeType === 'image/heic' || mimeType === 'image/heif';
+      if (isUnpreviewableHeic) {
+        return (
+          <a
+            href={mediaUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`mb-1 flex w-full max-w-[20rem] items-center gap-3 rounded-xl border p-3 text-left transition ${
+              isSentByMe
+                ? 'border-teal-200 bg-white/70 text-slate-900 hover:bg-white dark:border-teal-400/25 dark:bg-white/10 dark:text-slate-100 dark:hover:bg-white/15'
+                : 'border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:bg-slate-900'
+            }`}
+          >
+            <span
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                isSentByMe
+                  ? 'bg-teal-600/10 text-teal-700 dark:bg-white/10 dark:text-teal-100'
+                  : 'bg-white text-slate-700 shadow-sm dark:bg-slate-800 dark:text-slate-200'
+              }`}
+            >
+              <ImageIcon className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold leading-5">
+                {fileName || 'Photo'}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
+                Preview not available for this format · tap to open
+              </span>
+            </span>
+          </a>
+        );
+      }
+
       return (
         <img
           src={previewUrl}
@@ -322,6 +373,27 @@ export default function MessageBubble({
           className="max-w-xs rounded-lg mb-1 cursor-pointer hover:opacity-90"
           onClick={() => window.open(mediaUrl, '_blank')}
         />
+      );
+    }
+
+    if (type === 'video') {
+      return (
+        <div className="mb-1">
+          <video
+            key={mediaUrl}
+            controls
+            preload="metadata"
+            aria-label={fileName || 'Shared video'}
+            className="max-h-72 max-w-xs rounded-lg"
+          >
+            <source src={mediaUrl} type={mimeType || 'video/mp4'} />
+            Your browser does not support playing this video.{' '}
+            <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="underline">
+              Open it instead
+            </a>
+            .
+          </video>
+        </div>
       );
     }
 

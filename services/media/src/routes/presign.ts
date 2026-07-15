@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { execFile } from 'child_process';
 import { ObjectId } from 'mongodb';
-import { asyncHandler } from '@repo/utils';
+import { asyncHandler, logger } from '@repo/utils';
 import { getDatabase } from '../db';
 import { getMediaCollection, Media } from '../models/media';
 import {
@@ -21,7 +21,16 @@ import { scanBuffer } from '../media-scanner';
 
 const LOCAL_MEDIA_DIR = process.env.LOCAL_MEDIA_DIR || '/tmp/blabber-media';
 const MULTIPART_FIELD_NAME = 'file';
-const MESSAGE_TOTAL_ATTACHMENT_BYTES = Number(process.env.MEDIA_MESSAGE_TOTAL_BYTES || 30 * 1024 * 1024);
+// Pre-category-detection sanity ceiling only (we don't know the file's
+// category — image/audio/document/video — until validateMediaPolicy runs).
+// Must stay >= the largest per-category limit (video, 100mb) or it would
+// silently override that limit for every upload before category-specific
+// checks ever run. A function (like maxBytesForCategory in media-policy.ts)
+// rather than a module-level constant, so it reflects env var changes made
+// after this module first loads instead of freezing the value at import time.
+function messageTotalAttachmentBytes() {
+  return Number(process.env.MEDIA_MESSAGE_TOTAL_BYTES || 105 * 1024 * 1024);
+}
 const GENERIC_UPLOAD_ERROR = 'This file could not be uploaded.';
 const execFileAsync = promisify(execFile);
 const HEIC_DECODE_TIMEOUT_MS = Number(process.env.MEDIA_HEIC_DECODE_TIMEOUT_MS || 10_000);
@@ -29,8 +38,32 @@ const MAX_IMAGE_WIDTH = Number(process.env.MEDIA_MAX_IMAGE_WIDTH || 12_000);
 const MAX_IMAGE_HEIGHT = Number(process.env.MEDIA_MAX_IMAGE_HEIGHT || 12_000);
 const MAX_IMAGE_PIXELS = Number(process.env.MEDIA_MAX_IMAGE_PIXELS || 80_000_000);
 
-function uploadValidationError(res: Response, status = 400) {
-  return res.status(status).json({ error: status === 404 ? 'Not Found' : 'Validation Error', message: GENERIC_UPLOAD_ERROR });
+// Specific, user-facing messages for every known failure reason. Every
+// caller of uploadValidationError should pass one of these codes instead of
+// relying on the generic fallback, per the P0 requirement that upload
+// failures explain themselves instead of all reading "could not be
+// uploaded."
+const UPLOAD_ERROR_MESSAGES: Record<string, string> = {
+  no_file: 'No file was received. Please try again.',
+  too_large: 'This file is too large to send.',
+  unsafe_type: 'This file type is not supported here.',
+  deceptive_extension: 'This file name looks suspicious and cannot be sent.',
+  mime_mismatch: "This file's contents don't match its file type and cannot be sent.",
+  invalid_image_dimensions: 'This image is too large or too small to process.',
+  image_processing_failed: 'This photo could not be processed. Try a different photo or convert it to JPG first.',
+  malware_detected: 'This file failed a security scan and cannot be sent.',
+  scanner_unavailable: "We couldn't scan this file for safety right now. Please try again in a moment.",
+  quota_exceeded: "You've reached your daily upload limit. Try again tomorrow.",
+  not_found: 'This upload could not be found. Please try uploading again.',
+  server_error: 'Something went wrong uploading this file. Please try again.',
+};
+
+function uploadValidationError(res: Response, code: keyof typeof UPLOAD_ERROR_MESSAGES | string = 'server_error', status = 400) {
+  return res.status(status).json({
+    error: status === 404 ? 'Not Found' : 'Validation Error',
+    message: UPLOAD_ERROR_MESSAGES[code] || GENERIC_UPLOAD_ERROR,
+    code,
+  });
 }
 
 function shouldNormalizeImage(mimeType: string) {
@@ -271,22 +304,28 @@ async function approveLocalBuffer(params: {
   const { req, res, userId, buffer } = params;
   const userObjectId = new ObjectId(userId);
 
-  if (buffer.length === 0 || buffer.length > MESSAGE_TOTAL_ATTACHMENT_BYTES) return uploadValidationError(res);
+  if (buffer.length === 0) return uploadValidationError(res, 'unsafe_type');
+  if (buffer.length > messageTotalAttachmentBytes()) return uploadValidationError(res, 'too_large');
 
   let policy;
   try {
     policy = validateMediaPolicy({ fileName: params.fileName, declaredMimeType: params.declaredMimeType, buffer });
-  } catch {
-    return uploadValidationError(res);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'unsafe_type';
+    return uploadValidationError(res, code);
   }
-  if (policy.category === 'video' && params.mediaDoc?.purpose !== 'reel_source') return uploadValidationError(res);
+  // General chat/group attachment uploads (this route) now accept video
+  // directly — no transcoding is performed, so playback depends on browser
+  // support for the uploaded container/codec (see media-policy.ts). Reels
+  // and moment videos are unaffected: they go through their own dedicated
+  // upload routes (routes/reels.ts, routes/moment-videos.ts), never this one.
 
-  if (buffer.length > maxBytesForCategory(policy.category)) return uploadValidationError(res);
+  if (buffer.length > maxBytesForCategory(policy.category)) return uploadValidationError(res, 'too_large');
 
   try {
     await assertUserUploadQuota(userObjectId, buffer.length);
   } catch {
-    return uploadValidationError(res, 429);
+    return uploadValidationError(res, 'quota_exceeded', 429);
   }
 
   const mediaId = params.mediaId || new ObjectId();
@@ -343,7 +382,7 @@ async function approveLocalBuffer(params: {
         },
       }
     );
-    return uploadValidationError(res);
+    return uploadValidationError(res, scan.category === 'infected' ? 'malware_detected' : 'scanner_unavailable');
   }
 
   if (shouldNormalize) {
@@ -353,20 +392,36 @@ async function approveLocalBuffer(params: {
       approvedFileName = normalized.fileName;
       approvedMimeType = normalized.mimeType;
       approvedExtension = normalized.extension;
-    } catch {
-      await mediaCollection.updateOne(
-        { _id: mediaId },
-        {
-          $set: {
-            status: 'rejected',
-            scanMode: scan.mode,
-            scanResult: 'clean',
-            scanErrorCategory: undefined,
-            rejectedAt: new Date(),
-          },
-        }
-      );
-      return uploadValidationError(res);
+    } catch (error) {
+      if (isHeicOrHeif(policy.mimeType)) {
+        // We couldn't produce a JPEG preview (missing/failed heif-convert or
+        // ffmpeg, an unusual HEIC variant, etc.) — rather than silently
+        // rejecting a genuinely valid iPhone photo, fall back to storing the
+        // original HEIC/HEIF file as-is. The frontend shows a "preview not
+        // available, tap to open" state for images it can't decode inline
+        // instead of a broken <img>.
+        logger.warn(
+          { error, fileName: params.fileName, mimeType: policy.mimeType },
+          'HEIC/HEIF normalization failed; falling back to storing the original file'
+        );
+      } else {
+        const code = error instanceof Error && error.message === 'invalid_image_dimensions'
+          ? 'invalid_image_dimensions'
+          : 'image_processing_failed';
+        await mediaCollection.updateOne(
+          { _id: mediaId },
+          {
+            $set: {
+              status: 'rejected',
+              scanMode: scan.mode,
+              scanResult: 'clean',
+              scanErrorCategory: undefined,
+              rejectedAt: new Date(),
+            },
+          }
+        );
+        return uploadValidationError(res, code);
+      }
     }
   }
 
@@ -439,7 +494,7 @@ export const uploadMultipartMedia = asyncHandler(async (req: Request, res: Respo
   }
 
   const file = parseMultipartUpload(req)?.file;
-  if (!file || file.fieldName !== MULTIPART_FIELD_NAME) return uploadValidationError(res);
+  if (!file || file.fieldName !== MULTIPART_FIELD_NAME) return uploadValidationError(res, 'no_file');
 
   return approveLocalBuffer({
     req,
@@ -460,13 +515,17 @@ export const presign = asyncHandler(async (req: Request, res: Response) => {
   const fileName = sanitizeDisplayFileName(String(req.body?.fileName || ''));
   const declaredType = normalizeDeclaredMimeType(String(req.body?.fileType || ''));
   const fileSize = Number(req.body?.fileSize || 0);
-  if (!fileName || !Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MESSAGE_TOTAL_ATTACHMENT_BYTES) {
-    return uploadValidationError(res);
-  }
+  if (!fileName) return uploadValidationError(res, 'unsafe_type');
+  if (!Number.isFinite(fileSize) || fileSize <= 0) return uploadValidationError(res, 'unsafe_type');
+  if (fileSize > messageTotalAttachmentBytes()) return uploadValidationError(res, 'too_large');
   if (declaredType && !allowedMimeTypes().includes(declaredType)) {
-    return uploadValidationError(res);
+    return uploadValidationError(res, 'unsafe_type');
   }
-  if (declaredType === 'video/mp4') return uploadValidationError(res);
+  // This presign+PUT flow is only used for avatar uploads (profile/group
+  // photo) — never chat/group message attachments, which go through
+  // uploadMultipartMedia above and now accept video. Avatars staying
+  // image-only is intentional and unrelated to that.
+  if (declaredType === 'video/mp4') return uploadValidationError(res, 'unsafe_type');
 
   const extension = safeExtension(fileName);
   const mediaId = new ObjectId();
@@ -504,10 +563,10 @@ export const uploadLocalMedia = asyncHandler(async (req: Request, res: Response)
   if (!userId || !ObjectId.isValid(userId)) {
     return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
   }
-  if (!ObjectId.isValid(req.params.id)) return uploadValidationError(res, 404);
+  if (!ObjectId.isValid(req.params.id)) return uploadValidationError(res, 'not_found', 404);
 
   const uploadBody = req.body;
-  if (!Buffer.isBuffer(uploadBody) || uploadBody.length === 0) return uploadValidationError(res);
+  if (!Buffer.isBuffer(uploadBody) || uploadBody.length === 0) return uploadValidationError(res, 'unsafe_type');
 
   const mediaId = new ObjectId(req.params.id);
   const mediaDoc = await getMediaCollection().findOne({
@@ -517,9 +576,9 @@ export const uploadLocalMedia = asyncHandler(async (req: Request, res: Response)
     status: { $in: ['pending', 'rejected'] },
   });
 
-  if (!mediaDoc?.localPath) return uploadValidationError(res, 404);
-  if (uploadBody.length > mediaDoc.fileSize || uploadBody.length > MESSAGE_TOTAL_ATTACHMENT_BYTES) {
-    return uploadValidationError(res);
+  if (!mediaDoc?.localPath) return uploadValidationError(res, 'not_found', 404);
+  if (uploadBody.length > mediaDoc.fileSize || uploadBody.length > messageTotalAttachmentBytes()) {
+    return uploadValidationError(res, 'too_large');
   }
 
   return approveLocalBuffer({

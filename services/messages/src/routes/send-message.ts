@@ -13,7 +13,7 @@ import { unarchiveChatForParticipants } from '../chat-state';
 import { parseEventDate, validateMeetingUrl, validateTimezone } from '../event-utils';
 import { resolveShareablePost, resolveShareableReel } from '../shared-item-access';
 
-function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' {
+function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' | 'video' {
   if (fileType.startsWith('image/')) {
     return 'image';
   }
@@ -22,10 +22,22 @@ function getMessageMediaType(fileType: string): 'image' | 'audio' | 'document' {
     return 'audio';
   }
 
+  if (fileType.startsWith('video/')) {
+    return 'video';
+  }
+
   return 'document';
 }
 
-const MESSAGE_TOTAL_ATTACHMENT_BYTES = Number(process.env.MEDIA_MESSAGE_TOTAL_BYTES || 30 * 1024 * 1024);
+// Pre-category-detection sanity ceiling only — see the matching function and
+// comment in services/media/src/routes/presign.ts. Must stay >= the largest
+// per-category limit (video, 100mb by default) or it would silently
+// override that limit here too, since this is the last check the media
+// document has to pass before a message can reference it. Read fresh (not a
+// frozen const) so per-test/per-process env overrides are respected.
+function messageTotalAttachmentBytes() {
+  return Number(process.env.MEDIA_MESSAGE_TOTAL_BYTES || 105 * 1024 * 1024);
+}
 const MEDIA_UPLOAD_ERROR = 'This file could not be uploaded.';
 
 function normalizedPollOption(option: string) {
@@ -131,7 +143,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
         return;
       }
 
-      if ((mediaDoc.storage === 'local' && !mediaDoc.uploadedAt) || mediaDoc.fileSize > MESSAGE_TOTAL_ATTACHMENT_BYTES) {
+      if ((mediaDoc.storage === 'local' && !mediaDoc.uploadedAt) || mediaDoc.fileSize > messageTotalAttachmentBytes()) {
         res.status(400).json({
           error: 'Bad Request',
           message: MEDIA_UPLOAD_ERROR,

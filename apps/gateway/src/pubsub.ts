@@ -60,6 +60,7 @@ function buildMessagePreview(event: MessageSentEvent) {
   const text = (event.data.content || event.data.message?.body || '').trim();
 
   if (mediaType === 'image') return `${senderName} sent an image`;
+  if (mediaType === 'video') return `${senderName} sent a video`;
   if (mediaType === 'audio') return `${senderName} sent a voice message`;
   if (mediaType === 'document') return `${senderName} sent a document`;
   if (text) return `${senderName}: ${text.slice(0, 140)}`;

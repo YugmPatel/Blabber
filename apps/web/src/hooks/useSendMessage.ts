@@ -16,7 +16,7 @@ interface SendMessageParams {
   chatId: string;
   body: string;
   mediaId?: string;
-  mediaKind?: 'image' | 'audio' | 'document';
+  mediaKind?: 'image' | 'audio' | 'document' | 'video';
   mediaUrl?: string;
   mediaFileName?: string;
   mediaMimeType?: string;

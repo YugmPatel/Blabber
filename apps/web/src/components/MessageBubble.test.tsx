@@ -131,6 +131,54 @@ describe('MessageBubble', () => {
     expect(screen.getAllByText('Document')).not.toHaveLength(0);
   });
 
+  it('labels a PPTX document attachment with its specific type', () => {
+    const messageWithPptx: Message = {
+      ...mockMessage,
+      media: {
+        type: 'document',
+        url: 'https://example.com/deck.pptx',
+        fileName: 'deck.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      },
+    };
+    render(<MessageBubble message={messageWithPptx} isSentByMe={false} />);
+    expect(screen.getByText(/PPTX/)).toBeInTheDocument();
+  });
+
+  it('renders a playable video element for video media', () => {
+    const messageWithVideo: Message = {
+      ...mockMessage,
+      media: {
+        type: 'video',
+        url: 'https://example.com/clip.mp4',
+        fileName: 'clip.mp4',
+        mimeType: 'video/mp4',
+      },
+    };
+    const { container } = render(<MessageBubble message={messageWithVideo} isSentByMe={false} />);
+    const video = container.querySelector('video');
+    expect(video).toBeInTheDocument();
+    const source = container.querySelector('video source');
+    expect(source).toHaveAttribute('src', 'https://example.com/clip.mp4');
+    expect(source).toHaveAttribute('type', 'video/mp4');
+  });
+
+  it('shows a no-preview card instead of a broken image for HEIC media', () => {
+    const messageWithHeic: Message = {
+      ...mockMessage,
+      media: {
+        type: 'image',
+        url: 'https://example.com/photo.heic',
+        fileName: 'IMG_1234.heic',
+        mimeType: 'image/heic',
+      },
+    };
+    render(<MessageBubble message={messageWithHeic} isSentByMe={false} />);
+    expect(screen.queryByAltText('Shared image')).not.toBeInTheDocument();
+    expect(screen.getByText(/Preview not available for this format/)).toBeInTheDocument();
+    expect(screen.getByText('IMG_1234.heic')).toBeInTheDocument();
+  });
+
   it('renders formatted time', () => {
     render(<MessageBubble message={mockMessage} isSentByMe={false} />);
     // Time format will vary by locale, just check it exists

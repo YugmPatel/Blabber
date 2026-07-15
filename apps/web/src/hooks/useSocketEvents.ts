@@ -94,6 +94,7 @@ function markMessageFailedInData(
 
 function mediaPreviewText(message: Message) {
   if (message.media?.type === 'image') return 'Sent an image';
+  if (message.media?.type === 'video') return 'Sent a video';
   if (message.media?.type === 'audio') return 'Sent a voice message';
   if (message.media?.type === 'document') return 'Sent a document';
   if (message.type === 'poll') return 'Sent a poll';

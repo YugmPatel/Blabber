@@ -13,10 +13,10 @@ export interface Message {
   chatId: string;
   senderId: string;
   clientMessageId?: string;
-  type?: 'text' | 'image' | 'audio' | 'document' | 'poll' | 'sticker' | 'event';
+  type?: 'text' | 'image' | 'audio' | 'document' | 'video' | 'poll' | 'sticker' | 'event';
   body: string;
   media?: {
-    type: 'image' | 'audio' | 'document';
+    type: 'image' | 'audio' | 'document' | 'video';
     url: string;
     mediaId?: string;
     storageKey?: string;
@@ -141,10 +141,10 @@ export const MessageSchema = z.object({
   chatId: z.string(),
   senderId: z.string(),
   clientMessageId: z.string().optional(),
-  type: z.enum(['text', 'image', 'audio', 'document', 'poll', 'sticker', 'event']).optional(),
+  type: z.enum(['text', 'image', 'audio', 'document', 'video', 'poll', 'sticker', 'event']).optional(),
   body: z.string().max(10000),
   media: z.object({
-    type: z.enum(['image', 'audio', 'document']),
+    type: z.enum(['image', 'audio', 'document', 'video']),
     url: z.string().url(),
     mediaId: z.string().optional(),
     storageKey: z.string().optional(),
@@ -228,7 +228,7 @@ export const MessageSchema = z.object({
     body: z.string(),
     senderId: z.string(),
     senderDisplayName: z.string().optional(),
-    messageType: z.enum(['text', 'image', 'audio', 'document', 'poll', 'sticker', 'event']).optional(),
+    messageType: z.enum(['text', 'image', 'audio', 'document', 'video', 'poll', 'sticker', 'event']).optional(),
     snippet: z.string().optional(),
     attachmentLabel: z.string().optional(),
     unavailable: z.boolean().optional(),

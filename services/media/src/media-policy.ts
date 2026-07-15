@@ -12,6 +12,7 @@ const IMAGE_TYPES: Record<string, string[]> = {
   'image/jpeg': ['.jpg', '.jpeg', '.jpe', '.jfif'],
   'image/png': ['.png'],
   'image/webp': ['.webp'],
+  'image/gif': ['.gif'],
   'image/heic': ['.heic'],
   'image/heif': ['.heif'],
 };
@@ -22,6 +23,13 @@ const MIME_ALIASES: Record<string, string> = {
   'image/x-citrix-jpeg': 'image/jpeg',
   'image/x-png': 'image/png',
 };
+
+// Declared Content-Types that mean "the browser/OS doesn't actually know" —
+// common from iOS Safari and various share-sheet apps for HEIC photos and
+// Office documents. Rejecting on these alone throws out otherwise-valid
+// uploads; treat them as "no declared type" and defer entirely to the
+// extension + sniffed-content match instead.
+const UNKNOWN_DECLARED_TYPES = new Set(['application/octet-stream', 'binary/octet-stream', '']);
 
 const AUDIO_TYPES: Record<string, string[]> = {
   'audio/mpeg': ['.mp3'],
@@ -37,6 +45,15 @@ const AUDIO_TYPES: Record<string, string[]> = {
 
 const VIDEO_TYPES: Record<string, string[]> = {
   'video/mp4': ['.mp4'],
+  'video/quicktime': ['.mov'],
+  // Deliberately maps to no extension: .webm is shared with AUDIO_TYPES
+  // (voice messages upload as audio/webm) and the container's EBML magic
+  // bytes can't tell audio-only and video WebM apart. 'video/webm' still
+  // needs to be a recognized category member (for the category lookup
+  // below) without claiming the .webm entry in EXTENSION_TO_MIME — the
+  // .webm disambiguation in validateMediaPolicy resolves it case-by-case
+  // from the browser-declared type instead.
+  'video/webm': [],
 };
 
 const DOCUMENT_TYPES: Record<string, string[]> = {
@@ -84,6 +101,12 @@ export function detectMimeType(buffer: Buffer): string | null {
     const compatibleBrands = buffer.toString('ascii', 8, Math.min(buffer.length, 64)).toLowerCase();
     if (['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis'].includes(brand) || compatibleBrands.includes('heic')) return 'image/heic';
     if (['heif', 'mif1', 'msf1'].includes(brand) || compatibleBrands.includes('heif')) return 'image/heif';
+    // 'qt  ' (with trailing spaces) is QuickTime's major brand. Not every
+    // .mov carries it cleanly (some place it only in compatible brands, or
+    // omit ftyp altogether), so this is a best-effort precise match — the
+    // generic ftyp->video/mp4 fallback below plus validateMediaPolicy's
+    // extension-based alias exception cover the rest.
+    if (brand === 'qt  ' || compatibleBrands.includes('qt  ')) return 'video/quicktime';
   }
   if (buffer.length >= 4 && buffer.toString('ascii', 0, 4) === '%PDF') return 'application/pdf';
   if (buffer.length >= 3 && buffer.toString('ascii', 0, 3) === 'ID3') return 'audio/mpeg';
@@ -130,8 +153,20 @@ export function validateMediaPolicy(params: {
 
   const detected = detectMimeType(params.buffer);
   const declared = normalizeDeclaredMimeType(params.declaredMimeType);
-  const expectedByExtension = EXTENSION_TO_MIME.get(extension);
+  // A declared type the browser/OS effectively couldn't determine (common
+  // for HEIC photos and Office documents on iOS Safari) carries no signal —
+  // treat it as absent and defer entirely to extension + content sniffing.
+  const hasTrustworthyDeclaredType = Boolean(declared) && !UNKNOWN_DECLARED_TYPES.has(declared);
+  let expectedByExtension = EXTENSION_TO_MIME.get(extension);
   if (!expectedByExtension) throw new Error('unsafe_type');
+
+  // .webm is shared between voice-message audio and video attachments; the
+  // container's EBML magic bytes can't tell them apart, so when the browser
+  // clearly declares video/webm, resolve the expected type to video instead
+  // of the audio default.
+  if (extension === '.webm' && hasTrustworthyDeclaredType && declared === 'video/webm') {
+    expectedByExtension = 'video/webm';
+  }
 
   const isOoxml =
     detected === 'application/zip' &&
@@ -150,11 +185,27 @@ export function validateMediaPolicy(params: {
   const m4aFamily = ['audio/mp4', 'audio/x-m4a', 'audio/m4a'];
   const isM4aExpected = m4aFamily.includes(expectedByExtension);
   const isMp4Family = detected === 'video/mp4' && isM4aExpected;
+  // Mirror image of the m4a case: EBML sniffing always reports 'audio/webm'
+  // for both audio-only and video WebM containers, so a video/webm target
+  // (resolved above from the declared type) must not be rejected just
+  // because the raw sniff can't see past the shared container format.
+  const isWebmFamily = extension === '.webm' && detected === 'audio/webm' && expectedByExtension === 'video/webm';
+  // .mov files don't always carry a cleanly-recognized 'qt  ' brand, so the
+  // sniffer's fallback for any other ftyp-boxed file ('video/mp4') needs to
+  // be accepted for a .mov extension too rather than treated as a mismatch.
+  const isMovFamily = extension === '.mov' && detected === 'video/mp4' && expectedByExtension === 'video/quicktime';
 
-  if (!detected || (!isOoxml && !isCsv && !isMp4Family && detected !== expectedByExtension)) {
+  if (
+    !detected ||
+    (!isOoxml && !isCsv && !isMp4Family && !isWebmFamily && !isMovFamily && detected !== expectedByExtension)
+  ) {
     throw new Error('mime_mismatch');
   }
-  if (declared && declared !== expectedByExtension && !(isM4aExpected && m4aFamily.includes(declared))) {
+  if (
+    hasTrustworthyDeclaredType &&
+    declared !== expectedByExtension &&
+    !(isM4aExpected && m4aFamily.includes(declared))
+  ) {
     throw new Error('mime_mismatch');
   }
 
@@ -169,9 +220,19 @@ export function validateMediaPolicy(params: {
   return { category, mimeType: expectedByExtension, extension };
 }
 
+// Production-reasonable per-category ceilings (see docs/production-config for
+// how to override via env). Chosen to comfortably cover real phone-camera
+// output and typical office documents without being unsafely large for a
+// single chat attachment:
+//   image:    15 MB (a full-resolution phone photo, incl. HEIC, rarely exceeds ~8-12 MB)
+//   audio:    25 MB (a multi-minute voice note at typical bitrates)
+//   document: 25 MB (covers large PDFs/decks with embedded images)
+//   video:    100 MB (a couple of minutes of phone video; matches the existing
+//             reel/moment video ceiling and the 110mb proxy body limit already
+//             configured for those upload routes)
 export function maxBytesForCategory(category: MediaCategory) {
-  if (category === 'image') return Number(process.env.MEDIA_MAX_IMAGE_BYTES || 10 * 1024 * 1024);
-  if (category === 'video') return Number(process.env.REEL_MAX_SOURCE_BYTES || 100 * 1024 * 1024);
+  if (category === 'image') return Number(process.env.MEDIA_MAX_IMAGE_BYTES || 15 * 1024 * 1024);
+  if (category === 'video') return Number(process.env.MEDIA_MAX_VIDEO_BYTES || process.env.REEL_MAX_SOURCE_BYTES || 100 * 1024 * 1024);
   if (category === 'audio') return Number(process.env.MEDIA_MAX_AUDIO_BYTES || 25 * 1024 * 1024);
   return Number(process.env.MEDIA_MAX_DOCUMENT_BYTES || 25 * 1024 * 1024);
 }

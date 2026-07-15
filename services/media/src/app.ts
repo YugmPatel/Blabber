@@ -117,8 +117,12 @@ import {
   uploadMomentVideoSource,
 } from './routes/moment-videos';
 app.post('/presign', authMiddleware, presign);
-app.post('/upload', authMiddleware, express.raw({ type: 'multipart/form-data', limit: '50mb' }), uploadMultipartMedia);
-app.put('/local/:id', authMiddleware, express.raw({ type: '*/*', limit: '50mb' }), uploadLocalMedia);
+// 110mb headroom above the 100mb video ceiling (maxBytesForCategory) for
+// multipart/raw-body overhead — matches the reel/moment video upload routes
+// below, which hit the same "video needs more than the old 50mb body limit"
+// constraint.
+app.post('/upload', authMiddleware, express.raw({ type: 'multipart/form-data', limit: '110mb' }), uploadMultipartMedia);
+app.put('/local/:id', authMiddleware, express.raw({ type: '*/*', limit: '110mb' }), uploadLocalMedia);
 app.get('/local/:id', getLocalMedia);
 app.get('/link-preview', linkPreview);
 app.post('/moment-videos/upload-init', authMiddleware, initiateMomentVideoUpload);
