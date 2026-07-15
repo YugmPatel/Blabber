@@ -71,6 +71,12 @@ pnpm seed:beta-content:apply
 # tracking collection), grouped by kind and by source provider.
 pnpm seed:beta-content:report
 
+# Read-only eligibility probe for the web surfaces. This does not reset,
+# apply, or mutate seed data; it prints counts for content that should pass
+# the broad Feed Featured, Reels Browse/For You fallback, and Discover
+# creator/post checks.
+node scripts/beta-content/diagnose-eligibility.mjs
+
 # Remove beta content (soft-hide posts/reels, deactivate the demo accounts,
 # hard-delete their reactions/comments/follows). Requires an explicit
 # confirmation flag or it refuses to run.
@@ -128,6 +134,13 @@ pnpm test:beta-content
    Mongo upserts (there's no HTTP route for backfilling historical-looking
    engagement), keeping the denormalized `reactionCounts`/`commentCount`
    caches on each post/reel in sync.
+
+The app surfaces seeded content through the normal public/discoverable query
+paths, not seed-only bypasses. Feed Featured uses public discoverable posts
+from public discoverable creators; Reels Browse and Reels For You fallback use
+public published ready Reels with approved source media and generated playback
+derivatives; Discover For You falls back to eligible public posts when a new
+viewer has no personalization candidates.
 
 If apply ever reports a `401` from seed media registration/upload, treat it
 as a programming/configuration error: the seed path should not depend on

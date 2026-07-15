@@ -61,6 +61,8 @@ const TOPICS = new Set([
   'technology', 'artificial_intelligence', 'software_engineering', 'startups', 'business', 'finance', 'education', 'careers',
   'design', 'gaming', 'sports', 'fitness', 'health', 'food', 'travel', 'photography', 'music', 'film', 'books', 'science',
   'parenting', 'pets', 'home', 'fashion', 'comedy',
+  'movies_tv', 'home_lifestyle',
+  'blabber_tips', 'campus_life', 'tech_ai', 'food_cafes', 'san_jose', 'study_productivity', 'events', 'housing_roommates',
 ]);
 
 const uploadInitSchema = z.object({
@@ -540,51 +542,63 @@ async function buildReelForYouSession(viewerUserId: ObjectId, personalized: bool
     recentReelSignals(viewerUserId),
   ]);
   const followedTopics = new Set<string>(personalized ? pref?.followedTopicIds || [] : []);
-  const candidates = await getReelsCollection()
+  const baseQuery: any = {
+    reelDiscoverable: true,
+    publishState: 'published',
+    processingStatus: 'ready',
+    visibility: 'public',
+    deletedAt: { $exists: false },
+    moderationRemovedAt: { $exists: false },
+    authorUserId: { $ne: viewerUserId },
+  };
+  const loadCandidates = (useFreshWindow: boolean) => getReelsCollection()
     .find({
-      reelDiscoverable: true,
-      publishState: 'published',
-      processingStatus: 'ready',
-      visibility: 'public',
-      deletedAt: { $exists: false },
-      moderationRemovedAt: { $exists: false },
-      authorUserId: { $ne: viewerUserId },
-      publishedAt: { $gte: new Date(now.getTime() - REEL_FOR_YOU_CANDIDATE_WINDOW_MS) },
-    })
+      ...baseQuery,
+      ...(useFreshWindow ? {
+        publishedAt: { $gte: new Date(now.getTime() - REEL_FOR_YOU_CANDIDATE_WINDOW_MS) },
+      } : {}),
+    } as any)
     .sort({ publishedAt: -1, _id: -1 })
     .limit(REEL_FOR_YOU_MAX_CANDIDATES)
-    .toArray() as ReelDocument[];
-  const ranked: Array<{ reel: ReelDocument; score: number; explanation: Omit<ReelForYouExplanationSnapshot, 'reelId'> }> = [];
-  for (const reel of candidates) {
-    if (reel.authorUserId.equals(viewerUserId)) continue;
-    if (!(await isBrowseEligibleForViewer(reel, viewerUserId))) continue;
-    const topicIds = (reel.reelTopicIds || []).filter((topicId) => TOPICS.has(topicId) && !mutedTopics.has(topicId));
-    const author = await getDatabase().collection('users').findOne(activeUserQuery({ _id: reel.authorUserId }) as any, { projection: { profileHandle: 1 } });
-    let score = personalized ? reelFreshnessScore(reel.publishedAt || reel.createdAt, now) : 0;
-    const authorId = reel.authorUserId.toString();
-    let topTopicAffinity: string | undefined;
-    if (personalized) {
-      if (followedCreators.has(authorId)) score += REEL_FOR_YOU_WEIGHTS.followedCreator;
-      score += Math.min(REEL_FOR_YOU_WEIGHTS.followedTopicMax, topicIds.filter((topicId) => followedTopics.has(topicId)).length * REEL_FOR_YOU_WEIGHTS.followedTopic);
-      const creatorAffinity = affinityMaps.creators.get(authorId) || 0;
-      score += Math.min(REEL_FOR_YOU_WEIGHTS.creatorAffinityMax, Math.round(creatorAffinity * 0.3));
-      const topicAffinityScores = topicIds.map((topicId) => ({ topicId, score: affinityMaps.topics.get(topicId) || 0 })).sort((a, b) => b.score - a.score);
-      topTopicAffinity = topicAffinityScores.find((item) => item.score > 0)?.topicId;
-      score += Math.min(REEL_FOR_YOU_WEIGHTS.topicAffinityMax, topicAffinityScores.reduce((total, item) => total + Math.round(item.score * 0.18), 0));
-      score += Math.min(REEL_FOR_YOU_WEIGHTS.recentPositiveMax, signals.reelWeights.get(reel._id.toString()) || 0);
-      if (!signals.recentOpened.has(reel._id.toString())) score += REEL_FOR_YOU_WEIGHTS.newCreator;
-      if (signals.recentOpened.has(reel._id.toString())) score += REEL_FOR_YOU_WEIGHTS.recentSeenPenalty;
-      if (signals.quickSkipped.has(reel._id.toString())) score += REEL_FOR_YOU_WEIGHTS.quickSkipPenalty;
-      score += Math.min(REEL_FOR_YOU_WEIGHTS.communityTopicMax, topicIds.filter((topicId) => communityTopics.has(topicId)).length * 6);
-      ranked.push({
-        reel,
-        score,
-        explanation: primaryReelExplanation({ personalized, reel, author, followedCreators, followedTopics, creatorAffinity, topTopicAffinity }),
-      });
-    } else {
-      ranked.push({ reel, score, explanation: primaryReelExplanation({ personalized, reel, author, followedCreators, followedTopics, creatorAffinity: 0 }) });
+    .toArray() as Promise<ReelDocument[]>;
+
+  const rankCandidates = async (candidates: ReelDocument[]) => {
+    const ranked: Array<{ reel: ReelDocument; score: number; explanation: Omit<ReelForYouExplanationSnapshot, 'reelId'> }> = [];
+    for (const reel of candidates) {
+      if (reel.authorUserId.equals(viewerUserId)) continue;
+      if (!(await isBrowseEligibleForViewer(reel, viewerUserId))) continue;
+      const topicIds = (reel.reelTopicIds || []).filter((topicId) => TOPICS.has(topicId) && !mutedTopics.has(topicId));
+      const author = await getDatabase().collection('users').findOne(activeUserQuery({ _id: reel.authorUserId }) as any, { projection: { profileHandle: 1 } });
+      let score = personalized ? reelFreshnessScore(reel.publishedAt || reel.createdAt, now) : 0;
+      const authorId = reel.authorUserId.toString();
+      let topTopicAffinity: string | undefined;
+      if (personalized) {
+        if (followedCreators.has(authorId)) score += REEL_FOR_YOU_WEIGHTS.followedCreator;
+        score += Math.min(REEL_FOR_YOU_WEIGHTS.followedTopicMax, topicIds.filter((topicId) => followedTopics.has(topicId)).length * REEL_FOR_YOU_WEIGHTS.followedTopic);
+        const creatorAffinity = affinityMaps.creators.get(authorId) || 0;
+        score += Math.min(REEL_FOR_YOU_WEIGHTS.creatorAffinityMax, Math.round(creatorAffinity * 0.3));
+        const topicAffinityScores = topicIds.map((topicId) => ({ topicId, score: affinityMaps.topics.get(topicId) || 0 })).sort((a, b) => b.score - a.score);
+        topTopicAffinity = topicAffinityScores.find((item) => item.score > 0)?.topicId;
+        score += Math.min(REEL_FOR_YOU_WEIGHTS.topicAffinityMax, topicAffinityScores.reduce((total, item) => total + Math.round(item.score * 0.18), 0));
+        score += Math.min(REEL_FOR_YOU_WEIGHTS.recentPositiveMax, signals.reelWeights.get(reel._id.toString()) || 0);
+        if (!signals.recentOpened.has(reel._id.toString())) score += REEL_FOR_YOU_WEIGHTS.newCreator;
+        if (signals.recentOpened.has(reel._id.toString())) score += REEL_FOR_YOU_WEIGHTS.recentSeenPenalty;
+        if (signals.quickSkipped.has(reel._id.toString())) score += REEL_FOR_YOU_WEIGHTS.quickSkipPenalty;
+        score += Math.min(REEL_FOR_YOU_WEIGHTS.communityTopicMax, topicIds.filter((topicId) => communityTopics.has(topicId)).length * 6);
+        ranked.push({
+          reel,
+          score,
+          explanation: primaryReelExplanation({ personalized, reel, author, followedCreators, followedTopics, creatorAffinity, topTopicAffinity }),
+        });
+      } else {
+        ranked.push({ reel, score, explanation: primaryReelExplanation({ personalized, reel, author, followedCreators, followedTopics, creatorAffinity: 0 }) });
+      }
     }
-  }
+    return ranked;
+  };
+
+  let ranked = await rankCandidates(await loadCandidates(true));
+  if (ranked.length === 0) ranked = await rankCandidates(await loadCandidates(false));
   ranked.sort((a, b) => b.score - a.score || (b.reel.publishedAt || b.reel.createdAt).getTime() - (a.reel.publishedAt || a.reel.createdAt).getTime() || b.reel._id.toString().localeCompare(a.reel._id.toString()));
   const ordered = personalized ? diversifyReels(ranked) : ranked.slice(0, REEL_FOR_YOU_MAX_CANDIDATES);
   const sessionToken = crypto.randomBytes(32).toString('base64url');

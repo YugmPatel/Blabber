@@ -602,52 +602,64 @@ async function buildForYouSession(viewerUserId: ObjectId, personalized: boolean)
     recentPostSignals(viewerUserId),
   ]);
   const followedTopics = new Set<string>(personalized ? pref?.followedTopicIds || [] : []);
-  const candidates = await getPostsCollection()
+  const baseQuery: any = {
+    discoverable: true,
+    visibility: 'public',
+    deletedAt: { $exists: false },
+    authorUserId: { $ne: viewerUserId },
+  };
+  const loadCandidates = (useFreshWindow: boolean) => getPostsCollection()
     .find({
-      discoverable: true,
-      visibility: 'public',
-      deletedAt: { $exists: false },
-      authorUserId: { $ne: viewerUserId },
-      createdAt: { $gte: new Date(now.getTime() - FOR_YOU_CANDIDATE_WINDOW_MS) },
-    })
+      ...baseQuery,
+      ...(useFreshWindow ? {
+        createdAt: { $gte: new Date(now.getTime() - FOR_YOU_CANDIDATE_WINDOW_MS) },
+      } : {}),
+    } as any)
     .sort({ createdAt: -1, _id: -1 })
     .limit(FOR_YOU_MAX_CANDIDATES)
     .toArray();
-  const ranked: Array<{ post: PostDocument; score: number; explanation: Omit<ForYouExplanationSnapshot, 'postId'> }> = [];
-  for (const post of candidates) {
-    if (post.authorUserId.equals(viewerUserId)) continue;
-    if (!(await isDiscoverablePostForViewer(post, viewerUserId))) continue;
-    const topicIds = (post.discoveryTopicIds || []).filter((topicId) => !mutedTopics.has(topicId));
-    let score = personalized ? freshnessScore(post.createdAt, now) : 0;
-    const authorId = post.authorUserId.toString();
-    if (personalized && followedCreators.has(authorId)) score += FOR_YOU_WEIGHTS.followedCreator;
-    if (personalized) {
-      score += Math.min(FOR_YOU_WEIGHTS.followedTopicMax, topicIds.filter((topicId) => followedTopics.has(topicId)).length * FOR_YOU_WEIGHTS.followedTopic);
-      score += Math.min(FOR_YOU_WEIGHTS.creatorAffinityMax, Math.round((affinityMaps.creators.get(authorId) || 0) * 0.3));
-      const topicAffinityScores = topicIds.map((topicId) => ({ topicId, score: affinityMaps.topics.get(topicId) || 0 })).sort((a, b) => b.score - a.score);
-      score += Math.min(FOR_YOU_WEIGHTS.topicAffinityMax, topicAffinityScores.reduce((total, item) => total + Math.round(item.score * 0.18), 0));
-      score += Math.min(FOR_YOU_WEIGHTS.recentPositiveMax, signals.postWeights.get(post._id.toString()) || 0);
-      if (!signals.recentOpened.has(post._id.toString())) score += FOR_YOU_WEIGHTS.newCreator;
-      if (signals.recentOpened.has(post._id.toString())) score += FOR_YOU_WEIGHTS.recentSeenPenalty;
-      const communityTopicMatches = topicIds.filter((topicId) => communityTopics.has(topicId)).length;
-      score += Math.min(12, communityTopicMatches * 6);
-      ranked.push({
-        post,
-        score,
-        explanation: primaryExplanation({
-          personalized,
+
+  const rankCandidates = async (candidates: PostDocument[]) => {
+    const ranked: Array<{ post: PostDocument; score: number; explanation: Omit<ForYouExplanationSnapshot, 'postId'> }> = [];
+    for (const post of candidates) {
+      if (post.authorUserId.equals(viewerUserId)) continue;
+      if (!(await isDiscoverablePostForViewer(post, viewerUserId))) continue;
+      const topicIds = (post.discoveryTopicIds || []).filter((topicId) => !mutedTopics.has(topicId));
+      let score = personalized ? freshnessScore(post.createdAt, now) : 0;
+      const authorId = post.authorUserId.toString();
+      if (personalized && followedCreators.has(authorId)) score += FOR_YOU_WEIGHTS.followedCreator;
+      if (personalized) {
+        score += Math.min(FOR_YOU_WEIGHTS.followedTopicMax, topicIds.filter((topicId) => followedTopics.has(topicId)).length * FOR_YOU_WEIGHTS.followedTopic);
+        score += Math.min(FOR_YOU_WEIGHTS.creatorAffinityMax, Math.round((affinityMaps.creators.get(authorId) || 0) * 0.3));
+        const topicAffinityScores = topicIds.map((topicId) => ({ topicId, score: affinityMaps.topics.get(topicId) || 0 })).sort((a, b) => b.score - a.score);
+        score += Math.min(FOR_YOU_WEIGHTS.topicAffinityMax, topicAffinityScores.reduce((total, item) => total + Math.round(item.score * 0.18), 0));
+        score += Math.min(FOR_YOU_WEIGHTS.recentPositiveMax, signals.postWeights.get(post._id.toString()) || 0);
+        if (!signals.recentOpened.has(post._id.toString())) score += FOR_YOU_WEIGHTS.newCreator;
+        if (signals.recentOpened.has(post._id.toString())) score += FOR_YOU_WEIGHTS.recentSeenPenalty;
+        const communityTopicMatches = topicIds.filter((topicId) => communityTopics.has(topicId)).length;
+        score += Math.min(12, communityTopicMatches * 6);
+        ranked.push({
           post,
-          followedCreators,
-          followedTopics,
-          communityTopics,
-          creatorAffinity: affinityMaps.creators.get(authorId) || 0,
-          topTopicAffinity: topicAffinityScores.find((item) => item.score > 0)?.topicId,
-        }),
-      });
-    } else {
-      ranked.push({ post, score, explanation: primaryExplanation({ personalized, post, followedCreators, followedTopics, communityTopics, creatorAffinity: 0 }) });
+          score,
+          explanation: primaryExplanation({
+            personalized,
+            post,
+            followedCreators,
+            followedTopics,
+            communityTopics,
+            creatorAffinity: affinityMaps.creators.get(authorId) || 0,
+            topTopicAffinity: topicAffinityScores.find((item) => item.score > 0)?.topicId,
+          }),
+        });
+      } else {
+        ranked.push({ post, score, explanation: primaryExplanation({ personalized, post, followedCreators, followedTopics, communityTopics, creatorAffinity: 0 }) });
+      }
     }
-  }
+    return ranked;
+  };
+
+  let ranked = await rankCandidates(await loadCandidates(true));
+  if (ranked.length === 0) ranked = await rankCandidates(await loadCandidates(false));
   ranked.sort((a, b) => b.score - a.score || b.post.createdAt.getTime() - a.post.createdAt.getTime() || b.post._id.toString().localeCompare(a.post._id.toString()));
   const diversified = personalized ? diversifyForYou(ranked) : ranked.slice(0, FOR_YOU_MAX_CANDIDATES);
   const sessionToken = crypto.randomBytes(32).toString('base64url');
