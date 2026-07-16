@@ -6,6 +6,7 @@ import NewGroupModal from './NewGroupModal';
 import { chatKeys } from '@/hooks/useChats';
 import { createTestQueryClient } from '@/test/query-test-utils';
 import { apiClient } from '@/api/client';
+import { searchUsers } from '@/api/client';
 import type { Chat } from '@repo/types';
 
 const mockNavigate = vi.fn();
@@ -34,22 +35,20 @@ vi.mock('@/api/client', () => ({
     get: vi.fn(),
     post: vi.fn(),
   },
+  searchUsers: vi.fn(),
 }));
 
 const existingChat: Chat = {
   _id: 'chat-existing',
   type: 'direct',
   participants: ['me', 'friend-1'],
+  participantProfiles: [
+    { _id: 'me', name: 'Me', username: 'me', email: 'me@example.com' },
+    { _id: 'friend-1', name: 'Friend One', username: 'friend', email: 'friend@example.com' },
+  ],
   admins: [],
   createdAt: new Date(),
   updatedAt: new Date(),
-};
-
-const friendUser = {
-  _id: 'friend-1',
-  username: 'friend',
-  email: 'friend@example.com',
-  name: 'Friend One',
 };
 
 const newGroupChat: Chat = {
@@ -74,9 +73,9 @@ describe('NewGroupModal', () => {
       if (url === '/api/chats') {
         return Promise.resolve({ data: { chats: groupCreated ? [existingChat, newGroupChat] : [existingChat] } });
       }
-      if (url === '/api/users/friend-1') return Promise.resolve({ data: { user: friendUser } });
       return Promise.resolve({ data: {} });
     });
+    vi.mocked(searchUsers).mockResolvedValue({ users: [], nextCursor: null });
     vi.mocked(apiClient.post).mockImplementation(async () => {
       groupCreated = true;
       return { data: { chat: newGroupChat } };
@@ -178,17 +177,16 @@ describe('NewGroupModal', () => {
                 _id: 'chat-no-name',
                 type: 'direct',
                 participants: ['me', 'usernameOnly-1'],
+                participantProfiles: [
+                  { _id: 'me', name: 'Me', username: 'me' },
+                  { _id: 'usernameOnly-1', name: '', username: 'nonamehere', email: 'noname@example.com' },
+                ],
                 admins: [],
                 createdAt: new Date(),
                 updatedAt: new Date(),
               },
             ],
           },
-        });
-      }
-      if (url === '/api/users/usernameOnly-1') {
-        return Promise.resolve({
-          data: { user: { _id: 'usernameOnly-1', username: 'nonamehere', email: 'noname@example.com' } },
         });
       }
       return Promise.resolve({ data: {} });
@@ -205,5 +203,83 @@ describe('NewGroupModal', () => {
 
     // No name field on this user — username becomes the primary label.
     await screen.findByText('nonamehere');
+  });
+
+  it('searches the same user discovery source by display name and excludes self', async () => {
+    vi.mocked(searchUsers).mockResolvedValue({
+      users: [
+        {
+          id: 'devanshee-1',
+          username: 'devanshee',
+          displayName: 'Devanshee Shah',
+          isVerified: false,
+          relationshipStatus: 'accepted',
+          canMessage: true,
+          requiresMessageRequest: false,
+        },
+        {
+          id: 'me',
+          username: 'yugm',
+          displayName: 'Yugm Patel',
+          isVerified: false,
+          relationshipStatus: 'accepted',
+          canMessage: true,
+          requiresMessageRequest: false,
+        },
+      ],
+      nextCursor: null,
+    });
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search people you can message...'), {
+      target: { value: 'devanshee' },
+    });
+
+    expect(await screen.findByText('Devanshee Shah')).toBeInTheDocument();
+    expect(screen.getByText('@devanshee')).toBeInTheDocument();
+    expect(screen.queryByText('Yugm Patel')).not.toBeInTheDocument();
+    expect(searchUsers).toHaveBeenCalledWith('devanshee');
+  });
+
+  it('searches by username/handle and removes selected users from candidate rows', async () => {
+    vi.mocked(searchUsers).mockResolvedValue({
+      users: [
+        {
+          id: 'handle-1',
+          username: 'handlematch',
+          displayName: 'Handle Match',
+          isVerified: false,
+          relationshipStatus: 'accepted',
+          canMessage: true,
+          requiresMessageRequest: false,
+        },
+      ],
+      nextCursor: null,
+    });
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search people you can message...'), {
+      target: { value: 'handlematch' },
+    });
+
+    const row = await screen.findByText('Handle Match');
+    fireEvent.click(row);
+
+    expect(screen.getByText('Next (1 selected)')).toBeInTheDocument();
+    expect(screen.getAllByText('Handle Match')).toHaveLength(1);
   });
 });

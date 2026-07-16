@@ -1,9 +1,9 @@
-import { useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Search, Loader2, Users, Check, Clock, Timer, Archive, Camera } from 'lucide-react';
-import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { apiClient } from '@/api/client';
+import { apiClient, searchUsers, type UserSearchResult } from '@/api/client';
 import { chatKeys, useChats } from '@/hooks/useChats';
 import { useFileUpload } from '@/hooks/useFileUpload';
 import { useAuth } from '@/contexts/AuthContext';
@@ -26,10 +26,40 @@ const expirationOptions: { value: ExpirationOption; label: string; ms?: number }
   { value: 'custom', label: 'Custom' },
 ];
 
+const SEARCH_MIN_LENGTH = 2;
+const SEARCH_DEBOUNCE_MS = 300;
+
+type GroupCandidate = Pick<User, '_id' | 'username' | 'email' | 'name' | 'avatarUrl' | 'profileHandle'> & {
+  displayHandle?: string;
+};
+
+function userSearchResultToCandidate(user: UserSearchResult): GroupCandidate {
+  return {
+    _id: user.id,
+    username: user.username,
+    email: '',
+    name: user.displayName,
+    avatarUrl: user.avatarUrl,
+  };
+}
+
+function profileToCandidate(profile: NonNullable<Chat['participantProfiles']>[number]): GroupCandidate {
+  return {
+    _id: profile._id,
+    username: profile.username || '',
+    email: profile.email || '',
+    name: profile.name,
+    avatarUrl: profile.avatarUrl,
+    profileHandle: profile.profileHandle,
+    displayHandle: profile.displayHandle,
+  };
+}
+
 export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   const navigate = useNavigate();
   const [step, setStep] = useState<'select' | 'details'>('select');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [groupName, setGroupName] = useState('');
   const [groupDescription, setGroupDescription] = useState('');
@@ -49,6 +79,11 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
   const { uploadMedia } = useFileUpload();
   const { data: chats = [], isLoading: isLoadingChats } = useChats();
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [searchQuery]);
+
   const getExpirationDate = (): Date | null => {
     if (!isTemporary) return null;
     if (expiration === 'custom' && customExpirationDate) {
@@ -61,35 +96,35 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     return null;
   };
 
-  const eligibleParticipantIds = Array.from(
-    new Set(
-      chats.flatMap((chat) =>
-        chat.participants.filter((participantId) => participantId !== currentUser?._id)
-      )
-    )
-  );
-  const participantQueries = useQueries({
-    queries: eligibleParticipantIds.map((participantId) => ({
-      queryKey: ['users', participantId] as const,
-      queryFn: async () => {
-        const { data } = await apiClient.get<{ user: User }>(`/api/users/${participantId}`);
-        return data.user;
-      },
-      enabled: isOpen,
-      staleTime: 60_000,
-    })),
+  const selectedIds = useMemo(() => new Set(selectedUsers.map((user) => user._id)), [selectedUsers]);
+  const searchEnabled = isOpen && debouncedSearchQuery.length >= SEARCH_MIN_LENGTH;
+  const searchResults = useQuery({
+    queryKey: ['user-search', debouncedSearchQuery],
+    queryFn: () => searchUsers(debouncedSearchQuery),
+    enabled: searchEnabled,
   });
-  const normalizedSearch = searchQuery.trim().toLowerCase();
-  const eligibleUsers = participantQueries
-    .map((query) => query.data)
-    .filter((user): user is User => Boolean(user))
-    .filter((user) => {
-      if (!normalizedSearch) return true;
-      return [user.name, user.profileHandle, (user as User & { displayHandle?: string }).displayHandle, user.username, user.email]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(normalizedSearch));
+  const recentCandidates = useMemo(() => {
+    const byId = new Map<string, GroupCandidate>();
+    chats.forEach((chat) => {
+      (chat.participantProfiles || []).forEach((profile) => {
+        if (profile._id === currentUser?._id) return;
+        if (!byId.has(profile._id)) byId.set(profile._id, profileToCandidate(profile));
+      });
     });
-  const isSearching = isLoadingChats || participantQueries.some((query) => query.isLoading);
+    return Array.from(byId.values()).slice(0, 30);
+  }, [chats, currentUser?._id]);
+  const eligibleUsers = useMemo(() => {
+    const source = searchEnabled
+      ? (searchResults.data?.users || []).filter((user) => user.canMessage).map(userSearchResultToCandidate)
+      : recentCandidates;
+    const byId = new Map<string, GroupCandidate>();
+    source.forEach((user) => {
+      if (!user._id || user._id === currentUser?._id || selectedIds.has(user._id)) return;
+      if (!byId.has(user._id)) byId.set(user._id, user);
+    });
+    return Array.from(byId.values());
+  }, [currentUser?._id, recentCandidates, searchEnabled, searchResults.data?.users, selectedIds]);
+  const isSearching = searchEnabled ? searchResults.isLoading : isLoadingChats;
 
   // Create group mutation
   const createGroupMutation = useMutation({
@@ -135,19 +170,20 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     },
   });
 
-  const handleUserToggle = (user: User) => {
+  const handleUserToggle = (user: GroupCandidate) => {
     setSelectedUsers((prev) => {
       const isSelected = prev.some((u) => u._id === user._id);
       if (isSelected) {
         return prev.filter((u) => u._id !== user._id);
       }
-      return [...prev, user];
+      return [...prev, user as User];
     });
   };
 
   const handleClose = () => {
     setStep('select');
     setSearchQuery('');
+    setDebouncedSearchQuery('');
     setSelectedUsers([]);
     setGroupName('');
     setGroupDescription('');
@@ -316,9 +352,15 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                 </div>
               )}
 
-              {!isSearching && searchQuery && eligibleUsers.length === 0 && (
+              {!isSearching && searchEnabled && eligibleUsers.length === 0 && (
                 <div className="py-8 text-center text-slate-500 dark:text-slate-400">
                   <p>No people found</p>
+                </div>
+              )}
+
+              {!isSearching && !searchEnabled && searchQuery.trim().length > 0 && searchQuery.trim().length < SEARCH_MIN_LENGTH && (
+                <div className="py-8 text-center text-slate-500 dark:text-slate-400">
+                  <p>Keep typing to search</p>
                 </div>
               )}
 
@@ -332,8 +374,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
               {!isSearching && eligibleUsers.length > 0 && (
                 <div className="space-y-2">
                   {eligibleUsers
-                    .filter((user: User) => user._id !== currentUser?._id)
-                    .map((user: User) => {
+                    .map((user) => {
                       const isSelected = selectedUsers.some((u) => u._id === user._id);
                       return (
                         <button

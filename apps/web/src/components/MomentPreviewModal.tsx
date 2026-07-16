@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Image as ImageIcon, Loader2, Type, Video, Volume2, X } from 'lucide-react';
-import { apiClient, fetchAuthorizedObjectUrl } from '@/api/client';
+import { apiClient, createMomentVideoPlaybackSession, fetchAuthorizedObjectUrl } from '@/api/client';
 import type { Message } from '@repo/types';
 
 type MomentPreview = {
@@ -15,6 +15,12 @@ type MomentPreview = {
   createdAt: string;
   expiresAt?: string;
   archiveState?: 'active' | 'archived' | 'deleted';
+};
+
+type LoadedMedia = {
+  objectUrl?: string;
+  posterUrl?: string;
+  unavailable: boolean;
 };
 
 const STYLE_BACKGROUNDS: Record<string, string> = {
@@ -41,6 +47,7 @@ export default function MomentPreviewModal({
   onClose: () => void;
 }) {
   const [mediaObjectUrl, setMediaObjectUrl] = useState<string | undefined>();
+  const [loadedMedia, setLoadedMedia] = useState<LoadedMedia>({ unavailable: false });
   const query = useQuery({
     queryKey: ['moment-preview', momentId],
     queryFn: async () => {
@@ -74,10 +81,42 @@ export default function MomentPreviewModal({
   }, [momentId, onClose]);
 
   useEffect(() => {
-    if (!mediaUrl || type !== 'image') {
-      setMediaObjectUrl(undefined);
+    setLoadedMedia({ unavailable: false });
+    setMediaObjectUrl(undefined);
+    if (!type || type === 'text') {
       return undefined;
     }
+
+    if (type === 'video') {
+      let active = true;
+      let objectUrl: string | undefined;
+      let posterUrl: string | undefined;
+      createMomentVideoPlaybackSession(momentId)
+        .then(() => Promise.all([
+          apiClient.get<Blob>(`/api/moments/${momentId}/video/fallback`, { responseType: 'blob' }),
+          apiClient.get<Blob>(`/api/moments/${momentId}/video/poster`, { responseType: 'blob' }),
+        ]))
+        .then(([videoResponse, posterResponse]) => {
+          if (!active) return;
+          objectUrl = URL.createObjectURL(videoResponse.data);
+          posterUrl = URL.createObjectURL(posterResponse.data);
+          setLoadedMedia({ objectUrl, posterUrl, unavailable: false });
+        })
+        .catch(() => {
+          if (active) setLoadedMedia({ unavailable: true });
+        });
+      return () => {
+        active = false;
+        if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
+        if (posterUrl?.startsWith('blob:')) URL.revokeObjectURL(posterUrl);
+      };
+    }
+
+    if (!mediaUrl || (type !== 'image' && type !== 'audio')) {
+      setLoadedMedia({ unavailable: true });
+      return undefined;
+    }
+
     let active = true;
     let objectUrl: string | undefined;
     fetchAuthorizedObjectUrl(mediaUrl)
@@ -88,15 +127,16 @@ export default function MomentPreviewModal({
         }
         objectUrl = url;
         setMediaObjectUrl(url);
+        setLoadedMedia({ objectUrl: url, unavailable: false });
       })
       .catch(() => {
-        if (active) setMediaObjectUrl(undefined);
+        if (active) setLoadedMedia({ unavailable: true });
       });
     return () => {
       active = false;
       if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
     };
-  }, [mediaUrl, type]);
+  }, [mediaUrl, momentId, type]);
 
   if (!momentId) return null;
 
@@ -132,17 +172,41 @@ export default function MomentPreviewModal({
               <p className="mt-3 text-sm font-semibold text-[color:var(--bl-text)]">This Moment is no longer available.</p>
               {text && <p className="mt-2 max-w-xs text-sm text-[color:var(--bl-text-muted)]">{text}</p>}
             </div>
+          ) : loadedMedia.unavailable ? (
+            <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] text-center">
+              <Icon size={28} className="text-[color:var(--bl-text-muted)]" />
+              <p className="mt-3 text-sm font-semibold text-[color:var(--bl-text)]">This Moment media is unavailable.</p>
+              {text && <p className="mt-2 max-w-xs text-sm text-[color:var(--bl-text-muted)]">{text}</p>}
+            </div>
           ) : (
             <div className="overflow-hidden rounded-2xl">
-              {mediaObjectUrl ? (
-                <img src={mediaObjectUrl} alt="" className="max-h-[58vh] w-full object-contain bg-slate-950" />
+              {type === 'image' && mediaObjectUrl ? (
+                <img src={mediaObjectUrl} alt={text || 'Moment photo'} className="max-h-[58vh] w-full object-contain bg-slate-950" />
+              ) : type === 'audio' && loadedMedia.objectUrl ? (
+                <div className="bg-[color:var(--bl-hover)] px-4 py-8">
+                  <div className="mb-4 flex items-center justify-center">
+                    <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-500/15 text-teal-600 dark:text-teal-300">
+                      <Volume2 size={26} />
+                    </span>
+                  </div>
+                  <audio src={loadedMedia.objectUrl} controls preload="metadata" className="w-full" aria-label="Play or pause audio Moment" />
+                </div>
+              ) : type === 'video' && loadedMedia.objectUrl ? (
+                <video
+                  src={loadedMedia.objectUrl}
+                  poster={loadedMedia.posterUrl}
+                  controls
+                  preload="metadata"
+                  className="max-h-[58vh] w-full bg-black object-contain"
+                  aria-label="Play or pause video Moment"
+                />
               ) : (
                 <div className="flex min-h-72 flex-col items-center justify-center px-6 py-10 text-center text-white" style={{ background }}>
                   <Icon size={30} className="mb-4 opacity-85" />
                   <p className="whitespace-pre-wrap text-xl font-semibold leading-snug">{text || title}</p>
                 </div>
               )}
-              {text && mediaObjectUrl && (
+              {text && (mediaObjectUrl || loadedMedia.objectUrl) && (
                 <div className="bg-[color:var(--bl-hover)] px-4 py-3 text-sm text-[color:var(--bl-text-secondary)]">
                   {text}
                 </div>
