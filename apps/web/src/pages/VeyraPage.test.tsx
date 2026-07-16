@@ -149,6 +149,28 @@ describe('VeyraPage', () => {
     expect(mockAskVeyra).not.toHaveBeenCalled();
   });
 
+  it('shows "Approved spaces only" in the hero when that is the current access mode', async () => {
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByText('Approved spaces only')).toBeInTheDocument());
+    expect(screen.queryByText('Full Blabber access enabled')).not.toBeInTheDocument();
+  });
+
+  it('shows "Full Blabber access enabled" in the hero when full_access is the current mode', async () => {
+    mockFetchVeyraSettings.mockResolvedValue({
+      ...structuredClone(baseSettings),
+      settings: { ...structuredClone(baseSettings.settings), accessMode: 'full_access' },
+    });
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByText('Full Blabber access enabled')).toBeInTheDocument());
+  });
+
+  it('the "Manage access" link navigates to AI privacy settings', async () => {
+    renderVeyraPage();
+    const manageAccessButton = await screen.findByRole('button', { name: 'Manage access' });
+    fireEvent.click(manageAccessButton);
+    expect(mockNavigate).toHaveBeenCalledWith('/settings?s=ai');
+  });
+
   it('does not insert recognized speech into the text composer', async () => {
     renderVeyraPage();
     await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeEnabled());

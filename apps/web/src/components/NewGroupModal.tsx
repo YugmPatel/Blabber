@@ -40,6 +40,8 @@ function userSearchResultToCandidate(user: UserSearchResult): GroupCandidate {
     email: '',
     name: user.displayName,
     avatarUrl: user.avatarUrl,
+    profileHandle: user.profileHandle,
+    displayHandle: user.displayHandle || undefined,
   };
 }
 
@@ -114,8 +116,17 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     return Array.from(byId.values()).slice(0, 30);
   }, [chats, currentUser?._id]);
   const eligibleUsers = useMemo(() => {
+    // Group invites are governed by the backend's groupInvitePrivacy check
+    // (services/chats/src/contact-privacy.ts canAddToGroup), which defaults
+    // to 'everyone' and is independent from messagePrivacy/canMessage (used
+    // for direct-chat eligibility, defaults to 'followers'). Filtering
+    // candidates by canMessage here was hiding users who are perfectly
+    // addable to a group but haven't been messaged/followed — the same
+    // search results New Convo already shows in full. Any group-invite
+    // restriction still gets enforced server-side on create, surfaced via
+    // createGroupErrorMessage.
     const source = searchEnabled
-      ? (searchResults.data?.users || []).filter((user) => user.canMessage).map(userSearchResultToCandidate)
+      ? (searchResults.data?.users || []).map(userSearchResultToCandidate)
       : recentCandidates;
     const byId = new Map<string, GroupCandidate>();
     source.forEach((user) => {
@@ -352,7 +363,14 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                 </div>
               )}
 
-              {!isSearching && searchEnabled && eligibleUsers.length === 0 && (
+              {!isSearching && searchEnabled && searchResults.isError && (
+                <div className="py-8 text-center text-slate-500 dark:text-slate-400">
+                  <p className="font-medium text-slate-700 dark:text-slate-300">Search failed</p>
+                  <p className="mt-1 text-xs">Please try again in a moment.</p>
+                </div>
+              )}
+
+              {!isSearching && searchEnabled && !searchResults.isError && eligibleUsers.length === 0 && (
                 <div className="py-8 text-center text-slate-500 dark:text-slate-400">
                   <p>No people found</p>
                 </div>

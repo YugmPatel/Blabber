@@ -193,6 +193,8 @@ export async function searchUsers(req: Request, res: Response, next: NextFunctio
           avatarUrl: user.avatarUrl || undefined,
           bioPreview: bioPreview(user.about),
           isVerified: Boolean((user as any).emailVerified),
+          profileHandle: (user as any).profileHandle || undefined,
+          displayHandle: (user as any).profileHandle ? `@${(user as any).profileHandle}` : null,
           ...state,
         };
       })

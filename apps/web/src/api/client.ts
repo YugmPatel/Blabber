@@ -378,6 +378,8 @@ export interface UserSearchResult {
   relationshipStatus: RelationshipStatus;
   canMessage: boolean;
   requiresMessageRequest: boolean;
+  profileHandle?: string;
+  displayHandle?: string | null;
 }
 
 export async function searchUsers(query: string, cursor?: string | null): Promise<{ users: UserSearchResult[]; nextCursor: string | null }> {
@@ -893,9 +895,12 @@ export async function respondPlanThisAssignment(planId: string, assignmentId: st
   return data.plan;
 }
 
+export type VeyraAccessMode = 'approved_spaces' | 'full_access';
+
 export interface VeyraSettings {
   enabled: boolean;
   voiceRepliesEnabled: boolean;
+  accessMode: VeyraAccessMode;
   scopes: Array<{ id: string; type: 'general' | 'my_actions' | 'chat' | 'community'; targetId?: string; label?: string; grantedAt: string }>;
   updatedAt: string;
 }
@@ -905,7 +910,7 @@ export async function fetchVeyraSettings() {
   return data;
 }
 
-export async function updateVeyraSettings(payload: Partial<Pick<VeyraSettings, 'enabled' | 'voiceRepliesEnabled'>>) {
+export async function updateVeyraSettings(payload: Partial<Pick<VeyraSettings, 'enabled' | 'voiceRepliesEnabled' | 'accessMode'>>) {
   const { data } = await apiClient.patch<{ settings: VeyraSettings }>('/api/veyra/settings', payload);
   return data.settings;
 }

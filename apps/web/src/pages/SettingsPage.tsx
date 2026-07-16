@@ -51,6 +51,8 @@ import {
   Monitor,
   Rocket,
   Bug,
+  Unlock,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
@@ -2784,6 +2786,59 @@ function AppearanceSection() {
 
 // ── Section: AI privacy ──────────────────────────────────────────────────────
 
+function EnableFullAccessConfirmModal({ onCancel, onConfirm, isPending }: { onCancel: () => void; onConfirm: () => void; isPending: boolean }) {
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onCancel]);
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4" onClick={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="enable-full-access-title"
+        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300">
+            <AlertTriangle size={18} />
+          </span>
+          <div className="min-w-0">
+            <h2 id="enable-full-access-title" className="text-base font-semibold text-slate-900 dark:text-white">
+              Give Veyra full access?
+            </h2>
+            <p className="mt-1.5 text-sm leading-6 text-slate-600 dark:text-slate-300">
+              Veyra will be able to search all Blabber spaces and content you can access. You can turn this off anytime.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isPending}
+            className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+          >
+            {isPending ? 'Enabling...' : 'Enable full access'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AISection() {
   const navigate = useNavigate();
   const settingsQuery = useUserSettings();
@@ -2791,6 +2846,7 @@ function AISection() {
   const queryClient = useQueryClient();
   const [selectedScope, setSelectedScope] = useState('');
   const [showAddSpace, setShowAddSpace] = useState(false);
+  const [showFullAccessConfirm, setShowFullAccessConfirm] = useState(false);
   const clearHistory = useMutation({
     mutationFn: async () => {
       const { data } = await apiClient.delete('/api/intelligence/history/me');
@@ -2965,6 +3021,78 @@ function AISection() {
           last
         />
       </PrivacyCard>
+
+      {/* ── Veyra access mode ── */}
+      <PrivacyCard
+        icon={veyra?.accessMode === 'full_access' ? Unlock : Lock}
+        title="Veyra access"
+        subtitle="Choose how much of Blabber Veyra is allowed to search."
+      >
+        <div className="space-y-2.5">
+          {(
+            [
+              {
+                value: 'approved_spaces' as const,
+                label: 'Approved spaces only',
+                desc: 'Veyra only searches spaces you’ve explicitly approved below. This is the default.',
+              },
+              {
+                value: 'full_access' as const,
+                label: 'Full access to my Blabber',
+                desc: 'Veyra can search all chats, groups, files, links, posts, plans, and actions you can already access.',
+              },
+            ] as const
+          ).map((option) => {
+            const checked = (veyra?.accessMode || 'approved_spaces') === option.value;
+            return (
+              <label
+                key={option.value}
+                className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${
+                  checked
+                    ? 'border-teal-500/50 bg-teal-50/70 dark:border-teal-400/40 dark:bg-teal-500/10'
+                    : 'border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800/60'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="veyra-access-mode"
+                  value={option.value}
+                  checked={checked}
+                  disabled={!veyra?.enabled || updateVeyra.isPending}
+                  onChange={() => {
+                    if (option.value === 'full_access') {
+                      setShowFullAccessConfirm(true);
+                      return;
+                    }
+                    updateVeyra.mutate({ accessMode: 'approved_spaces' });
+                  }}
+                  className="mt-0.5 h-4 w-4 border-slate-400 text-teal-600 focus:ring-teal-500"
+                />
+                <span className="min-w-0">
+                  <span className="block text-[14px] font-medium text-slate-900 dark:text-white">{option.label}</span>
+                  <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{option.desc}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {!veyra?.enabled && (
+          <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">Enable the Veyra assistant above to change this.</p>
+        )}
+      </PrivacyCard>
+
+      {showFullAccessConfirm && (
+        <EnableFullAccessConfirmModal
+          isPending={updateVeyra.isPending}
+          onCancel={() => setShowFullAccessConfirm(false)}
+          onConfirm={() => {
+            updateVeyra.mutate(
+              { accessMode: 'full_access' },
+              { onSuccess: () => setShowFullAccessConfirm(false) }
+            );
+          }}
+        />
+      )}
 
       {/* ── Approved spaces ── */}
       <PrivacyCard

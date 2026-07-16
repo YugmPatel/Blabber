@@ -203,8 +203,40 @@ describe('GET /search - User Search', () => {
         'relationshipStatus',
         'canMessage',
         'requiresMessageRequest',
+        'displayHandle',
       ].sort()
     );
+  });
+
+  it('includes the real profileHandle/displayHandle when the user has set one, instead of only the raw username', async () => {
+    await getDatabase().collection('users').updateOne(
+      { _id: testUser1Id },
+      { $set: { profileHandle: 'alice-real-handle' } }
+    );
+
+    const response = await request(app)
+      .get('/search')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .query({ q: 'alice' });
+
+    expect(response.status).toBe(200);
+    const aliceUser = response.body.users.find((u: any) => u.username === 'test-search-alice');
+    expect(aliceUser).toBeDefined();
+    expect(aliceUser.profileHandle).toBe('alice-real-handle');
+    expect(aliceUser.displayHandle).toBe('@alice-real-handle');
+  });
+
+  it('returns a null displayHandle (not the username) when no profileHandle has been set', async () => {
+    const response = await request(app)
+      .get('/search')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .query({ q: 'Bob' });
+
+    expect(response.status).toBe(200);
+    const bobUser = response.body.users.find((u: any) => u.username === 'test-search-bob');
+    expect(bobUser).toBeDefined();
+    expect(bobUser.profileHandle).toBeUndefined();
+    expect(bobUser.displayHandle).toBeNull();
   });
 
   it('excludes a user the viewer blocked', async () => {

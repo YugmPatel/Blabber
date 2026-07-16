@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { z } from 'zod';
-import { asyncHandler, logger } from '@repo/utils';
+import { asyncHandler } from '@repo/utils';
 import { getDatabase } from '../db';
 import { getChatsCollection } from '../models/chat';
 import { getChatActionsCollection } from '../models/chat-action';
@@ -20,6 +20,7 @@ import {
   type VeyraSettingsDocument,
 } from '../models/veyra';
 import { isChatExpired } from '../serialize-chat';
+import { callOpenRouterChat } from '../intelligence/providers/openrouter-client';
 import {
   classifyRetrievalContentType,
   extractNameQuery,
@@ -51,6 +52,7 @@ const ContextSchema = z
 const UpdateSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   voiceRepliesEnabled: z.boolean().optional(),
+  accessMode: z.enum(['approved_spaces', 'full_access']).optional(),
 });
 const GrantScopeSchema = z.object({
   type: z.enum(['general', 'my_actions', 'chat', 'community']),
@@ -61,8 +63,6 @@ const AskSchema = z.object({
   scopeId: z.string().optional(),
   context: ContextSchema,
 });
-const OPENROUTER_CHAT_COMPLETIONS_URL = 'https://openrouter.ai/api/v1/chat/completions';
-
 function scopeId(type: VeyraScopeType, targetId?: ObjectId) {
   return targetId ? `${type}:${targetId.toString()}` : type;
 }
@@ -88,6 +88,22 @@ function classifyIntent(prompt: string): VeyraIntentCategory {
   // "delete" name an actual destination or mutation, so only those count.
   if (/\bsend\b[^.?!]{0,40}\bto\b/.test(text) || /\b(forward|delete|remove this|update this|edit this|rsvp|schedule a)\b/.test(text)) {
     return 'action_request';
+  }
+  // General-knowledge/assistant requests ("explain Docker", "write a follow-up
+  // email", "help me brainstorm ideas") have no dependency on Blabber data at
+  // all — checked narrowly (a generic-assistant verb AND no Blabber-domain
+  // noun in the same sentence) so a genuinely Blabber-scoped ask like
+  // "summarize apartment planning" or "write to yugm" still falls through to
+  // the grounded retrieval intents below rather than being answered blind.
+  if (
+    /\b(explain|write me|write a|write an|draft|compose|help me write|help me draft|give me ideas|brainstorm|proofread|rewrite this|translate|how do i write)\b/.test(
+      text
+    ) &&
+    !/\b(chat|chats|group|groups|plan|plans|trip|trips|event|events|pdf|pdfs|link|links|photo|photos|video|videos|action|actions|task|tasks|decision|decisions|message|messages|space|spaces|moment|moments|post|posts|reel|reels|blabber)\b/.test(
+      text
+    )
+  ) {
+    return 'general_assistant';
   }
   if (/\bwho (started|created|made|proposed)\b/.test(text)) return 'plan_creator';
   if (/\b(photo|photos|picture|pictures|image|images)\b/.test(text)) return 'find_photos';
@@ -154,10 +170,56 @@ async function authorizedScopeLabel(type: VeyraScopeType, targetId: ObjectId | u
   return null;
 }
 
+/**
+ * Full Access never bypasses per-chat authorization — it only widens *which*
+ * chats are treated as pre-approved, by projecting a virtual scope list built
+ * from the user's real chat memberships (still subject to the exact same
+ * deletion/expiry checks `listVeyraScopeCandidates` and every retrieval
+ * function already apply). Every downstream resolver (`resolveScopedChat`,
+ * `findPlansAndEventsAndTasks`, etc.) still re-authorizes each chat against
+ * live membership/block state right now — this only changes what's offered
+ * as a candidate, never what's trusted. Real granted scopes always take
+ * precedence (never duplicated); this projection is never persisted, so
+ * approved_spaces mode (and grant/revoke) are completely unaffected.
+ */
+async function resolveEffectiveVeyraSettings(userId: ObjectId, settings: VeyraSettingsDocument): Promise<VeyraSettingsDocument> {
+  if (settings.accessMode !== 'full_access') return settings;
+
+  const realChatTargetIds = new Set(
+    settings.scopes.filter((scope) => scope.type === 'chat' && scope.targetId).map((scope) => scope.targetId!.toString())
+  );
+
+  const chats = await getChatsCollection()
+    .find({ participants: userId, deletedAt: { $exists: false } })
+    .sort({ updatedAt: -1 })
+    .limit(200)
+    .toArray();
+
+  const virtualChatScopes: VeyraSettingsDocument['scopes'] = [];
+  for (const chat of chats) {
+    if (realChatTargetIds.has(chat._id.toString())) continue;
+    if (chat.type === 'group' && isChatExpired(chat)) continue;
+    const label = await labelForChat(chat._id, userId);
+    if (!label) continue;
+    virtualChatScopes.push({ id: scopeId('chat', chat._id), type: 'chat', targetId: chat._id, label, grantedAt: settings.updatedAt });
+  }
+
+  const extras: VeyraSettingsDocument['scopes'] = [];
+  if (!settings.scopes.some((scope) => scope.type === 'general')) {
+    extras.push({ id: scopeId('general'), type: 'general', grantedAt: settings.updatedAt });
+  }
+  if (!settings.scopes.some((scope) => scope.type === 'my_actions')) {
+    extras.push({ id: scopeId('my_actions'), type: 'my_actions', grantedAt: settings.updatedAt });
+  }
+
+  return { ...settings, scopes: [...settings.scopes, ...extras, ...virtualChatScopes] };
+}
+
 function serializeSettings(settings: Awaited<ReturnType<typeof getOrCreateVeyraSettings>>) {
   return {
     enabled: settings.enabled,
     voiceRepliesEnabled: settings.voiceRepliesEnabled,
+    accessMode: settings.accessMode || 'approved_spaces',
     scopes: settings.scopes.map((scope) => ({
       id: scope.id,
       type: scope.type,
@@ -189,6 +251,7 @@ export const updateVeyraSettings = asyncHandler(async (req: Request, res: Respon
   const patch: Record<string, unknown> = { updatedAt: new Date() };
   if (parsed.data.enabled !== undefined) patch.enabled = parsed.data.enabled;
   if (parsed.data.voiceRepliesEnabled !== undefined) patch.voiceRepliesEnabled = parsed.data.voiceRepliesEnabled;
+  if (parsed.data.accessMode !== undefined) patch.accessMode = parsed.data.accessMode;
   const settings = await getVeyraSettingsCollection().findOneAndUpdate(
     { userId: userObjectId },
     { $set: patch },
@@ -356,9 +419,7 @@ async function synthesizeVeyraAnswer(
   cards: VeyraResultCard[],
   fallbackAnswer: string
 ): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  const model = process.env.OPENROUTER_MODEL?.trim();
-  if (!apiKey || !model || cards.length === 0) return fallbackAnswer;
+  if (cards.length === 0) return fallbackAnswer;
 
   const context = cards.slice(0, 6).map((card, index) => ({
     index: index + 1,
@@ -370,54 +431,33 @@ async function synthesizeVeyraAnswer(
     createdAt: card.createdAt,
   }));
 
-  try {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    };
-    const referer = process.env.OPENROUTER_HTTP_REFERER || process.env.OPENROUTER_REFERER;
-    if (referer) headers['HTTP-Referer'] = referer;
+  const content = await callOpenRouterChat({
+    systemPrompt:
+      'You are Veyra inside Blabber. Answer only from the approved retrieved result metadata provided. Do not invent facts, messages, or spaces. Keep the answer concise and mention that results are from approved spaces.',
+    userPrompt: JSON.stringify({
+      question: prompt,
+      deterministicAnswer: fallbackAnswer,
+      approvedResults: context,
+    }),
+    temperature: 0.2,
+    maxTokens: 220,
+  });
 
-    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are Veyra inside Blabber. Answer only from the approved retrieved result metadata provided. Do not invent facts, messages, or spaces. Keep the answer concise and mention that results are from approved spaces.',
-          },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              question: prompt,
-              deterministicAnswer: fallbackAnswer,
-              approvedResults: context,
-            }),
-          },
-        ],
-        temperature: 0.2,
-        max_tokens: 220,
-      }),
-    });
+  return content || fallbackAnswer;
+}
 
-    if (!response.ok) throw new Error(`openrouter_${response.status}`);
-    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    const content = payload.choices?.[0]?.message?.content?.trim();
-    return content || fallbackAnswer;
-  } catch (error) {
-    logger.warn(
-      {
-        feature: 'veyra',
-        approvedResultCount: cards.length,
-        reason: error instanceof Error ? error.message : 'unknown_openrouter_error',
-      },
-      'Veyra OpenRouter synthesis fallback used'
-    );
-    return fallbackAnswer;
-  }
+const GENERAL_ASSISTANT_SYSTEM_PROMPT =
+  "You are Veyra, Blabber's assistant. This particular question is a general-knowledge or writing-help request with no dependency on the user's private Blabber data — answer it directly and helpfully, like a knowledgeable AI assistant. Do not mention needing access to any chat, space, or approved scope, and do not claim to have searched Blabber. Keep the answer concise and useful.";
+
+/** General assistant questions never touch retrieval/scopes — same OpenRouter helper, a different, unscoped system prompt, and a safe non-crashing fallback when OpenRouter is unavailable. */
+async function generalAssistantAnswer(prompt: string): Promise<string> {
+  const content = await callOpenRouterChat({
+    systemPrompt: GENERAL_ASSISTANT_SYSTEM_PROMPT,
+    userPrompt: prompt,
+    temperature: 0.5,
+    maxTokens: 500,
+  });
+  return content || "I can't reach the AI assistant right now — please try again in a moment.";
 }
 
 function scopeIdForChat(settings: VeyraSettingsDocument, chatId: ObjectId): string | undefined {
@@ -499,17 +539,39 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
   if (!parsed.success) return res.status(400).json({ error: 'Validation Error', message: 'Invalid Veyra request.' });
   const userObjectId = new ObjectId(userId);
   const settings = await getOrCreateVeyraSettings(userObjectId);
+  // Full Access re-projects a virtual scope list from the user's real chat
+  // memberships (see resolveEffectiveVeyraSettings) for every retrieval/
+  // resolution call below; approved_spaces mode passes `settings` through
+  // completely unchanged. `settings` itself (the persisted doc) is still used
+  // for the enabled/accessMode checks and never mutated.
+  const searchSettings = await resolveEffectiveVeyraSettings(userObjectId, settings);
   const intent = classifyIntent(parsed.data.prompt);
   const clientContext = parsed.data.context as VeyraConversationContext | undefined;
   if (!settings.enabled) return res.status(403).json({ error: 'Forbidden', message: 'Turn on Veyra in AI Privacy to begin.' });
   if (!await globalAiAllowed(userObjectId)) return res.status(403).json({ error: 'Forbidden', message: 'Turn on Veyra in AI Privacy to begin.' });
+
+  // General-knowledge/assistant questions never touch Blabber data, never
+  // require any approved scope or access mode, and are answered directly —
+  // Veyra behaves like a normal AI assistant here, in either access mode.
+  if (intent === 'general_assistant') {
+    const answer = await generalAssistantAnswer(parsed.data.prompt);
+    await audit(userObjectId, 'general', intent, true);
+    return res.status(200).json({
+      answer,
+      intent,
+      scope: null,
+      resultType: 'empty',
+      results: [],
+      context: nextContext(clientContext, 'preserve'),
+    });
+  }
 
   // A bare reply to "Which plan would you like to know about?" (or any other
   // unclassifiable text) is tried as a plan-title lookup before falling back
   // to the generic "I'm not sure" message — bounded strictly to plans inside
   // already-authorized chat scopes, never a broader search.
   if (intent === 'unclear') {
-    const lookup = await findPlanByTitleLookup(userObjectId, settings, parsed.data.prompt);
+    const lookup = await findPlanByTitleLookup(userObjectId, searchSettings, parsed.data.prompt);
     if (lookup.outcome === 'ambiguous') {
       await audit(userObjectId, 'general', 'find_plans', false);
       return res.status(200).json({
@@ -522,7 +584,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
       });
     }
     if (lookup.outcome === 'ok') {
-      const matchedScope = lookup.scopeId ? settings.scopes.find((scope) => scope.id === lookup.scopeId) : undefined;
+      const matchedScope = lookup.scopeId ? searchSettings.scopes.find((scope) => scope.id === lookup.scopeId) : undefined;
       await audit(userObjectId, 'chat', 'find_plans', true);
       return res.status(200).json({
         answer: `Found it: "${lookup.card.title}" in ${lookup.card.chatLabel}, started by ${lookup.card.senderName}.`,
@@ -559,14 +621,18 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
       answer =
         "I can search the Blabber spaces you've approved for messages, links, PDFs, files, photos, videos, plans, events, and tasks — just tell me what to look for and where. An approved space is a chat, group, or community you've explicitly selected in AI Privacy; I never search anywhere else.";
     } else if (intent === 'capability_spaces') {
-      const approvedLabels = settings.scopes
-        .filter((scope) => scope.type === 'chat' || scope.type === 'community')
-        .map((scope) => scope.label || 'Unnamed space');
-      if (approvedLabels.length === 0) {
-        answer = "You haven't approved any spaces yet. Go to Manage AI privacy to choose chats, groups, or communities Veyra can search.";
-        suggestManageAiPrivacy = true;
+      if (settings.accessMode === 'full_access') {
+        answer = 'Full Blabber access is enabled — I can search all the chats, groups, and My Actions items you already have access to, plus general questions. You can switch back to approved spaces only in Manage AI privacy.';
       } else {
-        answer = `Right now I can search: ${approvedLabels.join(', ')}.`;
+        const approvedLabels = settings.scopes
+          .filter((scope) => scope.type === 'chat' || scope.type === 'community')
+          .map((scope) => scope.label || 'Unnamed space');
+        if (approvedLabels.length === 0) {
+          answer = "You haven't approved any spaces yet. Go to Manage AI privacy to choose chats, groups, or communities Veyra can search.";
+          suggestManageAiPrivacy = true;
+        } else {
+          answer = `Right now I can search: ${approvedLabels.join(', ')}.`;
+        }
       }
     } else if (intent === 'unclear') {
       answer =
@@ -602,7 +668,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
         context: nextContext(clientContext, 'preserve'),
       });
     }
-    const resolved = await resolvePlanForContext(userObjectId, settings, planId);
+    const resolved = await resolvePlanForContext(userObjectId, searchSettings, planId);
     if (!resolved) {
       // The plan/space is no longer valid (e.g. the scope was revoked since
       // it was grounded) — refuse rather than guess, but do not erase the
@@ -656,7 +722,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
   // the approved My Actions scope, matching every pre-existing test/behavior).
   if (intent === 'action_status' && (clientContext?.activePlanId || clientContext?.activeSpaceId)) {
     if (clientContext.activePlanId) {
-      const resolved = await resolvePlanForContext(userObjectId, settings, clientContext.activePlanId);
+      const resolved = await resolvePlanForContext(userObjectId, searchSettings, clientContext.activePlanId);
       if (!resolved) {
         await audit(userObjectId, 'chat', intent, false);
         return res.status(200).json({
@@ -682,13 +748,13 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
         context: nextContext(clientContext, { lastResultKind: 'task' }),
       });
     }
-    const resolution = await resolveScopedChat(userObjectId, settings, {
+    const resolution = await resolveScopedChat(userObjectId, searchSettings, {
       scopeId: parsed.data.scopeId,
       prompt: parsed.data.prompt,
       context: { activeSpaceId: clientContext.activeSpaceId },
     });
     if (resolution.ok) {
-      const matchedScope = settings.scopes.find((scope) => scope.type === 'chat' && scope.targetId?.equals(resolution.chat._id));
+      const matchedScope = searchSettings.scopes.find((scope) => scope.type === 'chat' && scope.targetId?.equals(resolution.chat._id));
       const cards = await findTasksForContext(userObjectId, { chat: resolution.chat });
       await audit(userObjectId, 'chat', intent, cards.length > 0);
       return res.status(200).json({
@@ -716,7 +782,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
   if (RETRIEVAL_VEYRA_INTENTS.has(intent) || intent === 'action_request') {
     const contentIntent: RetrievalContentIntent =
       intent === 'action_request' ? classifyRetrievalContentType(parsed.data.prompt) : (intent as RetrievalContentIntent);
-    const retrieval = await runRetrieval(contentIntent, userObjectId, settings, parsed.data.prompt, parsed.data.scopeId, clientContext);
+    const retrieval = await runRetrieval(contentIntent, userObjectId, searchSettings, parsed.data.prompt, parsed.data.scopeId, clientContext);
 
     if (retrieval.outcome === 'scope_missing') {
       await audit(userObjectId, 'general', intent, false);
@@ -780,7 +846,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
     if (cards.length > 0) {
       const top = cards[0];
       if (contentIntent === 'find_plans') {
-        const topSpaceId = top.chatId ? scopeIdForChat(settings, new ObjectId(top.chatId)) : undefined;
+        const topSpaceId = top.chatId ? scopeIdForChat(searchSettings, new ObjectId(top.chatId)) : undefined;
         contextUpdate = {
           activeSpaceId: topSpaceId,
           activeSpaceName: top.chatLabel,
@@ -819,7 +885,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
   // any approved scope as a stand-in. decision_recap / latest_shared_item resolve their
   // target chat the same context-aware, name-overrides-everything way retrieval does.
   if (intent === 'decision_recap' || intent === 'latest_shared_item') {
-    const resolution = await resolveScopedChat(userObjectId, settings, {
+    const resolution = await resolveScopedChat(userObjectId, searchSettings, {
       scopeId: parsed.data.scopeId,
       prompt: parsed.data.prompt,
       context: { activeSpaceId: clientContext?.activeSpaceId },
@@ -846,7 +912,7 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
         code: 'scope_required',
       });
     }
-    const matchedScope = settings.scopes.find((scope) => scope.type === 'chat' && scope.targetId?.equals(resolution.chat._id));
+    const matchedScope = searchSettings.scopes.find((scope) => scope.type === 'chat' && scope.targetId?.equals(resolution.chat._id));
     const answer = (await chatAnswer(resolution.chat._id, userObjectId, intent)) || 'That space is not available to Veyra right now.';
     await audit(userObjectId, 'chat', intent, true);
     return res.status(200).json({
@@ -865,10 +931,10 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
 
   const requiresMyActionsScope = intent === 'plan_status';
   const selectedScope = parsed.data.scopeId
-    ? settings.scopes.find((scope) => scope.id === parsed.data.scopeId)
+    ? searchSettings.scopes.find((scope) => scope.id === parsed.data.scopeId)
     : requiresMyActionsScope || intent === 'action_status'
-      ? settings.scopes.find((scope) => scope.type === 'my_actions') || settings.scopes[0]
-      : settings.scopes.find((scope) => scope.type === 'general') || settings.scopes[0];
+      ? searchSettings.scopes.find((scope) => scope.type === 'my_actions') || searchSettings.scopes[0]
+      : searchSettings.scopes.find((scope) => scope.type === 'general') || searchSettings.scopes[0];
 
   if (!selectedScope || (requiresMyActionsScope && selectedScope.type !== 'my_actions')) {
     await audit(userObjectId, requiresMyActionsScope ? 'my_actions' : 'general', intent, false);

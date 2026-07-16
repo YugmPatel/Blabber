@@ -3,6 +3,15 @@ import { logger } from '@repo/utils';
 import { getDatabase } from '../db';
 
 export type VeyraScopeType = 'general' | 'my_actions' | 'chat' | 'community';
+
+// approved_spaces (default): only the chats/communities/My Actions the user
+// explicitly granted in AI Privacy are searchable. full_access: every
+// chat/space the user already has real product-level access to (still their
+// own membership only — never another user's private data) is searchable,
+// without requiring an individual grant per chat. Stored per-user; the
+// backend re-reads this on every ask, never trusting a client-supplied mode.
+export type VeyraAccessMode = 'approved_spaces' | 'full_access';
+
 export type VeyraIntentCategory =
   | 'greeting'
   | 'general_help'
@@ -26,7 +35,11 @@ export type VeyraIntentCategory =
   | 'search_messages'
   // Action-class language (send/forward/create/update/delete). This batch
   // never performs the side effect — it returns a confirmation-ready proposal.
-  | 'action_request';
+  | 'action_request'
+  // A general-knowledge/assistant question with no Blabber-data dependency
+  // (e.g. "explain Docker", "write a follow-up email") — answered directly by
+  // the model with no retrieval and no scope requirement, in either access mode.
+  | 'general_assistant';
 
 // Intents Veyra can answer without any approved scope — small talk, "what can
 // you do", and static app-navigation help never touch private Blabber data.
@@ -85,6 +98,7 @@ export interface VeyraSettingsDocument {
   userId: ObjectId;
   enabled: boolean;
   voiceRepliesEnabled: boolean;
+  accessMode: VeyraAccessMode;
   scopes: Array<{
     id: string;
     type: VeyraScopeType;
@@ -129,12 +143,22 @@ export async function getOrCreateVeyraSettings(userId: ObjectId): Promise<VeyraS
   const now = new Date();
   const collection = getVeyraSettingsCollection();
   const existing = await collection.findOne({ userId });
-  if (existing) return existing;
+  if (existing) {
+    // Documents created before accessMode existed default to the safer,
+    // pre-existing behavior (approved spaces only) — never silently widen an
+    // existing user's access. Backfilled lazily rather than via a migration.
+    if (!existing.accessMode) {
+      existing.accessMode = 'approved_spaces';
+      await collection.updateOne({ userId }, { $set: { accessMode: 'approved_spaces' } });
+    }
+    return existing;
+  }
 
   const doc: VeyraSettingsDocument = {
     userId,
     enabled: false,
     voiceRepliesEnabled: true,
+    accessMode: 'approved_spaces',
     scopes: [],
     createdAt: now,
     updatedAt: now,

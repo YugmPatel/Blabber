@@ -485,7 +485,21 @@ export default function VeyraPage() {
               {hasConversation ? <AmbientOrb state={orbState} size={28} /> : <VeyraMark size={28} />}
               <div className="leading-tight">
                 <p className="text-[15px] font-semibold tracking-wide text-[color:var(--bl-text)]">VEYRA</p>
-                <p className="text-[11px] text-[color:var(--bl-text-muted)]">AI assistant for approved spaces</p>
+                <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-[color:var(--bl-text-muted)]">
+                  <span>
+                    {settingsQuery.data?.settings.accessMode === 'full_access'
+                      ? 'Full Blabber access enabled'
+                      : 'Approved spaces only'}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/settings?s=ai')}
+                    className="brand-focus-ring font-semibold text-teal-600 underline-offset-2 hover:underline dark:text-teal-300"
+                  >
+                    Manage access
+                  </button>
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">

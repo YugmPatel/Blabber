@@ -248,6 +248,110 @@ describe('NewGroupModal', () => {
     expect(searchUsers).toHaveBeenCalledWith('devanshee');
   });
 
+  it('includes users who require a message request, not only users who can already be messaged directly', async () => {
+    // Regression test: group invites are governed by groupInvitePrivacy
+    // (defaults to 'everyone' server-side), a separate and more permissive
+    // check than messagePrivacy/canMessage. A user search result with
+    // canMessage: false must still be selectable for a group — this is
+    // exactly the "devanshee shows in New Convo but not Create Group" bug.
+    vi.mocked(searchUsers).mockResolvedValue({
+      users: [
+        {
+          id: 'devanshee-1',
+          username: 'devanshee',
+          displayName: 'Devanshee Shah',
+          isVerified: false,
+          relationshipStatus: 'none',
+          canMessage: false,
+          requiresMessageRequest: true,
+        },
+      ],
+      nextCursor: null,
+    });
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search people you can message...'), {
+      target: { value: 'devanshee' },
+    });
+
+    expect(await screen.findByText('Devanshee Shah')).toBeInTheDocument();
+    expect(screen.queryByText('No people found')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Devanshee Shah'));
+    expect(screen.getByText('Next (1 selected)')).toBeInTheDocument();
+  });
+
+  it('prefers profileHandle/displayHandle over the raw username when the backend provides one', async () => {
+    vi.mocked(searchUsers).mockResolvedValue({
+      users: [
+        {
+          id: 'handle-user',
+          username: 'devanshee123',
+          displayName: 'Devanshee Shah',
+          isVerified: false,
+          relationshipStatus: 'accepted',
+          canMessage: true,
+          requiresMessageRequest: false,
+          profileHandle: 'devanshee',
+          displayHandle: '@devanshee',
+        },
+      ],
+      nextCursor: null,
+    });
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search people you can message...'), {
+      target: { value: 'devanshee' },
+    });
+
+    await screen.findByText('Devanshee Shah');
+    expect(screen.getByText('@devanshee')).toBeInTheDocument();
+    expect(screen.queryByText('@devanshee123')).not.toBeInTheDocument();
+  });
+
+  it('does not show "No people found" while a search is still loading', async () => {
+    let resolveSearch: (value: { users: never[]; nextCursor: null }) => void = () => {};
+    vi.mocked(searchUsers).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSearch = resolve;
+      })
+    );
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search people you can message...'), {
+      target: { value: 'devanshee' },
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector('.animate-spin')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('No people found')).not.toBeInTheDocument();
+
+    resolveSearch({ users: [], nextCursor: null });
+    expect(await screen.findByText('No people found')).toBeInTheDocument();
+  });
+
   it('searches by username/handle and removes selected users from candidate rows', async () => {
     vi.mocked(searchUsers).mockResolvedValue({
       users: [
