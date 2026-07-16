@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useUpdateProfile } from '@/hooks/useUsers';
 import { apiClient, getAccessToken, normalizeMediaUrl } from '@/api/client';
 import CameraModal from '@/components/CameraModal';
+import AvatarLightbox from '@/components/AvatarLightbox';
 
 interface AvatarPresignResponse {
   uploadUrl: string;
@@ -31,6 +32,7 @@ export default function ProfilePage() {
   const [department, setDepartment] = useState(profileUser?.department || '');
   const [isUploading, setIsUploading] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
   const [showCameraCapture, setShowCameraCapture] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const displayedAvatar = normalizeMediaUrl(localPreview || avatarUrl);
@@ -194,17 +196,24 @@ export default function ProfilePage() {
             <div className="grid gap-6 md:grid-cols-[200px_1fr]">
               <div className="flex flex-col items-center">
                 <div className="relative">
-                  {displayedAvatar ? (
-                    <img
-                      src={displayedAvatar}
-                      alt="Profile"
-                      className="h-28 w-28 rounded-full object-cover border-4 border-[#0f766e]"
-                    />
-                  ) : (
-                    <div className="flex h-28 w-28 items-center justify-center rounded-full bg-[#0f766e] text-4xl font-semibold text-white">
-                      {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || '?'}
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAvatarOpen(true)}
+                    className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+                    aria-label="Open profile photo"
+                  >
+                    {displayedAvatar ? (
+                      <img
+                        src={displayedAvatar}
+                        alt="Profile"
+                        className="h-28 w-28 rounded-full object-cover border-4 border-[#0f766e]"
+                      />
+                    ) : (
+                      <div className="flex h-28 w-28 items-center justify-center rounded-full bg-[#0f766e] text-4xl font-semibold text-white">
+                        {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || '?'}
+                      </div>
+                    )}
+                  </button>
 
                   <button
                     onClick={() => setShowAvatarMenu(!showAvatarMenu)}
@@ -358,6 +367,12 @@ export default function ProfilePage() {
         onClose={() => setShowCameraCapture(false)}
         onCapture={handleAvatarFile}
         confirmLabel="Use Photo"
+      />
+      <AvatarLightbox
+        isOpen={avatarOpen}
+        src={displayedAvatar}
+        alt={user?.name || 'Profile'}
+        onClose={() => setAvatarOpen(false)}
       />
     </div>
   );

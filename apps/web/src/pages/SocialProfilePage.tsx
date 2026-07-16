@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import Avatar from '@/components/Avatar';
+import AvatarLightbox from '@/components/AvatarLightbox';
 import {
   cancelFollowRequest,
   fetchAuthorizedObjectUrl,
@@ -452,6 +453,7 @@ export default function SocialProfilePage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [tab, setTab] = useState<ProfileTab>('posts');
   const [relationshipModal, setRelationshipModal] = useState<'followers' | 'following' | null>(null);
+  const [avatarOpen, setAvatarOpen] = useState(false);
   const [relationshipBusyHandle, setRelationshipBusyHandle] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const cleanHandle = handle.replace(/^@/, '').toLowerCase();
@@ -665,7 +667,7 @@ export default function SocialProfilePage() {
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div className="flex min-w-0 items-end gap-4">
                       <div className="-mt-10 flex-shrink-0 rounded-full bg-[color:var(--bl-panel)] p-1.5 shadow-md">
-                        <Avatar src={normalizeMediaUrl(profile.avatarUrl)} alt={profile.name} size="xl" />
+                        <Avatar src={normalizeMediaUrl(profile.avatarUrl)} alt={profile.name} size="xl" onClick={() => setAvatarOpen(true)} title="Open profile photo" />
                       </div>
                       <div className="min-w-0 pb-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -931,6 +933,15 @@ export default function SocialProfilePage() {
                 onRelationshipAction={(user) => relationshipAction.mutate(user)}
               />
             </>
+          )}
+
+          {profile && (
+            <AvatarLightbox
+              isOpen={avatarOpen}
+              src={profile.avatarUrl}
+              alt={profile.name}
+              onClose={() => setAvatarOpen(false)}
+            />
           )}
         </div>
       </main>

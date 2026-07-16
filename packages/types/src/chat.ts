@@ -60,6 +60,8 @@ export interface ChatParticipantProfile {
   name: string;
   username?: string;
   email?: string;
+  profileHandle?: string;
+  displayHandle?: string;
   avatarUrl?: string;
 }
 
@@ -69,6 +71,8 @@ export const ChatParticipantProfileSchema = z.object({
   name: z.string(),
   username: z.string().optional(),
   email: z.string().optional(),
+  profileHandle: z.string().optional(),
+  displayHandle: z.string().optional(),
   avatarUrl: AvatarUrlSchema.optional(),
 });
 

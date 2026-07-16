@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import type { Message } from '@repo/types';
 import MessageBubble from './MessageBubble';
 import DateDivider from './DateDivider';
@@ -19,6 +20,8 @@ interface MessageListProps {
   onSave?: (message: Message) => void;
   onUnsave?: (message: Message) => void;
   onJumpToMessage?: (messageId: string, chatId?: string) => void;
+  onOpenMoment?: (momentId: string, snapshot?: Message['momentReply']) => void;
+  onEdit?: (message: Message, body: string) => Promise<void> | void;
   onReact?: (messageId: string, emoji: string) => void;
   onDelete?: (messageId: string) => void;
   onPollVote?: (messageId: string, optionIds: string[]) => void;
@@ -28,6 +31,9 @@ interface MessageListProps {
   onEventIcs?: (messageId: string) => void;
   highlightedMessageId?: string | null;
   onUserScrollInteraction?: () => void;
+  outgoingBubbleStyle?: CSSProperties;
+  scrollAreaStyle?: CSSProperties;
+  onOpenUserAvatar?: (user: { userId: string; name: string; avatarUrl?: string }) => void;
 }
 
 export default function MessageList({
@@ -46,6 +52,8 @@ export default function MessageList({
   onSave,
   onUnsave,
   onJumpToMessage,
+  onOpenMoment,
+  onEdit,
   onReact,
   onDelete,
   onPollVote,
@@ -55,6 +63,9 @@ export default function MessageList({
   onEventIcs,
   highlightedMessageId,
   onUserScrollInteraction,
+  outgoingBubbleStyle,
+  scrollAreaStyle,
+  onOpenUserAvatar,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -156,7 +167,7 @@ export default function MessageList({
 
   if (displayMessages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#f8faf9] text-slate-500 dark:bg-[#071315] dark:text-slate-400">
+      <div className="flex flex-1 items-center justify-center bg-[#f8faf9] text-slate-500 dark:bg-[#071315] dark:text-slate-400" style={scrollAreaStyle}>
         <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-center dark:border-[#1b393c] dark:bg-[#0b1d20]">
           <p className="font-medium text-slate-700 dark:text-slate-200">No messages yet</p>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Start the conversation to see insights appear.</p>
@@ -170,7 +181,7 @@ export default function MessageList({
       ref={scrollRef}
       tabIndex={0}
       className="flex-1 overflow-y-auto bg-[#f8faf9] px-6 py-5 dark:bg-[#071315] dark:[&_.bg-gray-200]:bg-slate-800 dark:[&_.text-gray-600]:text-slate-300"
-      style={{ display: 'flex', flexDirection: 'column-reverse' }}
+      style={{ display: 'flex', flexDirection: 'column-reverse', ...scrollAreaStyle }}
       onWheel={onUserScrollInteraction}
       onTouchMove={onUserScrollInteraction}
       onPointerDown={onUserScrollInteraction}
@@ -206,11 +217,9 @@ export default function MessageList({
                   isSentByMe={isSentByMe}
                   currentUserId={currentUserId}
                   showAvatar={showAvatar && isGroupChat}
-                  senderName={
-                    !isSentByMe && isGroupChat ? getUserName(message.senderId) : undefined
-                  }
-                    senderAvatarUrl={!isSentByMe ? getUserAvatar(message.senderId) : undefined}
-                    getUserName={getUserName}
+                  senderName={!isSentByMe && isGroupChat ? getUserName(message.senderId) : undefined}
+                  senderAvatarUrl={!isSentByMe ? getUserAvatar(message.senderId) : undefined}
+                  getUserName={getUserName}
                   onReply={onReply}
                   onForward={onForward}
                   onPin={onPin}
@@ -218,6 +227,8 @@ export default function MessageList({
                   onSave={onSave}
                   onUnsave={onUnsave}
                   onJumpToMessage={onJumpToMessage}
+                  onOpenMoment={onOpenMoment}
+                  onEdit={onEdit}
                   onReact={onReact}
                   onDelete={onDelete}
                   onPollVote={onPollVote}
@@ -226,6 +237,17 @@ export default function MessageList({
                   onEventCancel={onEventCancel}
                   onEventIcs={onEventIcs}
                   highlighted={message._id === highlightedMessageId}
+                  outgoingBubbleStyle={outgoingBubbleStyle}
+                  onAvatarClick={
+                    !isSentByMe
+                      ? () =>
+                          onOpenUserAvatar?.({
+                            userId: message.senderId,
+                            name: getUserName(message.senderId),
+                            avatarUrl: getUserAvatar(message.senderId),
+                          })
+                      : undefined
+                  }
                 />
               );
             })}

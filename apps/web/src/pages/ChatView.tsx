@@ -3,9 +3,10 @@ import { Component, useEffect, useState, useCallback, useMemo, useRef } from 're
 import type { ErrorInfo, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowLeft, Check, ExternalLink, FileText, Image as ImageIcon, Link as LinkIcon, Loader2, Search, Send, Sparkles, X } from 'lucide-react';
-import { chatKeys, useChat, useChats } from '@/hooks/useChats';
-import { messageKeys, useMessages, useDeleteMessage, useAddReaction, useVotePoll, useMarkMessagesRead, useForwardMessage, useMessagePins, usePinMessage, useSaveMessage, useUnpinMessage, useUnsaveMessage, useSharedContent, useClosePoll, useRsvpEvent, useCancelEvent, useDownloadEventIcs } from '@/hooks/useMessages';
+import { chatKeys, useChat, useChats, useClearChat, useRemoveDirectChat } from '@/hooks/useChats';
+import { messageKeys, useMessages, useDeleteMessage, useAddReaction, useVotePoll, useMarkMessagesRead, useForwardMessage, useMessagePins, usePinMessage, useSaveMessage, useUnpinMessage, useUnsaveMessage, useSharedContent, useClosePoll, useRsvpEvent, useCancelEvent, useDownloadEventIcs, useEditMessage } from '@/hooks/useMessages';
 import { useChatActions } from '@/hooks/useChatActions';
+import { chatThemeScrollStyle, outgoingBubbleStyle, useChatTheme } from '@/hooks/useChatTheme';
 import { useGroupBrain } from '@/hooks/useGroupBrain';
 import { useChatSummary } from '@/hooks/useChatSummary';
 import { useUser, useUserPresence } from '@/hooks/useUsers';
@@ -14,16 +15,20 @@ import { apiClient, fetchMessageWindow, normalizeMediaUrl } from '@/api/client';
 import type { SharedContentItem, SharedContentType } from '@/api/client';
 import { useAppStore } from '@/store/app-store';
 import ChatHeader from '@/components/ChatHeader';
+import AvatarLightbox from '@/components/AvatarLightbox';
+import ChatThemeModal from '@/components/ChatThemeModal';
 import ChatActionsPanel, { ActionForm, type ActionOwnerOption } from '@/components/ChatActionsPanel';
 import GroupBrainPanel from '@/components/GroupBrainPanel';
 import CatchMeUpCard from '@/components/CatchMeUpCard';
 import SourceEvidence from '@/components/SourceEvidence';
 import MessageList from '@/components/MessageList';
+import MomentPreviewModal from '@/components/MomentPreviewModal';
 import TypingDots from '@/components/TypingDots';
 import { Composer } from '@/components/Composer';
 import { canJumpToSource, sourceJumpPath } from '@/lib/source-jump';
 import { canSendToChat, isChatEnded, isGroupAdmin } from '@/utils/chat-permissions';
 import type { Chat, ChatSummaryTask, Message, SourceReference } from '@repo/types';
+import { formatDisplayName } from '@/utils/user-display';
 
 interface MessagesPage {
   messages: Message[];
@@ -181,7 +186,10 @@ export default function ChatView() {
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [isPinsOpen, setIsPinsOpen] = useState(false);
   const [isSharedOpen, setIsSharedOpen] = useState(false);
+  const [isThemeOpen, setIsThemeOpen] = useState(false);
   const [isIntelligenceOpen, setIsIntelligenceOpen] = useState(false);
+  const [momentPreview, setMomentPreview] = useState<{ momentId: string; snapshot?: Message['momentReply'] } | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<{ src?: string; alt: string } | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [sourceMessageError, setSourceMessageError] = useState<string | null>(null);
   const handledJumpKeyRef = useRef<string | null>(null);
@@ -296,7 +304,11 @@ export default function ChatView() {
   const unpinMessageMutation = useUnpinMessage(id || '');
   const saveMessageMutation = useSaveMessage();
   const unsaveMessageMutation = useUnsaveMessage();
+  const editMessageMutation = useEditMessage(id || '');
+  const clearChatMutation = useClearChat();
+  const removeDirectChatMutation = useRemoveDirectChat();
   const { mutate: markMessagesRead, isPending: isMarkingRead } = markReadMutation;
+  const chatTheme = useChatTheme(currentUser?._id, id);
 
   // Get typing users
   const typingUserIds = id ? getTypingUsers(id) : [];
@@ -325,6 +337,13 @@ export default function ChatView() {
       deleteMessageMutation.mutate(messageId);
     },
     [deleteMessageMutation]
+  );
+
+  const handleEdit = useCallback(
+    async (message: Message, body: string) => {
+      await editMessageMutation.mutateAsync({ messageId: message._id, data: { body } });
+    },
+    [editMessageMutation]
   );
 
   const handlePollVote = useCallback(
@@ -568,7 +587,7 @@ export default function ChatView() {
     if (chat.type === 'group') {
       return chat.title || 'Group Chat';
     }
-    return otherUser?.name || otherUser?.username || otherUser?.email || 'User';
+    return formatDisplayName(otherUser, 'User');
   }
 
   function getChatAvatar(chat: Chat): string | undefined {
@@ -583,10 +602,10 @@ export default function ChatView() {
       return 'You';
     }
     if (userId === otherUserId) {
-      return otherUser?.name || otherUser?.username || otherUser?.email || 'Unknown user';
+      return formatDisplayName(otherUser, 'Unknown user');
     }
     const profile = participantProfiles.get(userId);
-    return profile?.name || profile?.username || profile?.email || 'Unknown member';
+    return formatDisplayName(profile, 'Unknown member');
   }
 
   function getUserAvatar(userId: string): string | undefined {
@@ -659,6 +678,12 @@ export default function ChatView() {
         pinnedCount={pinData?.pins.length || 0}
         onOpenPins={() => setIsPinsOpen(true)}
         onOpenShared={() => setIsSharedOpen(true)}
+        onOpenTheme={() => setIsThemeOpen(true)}
+        onClearChat={() => id && clearChatMutation.mutate(id)}
+        onRemoveConversation={() => {
+          if (!id) return;
+          removeDirectChatMutation.mutate(id, { onSuccess: () => navigate('/chats') });
+        }}
       />
 
       {isEndedTemporaryGroup && (
@@ -695,6 +720,8 @@ export default function ChatView() {
         onSave={(message) => saveMessageMutation.mutate(message._id)}
         onUnsave={(message) => unsaveMessageMutation.mutate(message._id)}
         onJumpToMessage={jumpToMessage}
+        onOpenMoment={(momentId, snapshot) => setMomentPreview({ momentId, snapshot })}
+        onEdit={handleEdit}
         onReact={isBlockedDirectChat ? undefined : handleReact}
         onDelete={handleDelete}
         onPollVote={isBlockedDirectChat ? undefined : handlePollVote}
@@ -704,6 +731,9 @@ export default function ChatView() {
         onEventIcs={(messageId) => downloadEventIcsMutation.mutate(messageId)}
         highlightedMessageId={highlightedMessageId}
         onUserScrollInteraction={handleMessageListInteraction}
+        outgoingBubbleStyle={outgoingBubbleStyle(chatTheme.theme)}
+        scrollAreaStyle={chatThemeScrollStyle(chatTheme.theme)}
+        onOpenUserAvatar={({ name, avatarUrl }) => setAvatarPreview({ src: avatarUrl, alt: name })}
       />
 
       {sourceMessageError && (
@@ -754,6 +784,27 @@ export default function ChatView() {
           }}
         />
       )}
+
+      <ChatThemeModal
+        isOpen={isThemeOpen}
+        currentTheme={chatTheme.theme}
+        onSave={chatTheme.setTheme}
+        onReset={chatTheme.resetTheme}
+        onClose={() => setIsThemeOpen(false)}
+      />
+
+      <MomentPreviewModal
+        momentId={momentPreview?.momentId || null}
+        snapshot={momentPreview?.snapshot}
+        onClose={() => setMomentPreview(null)}
+      />
+
+      <AvatarLightbox
+        isOpen={Boolean(avatarPreview)}
+        src={avatarPreview?.src}
+        alt={avatarPreview?.alt || 'Profile photo'}
+        onClose={() => setAvatarPreview(null)}
+      />
 
       <ForwardMessageModal
         message={forwardingMessage}

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { z } from 'zod';
 import { getMessagesCollection } from '../models/message';
+import { getDatabase } from '../db';
 import { logger } from '@repo/utils';
 import { serializeMessage } from '../serialize-message';
 import { assertChatMembership } from '../chat-access';
@@ -53,23 +54,33 @@ export async function getMessages(req: Request, res: Response, next: NextFunctio
     const userObjectId = new ObjectId(userId);
 
     await assertChatMembership(chatObjectId, userObjectId);
+    const preferences = await getDatabase()
+      .collection('userChatPreferences')
+      .findOne({ chatId: chatObjectId, userId: userObjectId });
 
     // Build query
     const query: any = {
       chatId: chatObjectId,
       deletedFor: { $ne: userObjectId }, // Exclude messages deleted by this user
     };
+    if (preferences?.clearedAt) {
+      query.createdAt = { $gt: preferences.clearedAt };
+    }
 
     // Add cursor condition if provided
     if (cursor) {
       try {
         const cursorDoc = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'));
-        query.$or = [
+        const cursorOr = [
           { createdAt: { $lt: new Date(cursorDoc.createdAt) } },
           {
             createdAt: new Date(cursorDoc.createdAt),
             _id: { $lt: new ObjectId(cursorDoc._id) },
           },
+        ];
+        query.$and = [
+          ...(query.$and || []),
+          { $or: cursorOr },
         ];
       } catch (error) {
         res.status(400).json({ error: 'Bad Request', message: 'Invalid cursor' });

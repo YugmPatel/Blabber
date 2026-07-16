@@ -103,6 +103,7 @@ import {
 } from './routes/manage-members';
 import { updateChat } from './routes/update-chat';
 import { pinChat, unpinChat, archiveChat, unarchiveChat } from './routes/pin-archive';
+import { clearChatForMe, removeDirectChatForMe } from './routes/chat-preferences';
 import {
   createInviteLink,
   getInviteLinkSettings,
@@ -247,6 +248,8 @@ app.post('/:id/pin', authMiddleware, pinChat);
 app.post('/:id/unpin', authMiddleware, unpinChat);
 app.post('/:id/archive', authMiddleware, archiveChat);
 app.post('/:id/unarchive', authMiddleware, unarchiveChat);
+app.post('/:id/clear', authMiddleware, clearChatForMe);
+app.post('/:id/remove', authMiddleware, removeDirectChatForMe);
 
 // 404 handler
 app.use(notFoundHandler);

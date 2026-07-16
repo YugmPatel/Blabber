@@ -8,6 +8,7 @@ import { chatKeys, useChats } from '@/hooks/useChats';
 import { useFileUpload } from '@/hooks/useFileUpload';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Chat, User } from '@repo/types';
+import { formatDisplayName, formatUserSubtitle } from '@/utils/user-display';
 
 interface NewGroupModalProps {
   isOpen: boolean;
@@ -84,7 +85,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
     .filter((user): user is User => Boolean(user))
     .filter((user) => {
       if (!normalizedSearch) return true;
-      return [user.name, user.username, user.email]
+      return [user.name, user.profileHandle, (user as User & { displayHandle?: string }).displayHandle, user.username, user.email]
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(normalizedSearch));
     });
@@ -272,7 +273,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                     key={user._id}
                     className="flex items-center gap-1 rounded-full bg-[#0f766e] px-3 py-1 text-sm text-white"
                   >
-                    <span>{user.name || user.username || user.email}</span>
+                    <span>{formatDisplayName(user)}</span>
                     <button
                       onClick={() => handleUserToggle(user)}
                       className="ml-1 rounded-full hover:bg-white/20"
@@ -341,15 +342,15 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                           className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-800/70"
                         >
                           <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[#00a884] font-semibold text-white">
-                            {(user.name || user.username)?.[0]?.toUpperCase() || user.email[0].toUpperCase()}
+                            {formatDisplayName(user)[0]?.toUpperCase() || '?'}
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium text-slate-900 dark:text-white">
-                              {user.name || user.username || user.email}
+                              {formatDisplayName(user)}
                             </p>
-                            {(user.username || user.name) && (
+                            {formatUserSubtitle(user, user.email) && (
                               <p className="truncate text-sm text-slate-500 dark:text-slate-400">
-                                {user.username ? `@${user.username}` : user.email}
+                                {formatUserSubtitle(user, user.email)}
                               </p>
                             )}
                           </div>
@@ -465,7 +466,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                       key={user._id}
                       className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200"
                     >
-                      {user.name || user.username || user.email}
+                      {formatDisplayName(user)}
                     </span>
                   ))}
                 </div>

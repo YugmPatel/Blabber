@@ -51,9 +51,11 @@ interface AvatarProps {
   /** undefined = no indicator, true = online (green), false = offline (gray) */
   online?: boolean;
   className?: string;
+  onClick?: () => void;
+  title?: string;
 }
 
-export default function Avatar({ src, alt, size = 'md', online, className = '' }: AvatarProps) {
+export default function Avatar({ src, alt, size = 'md', online, className = '', onClick, title }: AvatarProps) {
   const s = SIZE[size];
   const normalizedSrc = normalizeMediaUrl(src);
   const [imageFailed, setImageFailed] = useState(false);
@@ -65,8 +67,8 @@ export default function Avatar({ src, alt, size = 'md', online, className = '' }
 
   const showImage = Boolean(normalizedSrc) && !imageFailed;
 
-  return (
-    <div className={`relative inline-flex flex-shrink-0 ${className}`}>
+  const content = (
+    <>
       <div
         className={`${s.container} overflow-hidden rounded-full flex items-center justify-center select-none`}
         style={!showImage ? { background: pickColor(alt || '?') } : undefined}
@@ -94,6 +96,25 @@ export default function Avatar({ src, alt, size = 'md', online, className = '' }
           aria-label={online ? 'Online' : 'Offline'}
         />
       )}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className={`relative inline-flex flex-shrink-0 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${className}`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={`relative inline-flex flex-shrink-0 ${className}`}>
+      {content}
     </div>
   );
 }

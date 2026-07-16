@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { Message } from '@repo/types';
 import { createReport, fetchAuthorizedObjectUrl, getAccessToken, normalizeMediaUrl } from '@/api/client';
 import Avatar from './Avatar';
 import ReadReceipts from './ReadReceipts';
 import PlanThisMessageCard from './PlanThisMessageCard';
 import SharedItemMessageCard from './SharedItemMessageCard';
-import { Bookmark, Flag, Image as ImageIcon, Loader2, Pin, Type, Video, Volume2, X } from 'lucide-react';
+import { Bookmark, Flag, Image as ImageIcon, Loader2, Pencil, Pin, Type, Video, Volume2, X } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -21,6 +22,8 @@ interface MessageBubbleProps {
   onSave?: (message: Message) => void;
   onUnsave?: (message: Message) => void;
   onJumpToMessage?: (messageId: string, chatId?: string) => void;
+  onOpenMoment?: (momentId: string, snapshot?: Message['momentReply']) => void;
+  onEdit?: (message: Message, body: string) => Promise<void> | void;
   onReact?: (messageId: string, emoji: string) => void;
   onDelete?: (messageId: string) => void;
   onPollVote?: (messageId: string, optionIds: string[]) => void;
@@ -30,6 +33,8 @@ interface MessageBubbleProps {
   onEventIcs?: (messageId: string) => void;
   getUserName?: (userId: string) => string;
   highlighted?: boolean;
+  outgoingBubbleStyle?: CSSProperties;
+  onAvatarClick?: () => void;
 }
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
@@ -193,6 +198,8 @@ export default function MessageBubble({
   onSave,
   onUnsave,
   onJumpToMessage,
+  onOpenMoment,
+  onEdit,
   onReact,
   onDelete,
   onPollVote,
@@ -202,6 +209,8 @@ export default function MessageBubble({
   onEventIcs,
   getUserName,
   highlighted = false,
+  outgoingBubbleStyle,
+  onAvatarClick,
 }: MessageBubbleProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
@@ -209,6 +218,9 @@ export default function MessageBubble({
   const [isCopyingPhoto, setIsCopyingPhoto] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showReportDialog, setShowReportDialog] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editBody, setEditBody] = useState(message.body);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [reportReason, setReportReason] = useState(REPORT_REASONS[0]);
   const [reportStatus, setReportStatus] = useState<string | null>(null);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
@@ -217,6 +229,18 @@ export default function MessageBubble({
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const canCopyPhoto = isSentByMe && message.media?.type === 'image' && Boolean(message.media.url);
   const momentReply = message.momentReply;
+  const canEditMessage = Boolean(
+    isSentByMe &&
+    onEdit &&
+    message.body?.trim() &&
+    (!message.type || message.type === 'text') &&
+    !message.media &&
+    !message.poll &&
+    !message.sticker &&
+    !message.event &&
+    !message.planThis &&
+    !message.sharedItem
+  );
 
   useEffect(() => {
     if (!momentReply?.mediaUrl || momentReply.momentType !== 'image') {
@@ -282,7 +306,7 @@ export default function MessageBubble({
     }
 
     const menuWidth = 160;
-    const menuHeight = canCopyPhoto ? 300 : 260;
+    const menuHeight = canCopyPhoto || canEditMessage ? 320 : 260;
     const gutter = 8;
     const top =
       window.innerHeight - rect.bottom >= menuHeight + gutter
@@ -346,6 +370,25 @@ export default function MessageBubble({
       setReportStatus('This report could not be submitted. Please try again.');
     } finally {
       setIsSubmittingReport(false);
+    }
+  };
+
+  const submitEdit = async () => {
+    const nextBody = editBody.trim();
+    if (!canEditMessage || !nextBody || nextBody === message.body || isSavingEdit) {
+      if (nextBody === message.body) setIsEditing(false);
+      return;
+    }
+    setIsSavingEdit(true);
+    setActionNotice(null);
+    try {
+      await onEdit?.(message, nextBody);
+      setIsEditing(false);
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: string } }; message?: string };
+      setActionNotice(err?.response?.data?.message || err?.message || 'Could not edit this message.');
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -726,7 +769,12 @@ export default function MessageBubble({
       : 'Moment';
 
     return (
-      <div className="mb-2 rounded-xl border border-teal-100 bg-teal-50/80 p-2.5 dark:border-teal-800/50 dark:bg-teal-500/10">
+      <button
+        type="button"
+        disabled={!momentReply.momentId || !onOpenMoment}
+        onClick={() => momentReply.momentId && onOpenMoment?.(momentReply.momentId, momentReply)}
+        className="mb-2 w-full rounded-xl border border-teal-100 bg-teal-50/80 p-2.5 text-left transition hover:border-teal-300 hover:bg-teal-50 disabled:cursor-default disabled:hover:border-teal-100 disabled:hover:bg-teal-50/80 dark:border-teal-800/50 dark:bg-teal-500/10 dark:hover:border-teal-500/60 dark:hover:bg-teal-500/15"
+      >
         <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-300">
           {momentReply.label || 'Replied to a Moment'}
         </p>
@@ -757,7 +805,7 @@ export default function MessageBubble({
             </span>
           </div>
         )}
-      </div>
+      </button>
     );
   };
 
@@ -830,7 +878,7 @@ export default function MessageBubble({
       {/* Avatar */}
       {showAvatar && !isSentByMe && (
         <div className="flex-shrink-0">
-          <Avatar src={senderAvatarUrl} alt={senderName || 'User'} size="sm" />
+          <Avatar src={senderAvatarUrl} alt={senderName || 'User'} size="sm" onClick={onAvatarClick} title="Open profile photo" />
         </div>
       )}
       {showAvatar && isSentByMe && <div className="w-8" />}
@@ -986,6 +1034,19 @@ export default function MessageBubble({
                     Copy photo
                   </button>
                 )}
+                {canEditMessage && (
+                  <button
+                    onClick={() => {
+                      setEditBody(message.body);
+                      setIsEditing(true);
+                      setShowMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    <Pencil size={16} aria-hidden="true" />
+                    Edit message
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(message.body);
@@ -1033,6 +1094,7 @@ export default function MessageBubble({
                 ? 'border border-teal-100 bg-teal-50 text-slate-900 dark:border-teal-400/20 dark:bg-teal-500/15 dark:text-slate-100'
                 : 'border border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
             }`}
+            style={isSentByMe ? outgoingBubbleStyle : undefined}
           >
             {renderReplyPreview()}
             {message.forwarded?.isForwarded && (
@@ -1047,7 +1109,39 @@ export default function MessageBubble({
             {renderEvent()}
             {renderPlanThis()}
             {renderSharedItem()}
-            {message.body && !message.poll && !message.sticker && !message.event && !message.planThis && !message.sharedItem && (
+            {isEditing ? (
+              <div className="min-w-[220px] space-y-2">
+                <textarea
+                  value={editBody}
+                  onChange={(event) => setEditBody(event.target.value)}
+                  rows={3}
+                  maxLength={10000}
+                  className="w-full resize-none rounded-xl border border-teal-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-teal-700 dark:bg-slate-900 dark:text-white dark:focus:ring-teal-500/20"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setEditBody(message.body);
+                    }}
+                    disabled={isSavingEdit}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitEdit()}
+                    disabled={isSavingEdit || !editBody.trim()}
+                    className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-teal-700 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+                  >
+                    {isSavingEdit ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            ) : message.body && !message.poll && !message.sticker && !message.event && !message.planThis && !message.sharedItem && (
               <MentionedText message={message} isSentByMe={isSentByMe} />
             )}
 

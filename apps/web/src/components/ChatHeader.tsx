@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Ban, ChevronDown, ChevronUp, ExternalLink, Flag, FolderOpen, Link2, MessageCircle, Pencil, Pin, Users, Phone, Video, Search, X, Sparkles, Crown, Shield, UserPlus, Trash2, Camera, Loader2 } from 'lucide-react';
+import { AlertTriangle, Ban, ChevronDown, ChevronUp, ExternalLink, Flag, FolderOpen, Link2, MessageCircle, Palette, Pencil, Pin, Users, Phone, Video, Search, X, Sparkles, Crown, Shield, UserPlus, Trash2, Camera, Loader2 } from 'lucide-react';
 import type { Chat, User } from '@repo/types';
 import Avatar from './Avatar';
+import AvatarLightbox from './AvatarLightbox';
 import GroupCallModal, { createGroupCallId } from './GroupCallModal';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -36,6 +37,7 @@ import {
 } from '@/hooks/useChats';
 import type { InviteExpiry, InviteMaxUses } from '@/api/client';
 import { useSearchUsers, useUpdateProfile } from '@/hooks/useUsers';
+import { formatDisplayHandle, formatDisplayName, formatUserSubtitle } from '@/utils/user-display';
 
 interface ChatHeaderProps {
   chat: Chat;
@@ -51,16 +53,19 @@ interface ChatHeaderProps {
   pinnedCount?: number;
   onOpenPins?: () => void;
   onOpenShared?: () => void;
+  onOpenTheme?: () => void;
+  onClearChat?: () => void;
+  onRemoveConversation?: () => void;
 }
 
 type DisplayUser = Partial<User> & { _id: string };
 
 function getUserTitle(user: DisplayUser | undefined, fallback = 'User') {
-  return user?.name || user?.username || user?.email || fallback;
+  return formatDisplayName(user, fallback);
 }
 
 function getUserMeta(user: DisplayUser | undefined) {
-  return [user?.email, user?.username ? `@${user.username}` : ''].filter(Boolean).join(' • ');
+  return formatUserSubtitle(user, user?.email || '');
 }
 
 /** Card block used to group each settings area inside the info modals. */
@@ -111,6 +116,7 @@ function UserProfileModal({
   onClose: () => void;
 }) {
   const [notice, setNotice] = useState('');
+  const [photoOpen, setPhotoOpen] = useState(false);
   const navigate = useNavigate();
   const { user: currentUser, refreshUser } = useAuth();
   const updateProfile = useUpdateProfile();
@@ -241,7 +247,7 @@ function UserProfileModal({
               style={{ background: 'radial-gradient(circle, rgba(45, 212, 191, 0.35) 0%, rgba(45, 212, 191, 0) 68%)' }}
             />
             <div className="relative rounded-full p-1 ring-2 ring-teal-400/40">
-              <Avatar src={displayedAvatarUrl} alt={getUserTitle(user)} size="xl" online={online} />
+              <Avatar src={displayedAvatarUrl} alt={getUserTitle(user)} size="xl" online={online} onClick={() => setPhotoOpen(true)} title="Open profile photo" />
             </div>
             {isSelf && (
               <button
@@ -259,8 +265,8 @@ function UserProfileModal({
           <h3 className="mt-5 text-xl font-bold tracking-tight text-[color:var(--bl-text)]">
             {getUserTitle(user)}
           </h3>
-          {(publicHandle || user.username) && (
-            <p className="mt-1 text-sm font-medium text-teal-600 dark:text-teal-300">@{publicHandle || user.username}</p>
+          {(publicHandle || formatDisplayHandle(user)) && (
+            <p className="mt-1 text-sm font-medium text-teal-600 dark:text-teal-300">{publicHandle ? `@${publicHandle}` : formatDisplayHandle(user)}</p>
           )}
           {online !== undefined && (
             <p className={`mt-0.5 text-xs font-medium ${online ? 'text-emerald-600 dark:text-emerald-400' : 'text-[color:var(--bl-text-muted)]'}`}>
@@ -367,6 +373,12 @@ function UserProfileModal({
         )}
         {notice && <p className="mt-3 text-center text-xs text-[color:var(--bl-text-muted)]" role="status">{notice}</p>}
       </div>
+      <AvatarLightbox
+        isOpen={photoOpen}
+        src={displayedAvatarUrl}
+        alt={getUserTitle(user)}
+        onClose={() => setPhotoOpen(false)}
+      />
     </div>
   );
 }
@@ -403,6 +415,7 @@ function GroupInfoModal({
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [lightboxAvatar, setLightboxAvatar] = useState<{ src?: string | null; alt: string } | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const updateChat = useUpdateChat(chat._id);
   const { uploadMedia, isUploading: isUploadingGroupAvatar } = useFileUpload();
@@ -607,11 +620,11 @@ function GroupInfoModal({
             />
             <div className="relative rounded-full p-1 ring-2 ring-teal-400/40">
               {avatarUrl ? (
-                <Avatar src={avatarUrl} alt={title} size="xl" />
+                <Avatar src={avatarUrl} alt={title} size="xl" onClick={() => setLightboxAvatar({ src: avatarUrl, alt: title })} title="Open group photo" />
               ) : (
-                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-teal-600">
+                <button type="button" onClick={() => setLightboxAvatar({ src: undefined, alt: title })} className="flex h-20 w-20 items-center justify-center rounded-full bg-teal-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400" aria-label="Open group photo">
                   <Users size={30} className="text-white" />
-                </div>
+                </button>
               )}
             </div>
             {canEdit && (
@@ -874,7 +887,7 @@ function GroupInfoModal({
                       onClick={() => setSelectedMemberIds((ids) => ids.filter((id) => id !== user._id))}
                       className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800 transition hover:bg-teal-100 dark:bg-teal-500/20 dark:text-teal-100 dark:hover:bg-teal-500/30"
                     >
-                      {getUserTitle(user as DisplayUser)} ✕
+                        {getUserTitle(user as DisplayUser)} x
                     </button>
                   ))}
                 </div>
@@ -912,8 +925,15 @@ function GroupInfoModal({
                   key={member._id}
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-2 py-2 text-left transition hover:bg-[color:var(--bl-panel)]"
                 >
-                  <button onClick={() => onSelectMember(member)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                    <Avatar src={member.avatarUrl} alt={getUserTitle(member)} size="md" />
+                    <button
+                      type="button"
+                      onClick={() => setLightboxAvatar({ src: member.avatarUrl, alt: getUserTitle(member) })}
+                      className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+                      aria-label={`Open ${getUserTitle(member)} photo`}
+                    >
+                      <Avatar src={member.avatarUrl} alt={getUserTitle(member)} size="md" />
+                    </button>
+                    <button onClick={() => onSelectMember(member)} className="flex min-w-0 flex-1 text-left">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-[color:var(--bl-text)]">
                         {getUserTitle(member, 'Unknown member')}
@@ -1033,6 +1053,12 @@ function GroupInfoModal({
             </div>
           </SectionCard>
         </div>
+        <AvatarLightbox
+          isOpen={Boolean(lightboxAvatar)}
+          src={lightboxAvatar?.src}
+          alt={lightboxAvatar?.alt || title}
+          onClose={() => setLightboxAvatar(null)}
+        />
       </div>
     </div>
   );
@@ -1103,6 +1129,9 @@ export default function ChatHeader({
   pinnedCount = 0,
   onOpenPins,
   onOpenShared,
+  onOpenTheme,
+  onClearChat,
+  onRemoveConversation,
 }: ChatHeaderProps) {
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
@@ -1114,6 +1143,7 @@ export default function ChatHeader({
   const [profileUser, setProfileUser] = useState<DisplayUser | null>(null);
   const [callNotice, setCallNotice] = useState<{ title: string; message: string } | null>(null);
   const [groupCall, setGroupCall] = useState<{ callId: string; callType: 'audio' | 'video'; isInitiator?: boolean } | null>(null);
+  const [headerAvatarOpen, setHeaderAvatarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
@@ -1337,34 +1367,36 @@ export default function ChatHeader({
       <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center justify-between px-4 py-3">
           {/* Left: avatar + info */}
-          <button
-            onClick={openProfileOrGroupInfo}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 dark:hover:bg-slate-800/70"
-            aria-label={isGroupChat ? 'Open group info' : 'Open user profile'}
-          >
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             {isGroupChat && getChatAvatar(chat) ? (
-              <Avatar src={getChatAvatar(chat)} alt={getChatTitle(chat)} size="md" />
+              <Avatar src={getChatAvatar(chat)} alt={getChatTitle(chat)} size="md" onClick={() => setHeaderAvatarOpen(true)} title="Open group photo" />
             ) : isGroupChat ? (
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-600">
+              <button type="button" onClick={() => setHeaderAvatarOpen(true)} className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400" aria-label="Open group photo">
                 <Users size={18} className="text-white" />
-              </div>
+              </button>
             ) : (
               <Avatar
                 src={getChatAvatar(chat)}
                 alt={getChatTitle(chat)}
                 size="md"
                 online={onlineStatus?.online}
+                onClick={() => setHeaderAvatarOpen(true)}
+                title="Open profile photo"
               />
             )}
-            <div className="min-w-0">
+            <button
+              onClick={openProfileOrGroupInfo}
+              className="min-w-0 rounded-xl text-left transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 dark:hover:bg-slate-800/70"
+              aria-label={isGroupChat ? 'Open group info' : 'Open user profile'}
+            >
               <h2 className="truncate text-[15px] font-semibold text-slate-900 dark:text-white">
                 {getChatTitle(chat)}
               </h2>
               <p className={`truncate text-xs ${isOnline ? 'text-teal-600 dark:text-teal-400' : 'text-slate-500 dark:text-slate-400'}`}>
                 {getStatusText()}
               </p>
-            </div>
-          </button>
+            </button>
+          </div>
 
           {/* Right: action buttons */}
           <div className="flex items-center gap-0.5 text-teal-600 dark:text-teal-300">
@@ -1410,6 +1442,36 @@ export default function ChatHeader({
             >
               <FolderOpen size={18} />
             </button>
+            <button
+              onClick={onOpenTheme}
+              aria-label="Chat theme"
+              title="Chat theme"
+              className={btnBase}
+            >
+              <Palette size={18} />
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('Clear messages in this conversation for you?')) onClearChat?.();
+              }}
+              aria-label="Clear chat"
+              title="Clear chat"
+              className={btnBase}
+            >
+              <Trash2 size={18} />
+            </button>
+            {!isGroupChat && (
+              <button
+                onClick={() => {
+                  if (window.confirm('Remove this direct conversation from your list?')) onRemoveConversation?.();
+                }}
+                aria-label="Remove conversation"
+                title="Remove conversation"
+                className={`${btnBase} text-rose-600 hover:text-rose-700 dark:text-rose-300 dark:hover:text-rose-200`}
+              >
+                <X size={18} />
+              </button>
+            )}
 
             {/* Search */}
             <button
@@ -1541,6 +1603,12 @@ export default function ChatHeader({
         onClose={() => setCallNotice(null)}
         title={callNotice?.title || 'Call'}
         message={callNotice?.message || ''}
+      />
+      <AvatarLightbox
+        isOpen={headerAvatarOpen}
+        src={getChatAvatar(chat)}
+        alt={getChatTitle(chat)}
+        onClose={() => setHeaderAvatarOpen(false)}
       />
 
       <GroupInfoModal

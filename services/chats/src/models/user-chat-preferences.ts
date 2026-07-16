@@ -9,6 +9,8 @@ export interface UserChatPreferences {
   pinned: boolean;
   archived: boolean;
   archivedAt?: Date;
+  clearedAt?: Date;
+  hiddenAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }

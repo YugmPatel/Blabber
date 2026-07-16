@@ -38,13 +38,31 @@ export const listChats = asyncHandler(async (req: Request, res: Response) => {
       .filter((preference: any) => preference.archived)
       .map((preference: any) => [preference.chatId.toString(), preference])
   );
+  const hiddenByChatId = new Map(
+    preferences
+      .filter((preference: any) => preference.hiddenAt)
+      .map((preference: any) => [preference.chatId.toString(), preference])
+  );
+  const clearedAtByChatId = new Map(
+    preferences
+      .filter((preference: any) => preference.clearedAt)
+      .map((preference: any) => [preference.chatId.toString(), preference.clearedAt as Date])
+  );
 
   // Find chats and sort by updatedAt descending
   const allChats = await collection.find(query).sort({ updatedAt: -1 }).limit(limit * 2).toArray();
   const chats = allChats
+    .filter((chat) => {
+      const hidden = hiddenByChatId.get(chat._id.toString()) as any;
+      if (!hidden?.hiddenAt) return true;
+      return new Date(chat.updatedAt).getTime() > new Date(hidden.hiddenAt).getTime();
+    })
     .filter((chat) => archivedOnly === archivedByChatId.has(chat._id.toString()))
     .slice(0, limit);
   const chatIds = chats.map((chat) => chat._id);
+  if (chatIds.length === 0) {
+    return res.status(200).json({ chats: [] });
+  }
   const unreadCounts = await db
     .collection('messages')
     .aggregate<{ _id: ObjectId; count: number }>([
@@ -53,6 +71,10 @@ export const listChats = asyncHandler(async (req: Request, res: Response) => {
           chatId: { $in: chatIds },
           senderId: { $ne: userObjectId },
           deletedFor: { $ne: userObjectId },
+          $or: chatIds.map((chatId) => ({
+            chatId,
+            createdAt: { $gt: clearedAtByChatId.get(chatId.toString()) || new Date(0) },
+          })),
         },
       },
       {
@@ -102,6 +124,10 @@ export const listChats = asyncHandler(async (req: Request, res: Response) => {
           senderId: { $ne: userObjectId },
           'mentions.userId': userObjectId,
           deletedFor: { $ne: userObjectId },
+          $or: chatIds.map((chatId) => ({
+            chatId,
+            createdAt: { $gt: clearedAtByChatId.get(chatId.toString()) || new Date(0) },
+          })),
         },
       },
       {

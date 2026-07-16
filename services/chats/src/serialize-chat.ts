@@ -7,6 +7,8 @@ interface UserDocument {
   name?: string;
   username?: string;
   email?: string;
+  profileHandle?: string;
+  displayHandle?: string;
   avatarUrl?: string;
 }
 
@@ -119,7 +121,7 @@ export async function serializeChat(
     const users = await getDatabase()
       .collection<UserDocument>('users')
       .find({ _id: { $in: activeChat.participants } })
-      .project<UserDocument>({ _id: 1, name: 1, username: 1, email: 1, avatarUrl: 1 })
+      .project<UserDocument>({ _id: 1, name: 1, username: 1, email: 1, profileHandle: 1, displayHandle: 1, avatarUrl: 1 })
       .toArray();
     const byId = new Map(users.map((user) => [user._id.toString(), user]));
     serialized.participantProfiles = activeChat.participants.map((participantId) => {
@@ -131,6 +133,8 @@ export async function serializeChat(
             name: displayName(user),
             username: user.username,
             email: user.email,
+            profileHandle: user.profileHandle,
+            displayHandle: user.displayHandle || (user.profileHandle ? `@${user.profileHandle.replace(/^@/, '')}` : undefined),
             avatarUrl: user.avatarUrl,
           }
         : { _id: id, name: id };

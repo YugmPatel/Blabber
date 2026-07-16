@@ -323,6 +323,39 @@ export const useUnarchiveChat = () => {
   });
 };
 
+export const useClearChat = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (chatId: string) => {
+      await apiClient.post(`/api/chats/${chatId}/clear`);
+      return chatId;
+    },
+    onSuccess: (chatId) => {
+      queryClient.removeQueries({ queryKey: ['messages', 'list', chatId] });
+      queryClient.invalidateQueries({ queryKey: ['messages', 'list', chatId] });
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
+export const useRemoveDirectChat = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (chatId: string) => {
+      await apiClient.post(`/api/chats/${chatId}/remove`);
+      return chatId;
+    },
+    onSuccess: (chatId) => {
+      queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+      queryClient.removeQueries({ queryKey: ['messages', 'list', chatId] });
+      removeChatFromCachedLists(queryClient, chatId);
+      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    },
+  });
+};
+
 export const useInviteLinkSettings = (chatId: string | undefined, enabled = true) => {
   return useQuery({
     queryKey: chatKeys.invite(chatId || ''),
