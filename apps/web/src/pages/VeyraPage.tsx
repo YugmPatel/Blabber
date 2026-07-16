@@ -788,7 +788,7 @@ export default function VeyraPage() {
                         </>
                       ) : (
                         <>
-                          <VeyraAnswerText text={turn.answer} className="mt-1" />
+                          <VeyraAnswerText text={turn.answer ?? ''} className="mt-1" />
                           {turn.suggestManageAiPrivacy && (
                             <button
                               type="button"
