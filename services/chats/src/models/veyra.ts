@@ -39,7 +39,13 @@ export type VeyraIntentCategory =
   // A general-knowledge/assistant question with no Blabber-data dependency
   // (e.g. "explain Docker", "write a follow-up email") — answered directly by
   // the model with no retrieval and no scope requirement, in either access mode.
-  | 'general_assistant';
+  | 'general_assistant'
+  // A broad "catch me up" / "summarize today" style question with no named
+  // chat or content type — aggregates evidence across every accessible space
+  // (approved scopes only in approved_spaces mode; every accessible chat plus
+  // My Actions in full_access) into one sectioned, OpenRouter-synthesized
+  // recap, rather than single-space retrieval or space disambiguation.
+  | 'daily_recap';
 
 // Intents Veyra can answer without any approved scope — small talk, "what can
 // you do", and static app-navigation help never touch private Blabber data.

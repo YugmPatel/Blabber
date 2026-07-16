@@ -1056,7 +1056,7 @@ describe('POST /veyra/ask', () => {
       expect(response.body.results[0].title).toBe('approved.pdf');
     });
 
-    it('full_access mode treats every one of the user\'s chats as a candidate without an individual grant (would be scope_required with zero grants otherwise)', async () => {
+    it('full_access mode aggregates a broad/unnamed retrieval question across every one of the user\'s chats, without an individual grant and without asking which space', async () => {
       await enableVeyra();
       await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
       const chatOne = await seedChatWithUser('Trip Planning');
@@ -1066,13 +1066,14 @@ describe('POST /veyra/ask', () => {
 
       // Neither chat was individually approved, and the prompt names no
       // specific chat — with zero grants this would be scope_required under
-      // approved_spaces. Under full_access both chats are valid, unnamed
-      // candidates, so retrieval reports them as ambiguous instead of denied.
+      // approved_spaces. Full Access must not ask the user to pick a space
+      // for a broad question like this; it searches every accessible chat
+      // and merges the results instead.
       const response = await request(app).post('/veyra/ask').send({ prompt: 'find any pdf' });
       expect(response.status).toBe(200);
-      expect(response.body.ambiguous).toBe(true);
-      const labels = response.body.candidates.map((candidate: any) => candidate.label).sort();
-      expect(labels).toEqual(['Apartment Hunt', 'Trip Planning']);
+      expect(response.body.ambiguous).toBeFalsy();
+      const titles = response.body.results.map((result: any) => result.title).sort();
+      expect(titles).toEqual(['itinerary.pdf', 'lease.pdf']);
     });
 
     it('full_access mode retrieves from a specific chat once it is named, with no prior grant needed', async () => {
@@ -1086,6 +1087,140 @@ describe('POST /veyra/ask', () => {
       expect(response.status).toBe(200);
       expect(response.body.results).toHaveLength(1);
       expect(response.body.results[0].title).toBe('lease.pdf');
+    });
+
+    it('full_access "find any pdf with yugm" searches across all accessible spaces matching that name', async () => {
+      await enableVeyra();
+      await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
+      await seedChatWithUser('Design Crew');
+      const yugmChat = await seedChatWithUser('Yugm Trip');
+      await seedMessage(yugmChat, { media: { type: 'document', mimeType: 'application/pdf', fileName: 'lease.pdf' } });
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'find any pdf with yugm' });
+      expect(response.status).toBe(200);
+      expect(response.body.ambiguous).toBeFalsy();
+      expect(response.body.results).toHaveLength(1);
+      expect(response.body.results[0].title).toBe('lease.pdf');
+    });
+
+    it('full_access "show all my plans" searches every accessible chat\'s plans/events, not just one', async () => {
+      await enableVeyra();
+      await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
+      const chatOne = await seedChatWithUser('Trip Planning');
+      const chatTwo = await seedChatWithUser('Apartment Hunt');
+      const creatorId = new ObjectId();
+      await seedChatUsers([creatorId]);
+      await getDatabase().collection('plan_this_plans').insertMany([
+        {
+          _id: new ObjectId(),
+          chatId: chatOne,
+          creatorUserId: creatorId,
+          source: { type: 'post', sourceId: new ObjectId(), previewLabel: 'Trip' },
+          state: 'proposed',
+          title: 'Yosemite Weekend',
+          description: '',
+          checklist: [],
+          participants: [{ userId: mockUserId }],
+          votes: [],
+          assignments: [],
+          updateCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          _id: new ObjectId(),
+          chatId: chatTwo,
+          creatorUserId: creatorId,
+          source: { type: 'post', sourceId: new ObjectId(), previewLabel: 'Apartment' },
+          state: 'proposed',
+          title: 'Apartment Viewing',
+          description: '',
+          checklist: [],
+          participants: [{ userId: mockUserId }],
+          votes: [],
+          assignments: [],
+          updateCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ] as any);
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'show all my plans' });
+      expect(response.status).toBe(200);
+      expect(response.body.ambiguous).toBeFalsy();
+      const titles = response.body.results.map((result: any) => result.title).sort();
+      expect(titles).toEqual(['Apartment Viewing', 'Yosemite Weekend']);
+    });
+
+    it('full_access "summarize today" aggregates across multiple chats/groups and does not ask which space', async () => {
+      await enableVeyra();
+      await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
+      const chatOne = await seedChatWithUser('Trip Planning');
+      const chatTwo = await seedChatWithUser('Apartment Hunt');
+      await seedMessage(chatOne, { body: 'Let us book the flights today', createdAt: new Date() });
+      await seedMessage(chatTwo, { body: 'Signed the lease this morning', createdAt: new Date() });
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'summarize today' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('daily_recap');
+      expect(response.body.ambiguous).toBeFalsy();
+      expect(response.body.candidates).toBeUndefined();
+      expect(typeof response.body.answer).toBe('string');
+      expect(response.body.answer.length).toBeGreaterThan(0);
+    });
+
+    it('full_access daily recap gives a clear no-results answer (not an approved-space warning) when nothing was found', async () => {
+      await enableVeyra();
+      await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
+      await seedChatWithUser('Quiet Chat');
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'summarize today' });
+      expect(response.status).toBe(200);
+      expect(response.body.answer).toBe('No matching Blabber activity was found today.');
+      expect(response.body.answer).not.toMatch(/approved space/i);
+    });
+
+    it('full_access generic question "what is Docker?" uses the OpenRouter general-assistant path, not retrieval', async () => {
+      await enableVeyra();
+      await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
+      process.env.OPENROUTER_API_KEY = 'test-key';
+      process.env.OPENROUTER_MODEL = 'test-model';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'Docker is a container platform.' } }] }),
+      }));
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'what is Docker?' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('general_assistant');
+      expect(response.body.answer).toBe('Docker is a container platform.');
+      vi.unstubAllGlobals();
+      delete process.env.OPENROUTER_API_KEY;
+      delete process.env.OPENROUTER_MODEL;
+    });
+
+    it('"summarize this apartment planning conversation" is treated as a grounded Blabber question, never a generic assistant answer', async () => {
+      await enableVeyra();
+      const chatId = await seedChatWithUser('Apartment Planning');
+      await grantScope('chat', chatId.toString());
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'summarize this apartment planning conversation' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).not.toBe('general_assistant');
+    });
+
+    it('approved_spaces mode never aggregates beyond explicitly approved spaces, even for a broad daily recap question', async () => {
+      await enableVeyra();
+      const approvedChat = await seedChatWithUser('Approved Crew');
+      const unapprovedChat = await seedChatWithUser('Unapproved Crew');
+      await grantScope('chat', approvedChat.toString());
+      await seedMessage(approvedChat, { body: 'Approved chat activity today' });
+      await seedMessage(unapprovedChat, { body: 'Unapproved chat activity today' });
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'summarize today' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('daily_recap');
+      const cardChatLabels = response.body.results.map((result: any) => result.chatLabel);
+      expect(cardChatLabels.every((label: string) => label !== 'Unapproved Crew')).toBe(true);
     });
 
     it('full_access mode still never returns content from a chat the user is not a participant in', async () => {
@@ -1138,6 +1273,67 @@ describe('POST /veyra/ask', () => {
       expect(afterRevoke.status).toBe(403);
       expect(afterRevoke.body.code).toBe('scope_required');
     });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      delete process.env.OPENROUTER_API_KEY;
+      delete process.env.OPENROUTER_MODEL;
+    });
+
+    it('full_access mode routes an unclassifiable query to OpenRouter instead of the old dead-end message', async () => {
+      await enableVeyra();
+      await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
+      process.env.OPENROUTER_API_KEY = 'test-key';
+      process.env.OPENROUTER_MODEL = 'test-model';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'Sure, happy to help with that.' } }] }),
+      }));
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'zzz blorp fizzbuzz' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('general_assistant');
+      expect(response.body.answer).not.toContain("I'm not sure how to help");
+      expect(response.body.answer).toBe('Sure, happy to help with that.');
+    });
+
+    it('approved_spaces mode keeps the original conservative "not sure how to help" response for the same unclassifiable query', async () => {
+      await enableVeyra();
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'zzz blorp fizzbuzz' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('unclear');
+      expect(response.body.answer).toContain("I'm not sure how to help");
+    });
+
+    it('full_access empty-retrieval answer never mentions "approved spaces"', async () => {
+      await enableVeyra();
+      await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
+      await seedChatWithUser('Only Chat');
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'find pdf in Only Chat' });
+      expect(response.status).toBe(200);
+      expect(response.body.results).toHaveLength(0);
+      expect(response.body.answer).not.toMatch(/approved space/i);
+      expect(response.body.answer).toContain("couldn't find any matching content");
+    });
+
+    it('approved_spaces empty-retrieval answer still references approved spaces (unchanged conservative behavior)', async () => {
+      await enableVeyra();
+      const chatId = await seedChatWithUser('Only Chat');
+      await grantScope('chat', chatId.toString());
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'find pdf in Only Chat' });
+      expect(response.status).toBe(200);
+      expect(response.body.results).toHaveLength(0);
+      expect(response.body.answer).toBe('No matching results found in your approved spaces.');
+    });
+
+    it('full_access general_help copy never mentions "approved"', async () => {
+      await enableVeyra();
+      await request(app).patch('/veyra/settings').send({ accessMode: 'full_access' });
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'what can you help with?' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('general_help');
+      expect(response.body.answer).not.toMatch(/approved/i);
+    });
   });
 
   describe('general assistant questions', () => {
@@ -1176,7 +1372,7 @@ describe('POST /veyra/ask', () => {
       await enableVeyra();
       const response = await request(app).post('/veyra/ask').send({ prompt: 'help me draft a workout routine for beginners' });
       expect(response.status).toBe(200);
-      expect(response.body.answer).toBe("I can't reach the AI assistant right now — please try again in a moment.");
+      expect(response.body.answer).toBe('Veyra could not reach the AI model right now. Please try again.');
     });
 
     it('falls back to a safe, non-crashing message when the OpenRouter call throws', async () => {
@@ -1187,7 +1383,7 @@ describe('POST /veyra/ask', () => {
 
       const response = await request(app).post('/veyra/ask').send({ prompt: 'give me ideas for my project' });
       expect(response.status).toBe(200);
-      expect(response.body.answer).toBe("I can't reach the AI assistant right now — please try again in a moment.");
+      expect(response.body.answer).toBe('Veyra could not reach the AI model right now. Please try again.');
     });
 
     it('does not treat a Blabber-scoped summary request as a general assistant question', async () => {
@@ -1197,6 +1393,44 @@ describe('POST /veyra/ask', () => {
       const response = await request(app).post('/veyra/ask').send({ prompt: 'what did we decide about the apartment?' });
       expect(response.status).toBe(200);
       expect(response.body.intent).toBe('decision_recap');
+    });
+
+    it('answers "what is docker" as a general assistant question (the exact reported blocker)', async () => {
+      await enableVeyra();
+      process.env.OPENROUTER_API_KEY = 'test-key';
+      process.env.OPENROUTER_MODEL = 'test-model';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'Docker is a containerization platform.' } }] }),
+      }));
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'what is docker' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('general_assistant');
+      expect(response.body.answer).toBe('Docker is a containerization platform.');
+      expect(response.body.answer).not.toContain("I'm not sure how to help");
+    });
+
+    it('answers "help me draft a message" as a general writing-help request, not a Blabber message search', async () => {
+      await enableVeyra();
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'help me draft a message' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('general_assistant');
+    });
+
+    it('answers "give me a resume bullet for this project" as a general writing-help request', async () => {
+      await enableVeyra();
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'give me a resume bullet for this project' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('general_assistant');
+    });
+
+    it('does not hijack a Blabber vote/plan-status question even though it starts with "what is"', async () => {
+      await enableVeyra();
+      await grantScope('my_actions');
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'what is still waiting for my vote' });
+      expect(response.status).toBe(200);
+      expect(response.body.intent).toBe('plan_status');
     });
   });
 

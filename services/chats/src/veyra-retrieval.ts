@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb';
 import { getDatabase } from './db';
 import { getChatsCollection, type Chat } from './models/chat';
 import { getChatActionsCollection } from './models/chat-action';
+import { getChatDecisionsCollection } from './models/chat-decision';
 import { getPlanThisCollection, type PlanThisDocument } from './models/plan-this';
 import type { VeyraConversationContext, VeyraResultCard, VeyraResultType, VeyraSettingsDocument } from './models/veyra';
 import { isChatExpired } from './serialize-chat';
@@ -85,6 +86,7 @@ const STOPWORDS = new Set([
   'action', 'actions', 'task', 'tasks', 'reply', 'status', 'need', 'waiting',
   'vote', 'voting', 'shared', 'latest', 'last',
   'help', 'capabilit', 'capabilities', 'hi', 'hello', 'hey', 'name', 'thanks', 'thank',
+  'summarize', 'summary', 'today', 'recap',
 ]);
 
 export function extractNameQuery(prompt: string): string | undefined {
@@ -603,4 +605,162 @@ export async function findTasksForContext(
     createdAt: task.createdAt.toISOString(),
     deepLink: { kind: 'action' as const, actionId: task._id.toString() },
   }));
+}
+
+// ── Full Access global aggregation ──────────────────────────────────────
+
+type GlobalContentIntent = 'find_photos' | 'find_videos' | 'find_documents' | 'find_links' | 'search_messages';
+
+/**
+ * Full Access only: when a broad/unnamed retrieval question (no specific chat
+ * named, so `resolveScopedChat` came back ambiguous) has more than one
+ * accessible candidate chat, this searches every one of them — instead of
+ * asking the user to disambiguate — and merges the results by recency.
+ * Approved-spaces mode never calls this; it keeps asking which space, since
+ * "ambiguous" there means the user has multiple *explicitly approved* spaces
+ * and Veyra must not guess which one they meant. Every candidate chat is
+ * still re-authorized right now via the same scope lookup + `listAttachments`
+ * / `listLinks` / `searchMessagesInChat` tools already used for a single
+ * named chat — this only changes "ask which one" into "search all of them",
+ * never who or what is allowed to be searched.
+ */
+export async function searchAcrossCandidateChats(
+  contentIntent: GlobalContentIntent,
+  candidates: Array<{ scopeId: string; label: string }>,
+  settings: VeyraSettingsDocument,
+  userId: ObjectId,
+  prompt: string
+): Promise<{ cards: VeyraResultCard[]; attachmentKind?: 'pdf' | 'document' }> {
+  const query = extractNameQuery(prompt) || '';
+  const attachmentKind: 'pdf' | 'document' | undefined =
+    contentIntent === 'find_documents' ? (/\bpdf/i.test(prompt) ? 'pdf' : 'document') : undefined;
+
+  const merged: VeyraResultCard[] = [];
+  for (const candidate of candidates) {
+    const scope = settings.scopes.find((item) => item.id === candidate.scopeId);
+    if (!scope?.targetId) continue;
+    const chat = await reauthorizeChatForUser(scope.targetId, userId);
+    if (!chat) continue;
+
+    let cards: VeyraResultCard[];
+    if (contentIntent === 'find_photos') cards = await listAttachments(chat, userId, 'image', query || undefined);
+    else if (contentIntent === 'find_videos') cards = await listAttachments(chat, userId, 'video', query || undefined);
+    else if (contentIntent === 'find_documents') cards = await listAttachments(chat, userId, attachmentKind!, query || undefined);
+    else if (contentIntent === 'find_links') cards = await listLinks(chat, userId, query || undefined);
+    else cards = await searchMessagesInChat(chat, userId, query);
+    merged.push(...cards);
+  }
+
+  merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  return { cards: merged.slice(0, RESULT_LIMIT), attachmentKind };
+}
+
+export interface DailyRecapEvidence {
+  activeChatLabels: string[];
+  messages: VeyraResultCard[];
+  media: VeyraResultCard[];
+  decisions: Array<{ title: string; chatLabel?: string }>;
+  plansAndEvents: VeyraResultCard[];
+  tasks: VeyraResultCard[];
+}
+
+/**
+ * Gathers a broad evidence set for "summarize today" / "catch me up" style
+ * questions, bounded strictly to `settings.scopes` — in approved_spaces mode
+ * that's only the chats/My-Actions the user explicitly granted; in
+ * full_access mode `settings` is already the virtual-scope projection from
+ * `resolveEffectiveVeyraSettings`, so this naturally covers every chat the
+ * user can currently access. No new authorization path is introduced here —
+ * every chat is re-verified live via `reauthorizeChatForUser`, and plans/
+ * events/tasks are gathered via the exact same `findPlansAndEventsAndTasks`
+ * used by "show my plans", never a separate/looser query.
+ */
+export async function gatherDailyRecapEvidence(
+  userId: ObjectId,
+  settings: VeyraSettingsDocument,
+  sinceHours = 24
+): Promise<DailyRecapEvidence> {
+  const chatScopes = settings.scopes.filter((scope) => scope.type === 'chat' && scope.targetId);
+  const authorizedChats: Chat[] = [];
+  const chatLabelById = new Map<string, string>();
+  for (const scope of chatScopes) {
+    const chat = await reauthorizeChatForUser(scope.targetId!, userId);
+    if (chat) {
+      authorizedChats.push(chat);
+      chatLabelById.set(chat._id.toString(), scope.label || 'Chat');
+    }
+  }
+  const authorizedChatIds = authorizedChats.map((chat) => chat._id);
+
+  if (authorizedChatIds.length === 0) {
+    return { activeChatLabels: [], messages: [], media: [], decisions: [], plansAndEvents: [], tasks: [] };
+  }
+
+  const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+  const recentMessages = await getDatabase()
+    .collection('messages')
+    .find({ chatId: { $in: authorizedChatIds }, deletedFor: { $ne: userId }, createdAt: { $gte: sinceDate } })
+    .sort({ createdAt: -1 })
+    .limit(150)
+    .toArray();
+
+  const senderNames = await loadUserNames(recentMessages.map((message) => message.senderId));
+  const activeChatIds = new Set<string>();
+  const perChatCount = new Map<string, number>();
+  const messageCards: VeyraResultCard[] = [];
+  const mediaCards: VeyraResultCard[] = [];
+
+  for (const message of recentMessages) {
+    const chatKey = message.chatId.toString();
+    activeChatIds.add(chatKey);
+    const count = perChatCount.get(chatKey) || 0;
+    // Capped per chat so one noisy conversation can't crowd out everything
+    // else in the recap, and capped overall so the synthesis prompt stays a
+    // manageable size.
+    if (count >= 6 || messageCards.length + mediaCards.length >= 60) continue;
+    perChatCount.set(chatKey, count + 1);
+
+    const chatLabel = chatLabelById.get(chatKey) || 'Chat';
+    const senderName = senderNames.get(message.senderId.toString()) || 'Someone';
+    const bodyText = String(message.body || '');
+    const isLink = URL_PATTERN.test(bodyText);
+    const card: VeyraResultCard = {
+      resultType: message.media ? 'attachment' : isLink ? 'link' : 'message',
+      id: message._id.toString(),
+      title: message.media?.fileName || (isLink ? bodyText.match(URL_PATTERN)?.[0] || 'Link' : bodyText.slice(0, 140) || 'Message'),
+      subtitle: chatLabel,
+      senderName,
+      chatId: chatKey,
+      chatLabel,
+      createdAt: message.createdAt.toISOString(),
+      deepLink: { kind: 'chat_message', chatId: chatKey, messageId: message._id.toString() },
+    };
+    if (message.media || isLink) mediaCards.push(card);
+    else messageCards.push(card);
+  }
+
+  const decisionDocs = await getChatDecisionsCollection()
+    .find({ chatId: { $in: authorizedChatIds } })
+    .sort({ updatedAt: -1 })
+    .limit(10)
+    .toArray();
+  const decisions = decisionDocs.map((decision) => ({
+    title: decision.title,
+    chatLabel: chatLabelById.get(decision.chatId.toString()),
+  }));
+
+  const plansEventsAndTasks = await findPlansAndEventsAndTasks(userId, settings, '');
+  const plansAndEvents = plansEventsAndTasks.filter((card) => card.resultType === 'plan' || card.resultType === 'event');
+  const tasks = plansEventsAndTasks.filter((card) => card.resultType === 'task');
+
+  const activeChatLabels = Array.from(activeChatIds).map((chatId) => chatLabelById.get(chatId) || 'Chat');
+
+  return {
+    activeChatLabels: Array.from(new Set(activeChatLabels)),
+    messages: messageCards,
+    media: mediaCards,
+    decisions,
+    plansAndEvents,
+    tasks,
+  };
 }

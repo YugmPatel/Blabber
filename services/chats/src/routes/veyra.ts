@@ -27,13 +27,16 @@ import {
   findPlanByTitleLookup,
   findPlansAndEventsAndTasks,
   findTasksForContext,
+  gatherDailyRecapEvidence,
   listAttachments,
   listLinks,
   loadUserNames,
   resolvePlanForContext,
   resolveScopedChat,
   resultTypeForCards,
+  searchAcrossCandidateChats,
   searchMessagesInChat,
+  type DailyRecapEvidence,
   type ScopeResolution,
   type ScopeResolutionSource,
 } from '../veyra-retrieval';
@@ -89,17 +92,32 @@ function classifyIntent(prompt: string): VeyraIntentCategory {
   if (/\bsend\b[^.?!]{0,40}\bto\b/.test(text) || /\b(forward|delete|remove this|update this|edit this|rsvp|schedule a)\b/.test(text)) {
     return 'action_request';
   }
-  // General-knowledge/assistant requests ("explain Docker", "write a follow-up
-  // email", "help me brainstorm ideas") have no dependency on Blabber data at
-  // all — checked narrowly (a generic-assistant verb AND no Blabber-domain
-  // noun in the same sentence) so a genuinely Blabber-scoped ask like
-  // "summarize apartment planning" or "write to yugm" still falls through to
-  // the grounded retrieval intents below rather than being answered blind.
+  // Broad "catch me up" / "summarize today" style questions — checked before
+  // general_assistant and every single-space content check, since these are
+  // unambiguously Blabber-grounded but never name a specific chat/content
+  // type. Handled by a dedicated global-aggregation path (see `daily_recap`
+  // in askVeyra), never single-space retrieval or space disambiguation.
   if (
-    /\b(explain|write me|write a|write an|draft|compose|help me write|help me draft|give me ideas|brainstorm|proofread|rewrite this|translate|how do i write)\b/.test(
+    /\b(catch me up|what happened|what did i miss|what changed)\b/.test(text) ||
+    (/\b(summarize|recap)\b/.test(text) && /\b(today|now|currently|this week|blabber)\b/.test(text))
+  ) {
+    return 'daily_recap';
+  }
+  // General-knowledge/assistant requests ("what is Docker", "explain Docker",
+  // "write a follow-up email", "help me draft a message", "give me a resume
+  // bullet") have no dependency on Blabber data at all — checked narrowly (a
+  // generic-assistant verb/question-form AND no Blabber-domain noun in the
+  // same sentence) so a genuinely Blabber-scoped ask like "summarize apartment
+  // planning", "write to yugm", or "what is an approved space" still falls
+  // through to the grounded retrieval/help intents below rather than being
+  // answered blind. Deliberately broad — this is the primary safety net that
+  // keeps Veyra from ever landing on the generic "I'm not sure how to help"
+  // dead end for an ordinary general-knowledge or writing-help question.
+  if (
+    /\b(explain|what is|what's|what are|how does|how do|how to|write me|write a|write an|draft|compose|help me write|help me draft|help me with|give me|brainstorm|proofread|rewrite this|translate|define)\b/.test(
       text
     ) &&
-    !/\b(chat|chats|group|groups|plan|plans|trip|trips|event|events|pdf|pdfs|link|links|photo|photos|video|videos|action|actions|task|tasks|decision|decisions|message|messages|space|spaces|moment|moments|post|posts|reel|reels|blabber)\b/.test(
+    !/\b(chat|chats|group|groups|plan|plans|trip|trips|event|events|pdf|pdfs|link|links|photo|photos|video|videos|action|actions|task|tasks|decision|decisions|space|spaces|moment|moments|post|posts|reel|reels|blabber|veyra|vote|votes|voting)\b/.test(
       text
     )
   ) {
@@ -129,7 +147,7 @@ function classifyIntent(prompt: string): VeyraIntentCategory {
   if (/\b(actions?|tasks?|reply|need to do|status)\b/.test(text)) return 'action_status';
   if (/\bshared\b/.test(text)) return 'latest_shared_item';
   if (/\b(where|open|go to|navigate)\b/.test(text)) return 'navigation_help';
-  if (/\b(search|find|show me|show|list)\b/.test(text)) return 'search_messages';
+  if (/\b(search|find|show me|show|list|summarize)\b/.test(text)) return 'search_messages';
   return 'unclear';
 }
 
@@ -457,7 +475,94 @@ async function generalAssistantAnswer(prompt: string): Promise<string> {
     temperature: 0.5,
     maxTokens: 500,
   });
-  return content || "I can't reach the AI assistant right now — please try again in a moment.";
+  return content || 'Veyra could not reach the AI model right now. Please try again.';
+}
+
+const DAILY_RECAP_SYSTEM_PROMPT =
+  "You are Veyra inside Blabber, summarizing the user's own accessible Blabber activity. Answer only from the retrieved evidence provided below — never invent messages, files, plans, decisions, or tasks that are not present in it. Organize the answer into these sections, in this exact order, briefly noting when a section has nothing to report rather than omitting it: 1. Top summary 2. Active conversations/groups 3. Decisions made 4. Pending tasks/actions 5. Plans/events 6. Files/links/media shared 7. Things that may need attention. If the evidence is empty or has nothing relevant to the question, say plainly that no matching Blabber activity was found. Keep it concise and useful.";
+
+/** Deterministic, non-OpenRouter fallback covering the exact same 7 sections — used only if OpenRouter is unavailable/fails, so a recap is never a hard failure. */
+function buildDailyRecapFallback(evidence: DailyRecapEvidence): string {
+  const hasAnything =
+    evidence.activeChatLabels.length > 0 ||
+    evidence.messages.length > 0 ||
+    evidence.media.length > 0 ||
+    evidence.decisions.length > 0 ||
+    evidence.plansAndEvents.length > 0 ||
+    evidence.tasks.length > 0;
+  if (!hasAnything) return 'No matching Blabber activity was found today.';
+
+  const lines: string[] = [];
+  lines.push(
+    `Top summary: activity found in ${evidence.activeChatLabels.length} conversation${evidence.activeChatLabels.length === 1 ? '' : 's'}, ${evidence.decisions.length} decision${evidence.decisions.length === 1 ? '' : 's'}, ${evidence.tasks.length} pending task${evidence.tasks.length === 1 ? '' : 's'}, and ${evidence.plansAndEvents.length} plan/event${evidence.plansAndEvents.length === 1 ? '' : 's'}.`
+  );
+  lines.push(
+    evidence.activeChatLabels.length > 0
+      ? `Active conversations/groups: ${evidence.activeChatLabels.join(', ')}.`
+      : 'Active conversations/groups: none found.'
+  );
+  lines.push(
+    evidence.decisions.length > 0
+      ? `Decisions made: ${evidence.decisions.map((decision) => decision.title).join('; ')}.`
+      : 'Decisions made: none found.'
+  );
+  lines.push(
+    evidence.tasks.length > 0
+      ? `Pending tasks/actions: ${evidence.tasks.map((task) => task.title).join('; ')}.`
+      : 'Pending tasks/actions: none found.'
+  );
+  lines.push(
+    evidence.plansAndEvents.length > 0
+      ? `Plans/events: ${evidence.plansAndEvents.map((card) => card.title).join('; ')}.`
+      : 'Plans/events: none found.'
+  );
+  lines.push(
+    evidence.media.length > 0
+      ? `Files/links/media shared: ${evidence.media.map((card) => card.title).join('; ')}.`
+      : 'Files/links/media shared: none found.'
+  );
+  lines.push(
+    evidence.tasks.length > 0 || evidence.decisions.length > 0
+      ? 'Things that may need attention: review the pending tasks and recent decisions above.'
+      : 'Things that may need attention: nothing flagged.'
+  );
+  return lines.join('\n');
+}
+
+async function dailyRecapAnswer(
+  userId: ObjectId,
+  settings: VeyraSettingsDocument,
+  prompt: string
+): Promise<{ answer: string; cards: VeyraResultCard[] }> {
+  const evidence = await gatherDailyRecapEvidence(userId, settings);
+  const cards = [...evidence.media, ...evidence.plansAndEvents, ...evidence.tasks, ...evidence.messages].slice(0, 12);
+  const fallback = buildDailyRecapFallback(evidence);
+
+  const hasAnyEvidence =
+    evidence.activeChatLabels.length > 0 ||
+    evidence.decisions.length > 0 ||
+    evidence.plansAndEvents.length > 0 ||
+    evidence.tasks.length > 0 ||
+    evidence.media.length > 0 ||
+    evidence.messages.length > 0;
+  if (!hasAnyEvidence) return { answer: fallback, cards: [] };
+
+  const content = await callOpenRouterChat({
+    systemPrompt: DAILY_RECAP_SYSTEM_PROMPT,
+    userPrompt: JSON.stringify({
+      question: prompt,
+      activeChatLabels: evidence.activeChatLabels,
+      decisions: evidence.decisions,
+      pendingTasksAndActions: evidence.tasks.map((task) => ({ title: task.title, status: task.subtitle })),
+      plansAndEvents: evidence.plansAndEvents.map((card) => ({ title: card.title, type: card.resultType, chatLabel: card.chatLabel })),
+      filesLinksMediaShared: evidence.media.map((card) => ({ title: card.title, type: card.resultType, chatLabel: card.chatLabel, senderName: card.senderName })),
+      recentMessages: evidence.messages.slice(0, 20).map((card) => ({ text: card.title, chatLabel: card.chatLabel, senderName: card.senderName, createdAt: card.createdAt })),
+    }),
+    temperature: 0.3,
+    maxTokens: 700,
+  });
+
+  return { answer: content || fallback, cards };
 }
 
 function scopeIdForChat(settings: VeyraSettingsDocument, chatId: ObjectId): string | undefined {
@@ -498,7 +603,23 @@ async function runRetrieval(
     context: { activeSpaceId: clientContext?.activeSpaceId },
   });
   if (!resolution.ok) {
-    if (resolution.reason === 'ambiguous') return { outcome: 'ambiguous', candidates: resolution.candidates };
+    if (resolution.reason === 'ambiguous') {
+      // Full Access: a broad/unnamed retrieval question with more than one
+      // accessible chat must search all of them, never make the user pick
+      // one — approved_spaces mode keeps asking (multiple *explicitly
+      // approved* spaces genuinely need disambiguation there).
+      if (settings.accessMode === 'full_access') {
+        const { cards, attachmentKind } = await searchAcrossCandidateChats(
+          contentIntent,
+          resolution.candidates,
+          settings,
+          userId,
+          prompt
+        );
+        return { outcome: 'ok', cards, scopeLabel: 'all your accessible spaces', scopeType: 'general', attachmentKind };
+      }
+      return { outcome: 'ambiguous', candidates: resolution.candidates };
+    }
     return { outcome: 'scope_missing' };
   }
   const { chat, label, source } = resolution;
@@ -604,6 +725,55 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
     // No matching plan — fall through to the standard safe "unclear" message below.
   }
 
+  // In Full Access, an intent the rule-based classifier couldn't pin down is
+  // never a dead end — it's handed to OpenRouter as a general assistant
+  // question rather than showing the old "I'm not sure how to help" message.
+  // This is the safety net behind the (deliberately broad but still
+  // imperfect) `general_assistant` classification above. Approved-spaces mode
+  // keeps the original conservative behavior unchanged (falls through to the
+  // static message below).
+  if (intent === 'unclear' && settings.accessMode === 'full_access') {
+    const answer = await generalAssistantAnswer(parsed.data.prompt);
+    await audit(userObjectId, 'general', intent, true);
+    return res.status(200).json({
+      answer,
+      intent: 'general_assistant',
+      scope: null,
+      resultType: 'empty',
+      results: [],
+      context: nextContext(clientContext, 'preserve'),
+    });
+  }
+
+  // Broad "summarize today" / "catch me up" style questions aggregate
+  // evidence across every accessible space (bounded to `searchSettings.scopes`
+  // — approved-only in approved_spaces mode, every accessible chat + My
+  // Actions in full_access) into one sectioned answer. With zero accessible
+  // spaces at all there is nothing to aggregate, so this still requires the
+  // same baseline access every other Blabber-specific question does.
+  if (intent === 'daily_recap') {
+    const hasAnyScope = searchSettings.scopes.some((scope) => (scope.type === 'chat' && scope.targetId) || scope.type === 'my_actions');
+    if (!hasAnyScope) {
+      await audit(userObjectId, 'general', intent, false);
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'To answer that, Veyra needs access to an approved space.',
+        code: 'scope_required',
+      });
+    }
+    const { answer, cards } = await dailyRecapAnswer(userObjectId, searchSettings, parsed.data.prompt);
+    const scopeType: VeyraScopeType = settings.accessMode === 'full_access' ? 'general' : 'chat';
+    await audit(userObjectId, scopeType, intent, cards.length > 0);
+    return res.status(200).json({
+      answer,
+      intent,
+      scope: null,
+      resultType: resultTypeForCards(cards),
+      results: cards,
+      context: nextContext(clientContext, 'preserve'),
+    });
+  }
+
   // General conversation (greetings, identity, "what can you do", acknowledgments,
   // static navigation help) never touches private Blabber data and never falls
   // back to a chat summary — it works even with zero approved scopes, and the
@@ -619,7 +789,9 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
       answer = "You're welcome! Let me know if there's anything else you'd like to find.";
     } else if (intent === 'general_help') {
       answer =
-        "I can search the Blabber spaces you've approved for messages, links, PDFs, files, photos, videos, plans, events, and tasks — just tell me what to look for and where. An approved space is a chat, group, or community you've explicitly selected in AI Privacy; I never search anywhere else.";
+        settings.accessMode === 'full_access'
+          ? "I can answer general questions like a normal AI assistant, and search all the Blabber chats, groups, and My Actions items you already have access to for messages, links, PDFs, files, photos, videos, plans, events, and tasks — just ask."
+          : "I can search the Blabber spaces you've approved for messages, links, PDFs, files, photos, videos, plans, events, and tasks — just tell me what to look for and where. An approved space is a chat, group, or community you've explicitly selected in AI Privacy; I never search anywhere else.";
     } else if (intent === 'capability_spaces') {
       if (settings.accessMode === 'full_access') {
         answer = 'Full Blabber access is enabled — I can search all the chats, groups, and My Actions items you already have access to, plus general questions. You can switch back to approved spaces only in Manage AI privacy.';
@@ -816,7 +988,13 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
     const usedPlanContext = resolutionSource === 'context' && Boolean(clientContext?.activePlanTitle);
     let answer: string;
     if (cards.length === 0) {
-      answer = 'No matching results found in your approved spaces.';
+      // Never hallucinate that something was found — this always states
+      // plainly that the search came back empty, phrased for whichever
+      // access mode actually ran.
+      answer =
+        settings.accessMode === 'full_access'
+          ? "I couldn't find any matching content in your Blabber spaces."
+          : 'No matching results found in your approved spaces.';
     } else if (intent === 'action_request') {
       const noun =
         contentIntent === 'find_photos'
@@ -960,7 +1138,10 @@ export const askVeyra = asyncHandler(async (req: Request, res: Response) => {
   } else if (selectedScope.type === 'community') {
     answer = `From ${available}: Veyra can use only safe existing Community summary/action metadata in this version. No available summary was found.`;
   } else {
-    answer = 'I can chat and help with navigation. Approve My Actions or a specific space to ask about private updates.';
+    answer =
+      settings.accessMode === 'full_access'
+        ? 'I can chat and help with navigation, or search a specific chat, group, or My Actions if you tell me which one.'
+        : 'I can chat and help with navigation. Approve My Actions or a specific space to ask about private updates.';
   }
 
   await audit(userObjectId, selectedScope.type, intent, true);
