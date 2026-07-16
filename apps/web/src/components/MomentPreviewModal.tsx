@@ -88,6 +88,11 @@ export default function MomentPreviewModal({
     }
 
     if (type === 'video') {
+      if (!momentId) {
+        setLoadedMedia({ unavailable: true });
+        return undefined;
+      }
+
       let active = true;
       let objectUrl: string | undefined;
       let posterUrl: string | undefined;
