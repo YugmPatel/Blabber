@@ -171,6 +171,28 @@ describe('VeyraPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/settings?s=ai');
   });
 
+  it('input placeholder and footer copy do not reference approved spaces when full_access is enabled', async () => {
+    mockFetchVeyraSettings.mockResolvedValue({
+      ...structuredClone(baseSettings),
+      settings: { ...structuredClone(baseSettings.settings), accessMode: 'full_access' },
+    });
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByText('Full Blabber access enabled')).toBeInTheDocument());
+
+    expect(screen.getByPlaceholderText('Ask VEYRA anything…')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/approved spaces/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Veyra can answer general questions and search your Blabber spaces\./)).toBeInTheDocument();
+    expect(screen.queryByText('VEYRA only searches in your approved spaces.')).not.toBeInTheDocument();
+  });
+
+  it('input placeholder and footer copy keep the approved-spaces framing in approved_spaces mode', async () => {
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByText('Approved spaces only')).toBeInTheDocument());
+
+    expect(screen.getByPlaceholderText('Ask VEYRA about approved spaces…')).toBeInTheDocument();
+    expect(screen.getByText('VEYRA only searches in your approved spaces.')).toBeInTheDocument();
+  });
+
   it('does not insert recognized speech into the text composer', async () => {
     renderVeyraPage();
     await waitFor(() => expect(screen.getByLabelText('Start listening')).toBeEnabled());
@@ -227,6 +249,52 @@ describe('VeyraPage', () => {
 
     await waitFor(() => expect(mockAskVeyra).toHaveBeenCalledTimes(1));
     expect(mockAskVeyra).toHaveBeenCalledWith({ prompt: 'find any links shared with yugm', scopeId: 'chat:fresh' });
+  });
+
+  it('renders a bold-markdown answer as real bold text, never showing raw "**" markdown symbols', async () => {
+    mockAskVeyra.mockResolvedValue({ answer: '**Top summary**: nothing new today.', intent: 'daily_recap', scope: null });
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'summarize today' } });
+    fireEvent.click(screen.getByLabelText('Send to Veyra'));
+
+    await screen.findByText('Top summary');
+    expect(document.body.textContent).not.toContain('**');
+  });
+
+  it('renders a numbered-list answer as a real ordered list, not raw "1." markdown text', async () => {
+    mockAskVeyra.mockResolvedValue({ answer: '1. First item\n2. Second item', intent: 'daily_recap', scope: null });
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'summarize today' } });
+    fireEvent.click(screen.getByLabelText('Send to Veyra'));
+
+    const items = await screen.findAllByRole('listitem');
+    expect(items.map((item) => item.textContent)).toEqual(['First item', 'Second item']);
+  });
+
+  it('renders a bullet-list answer as a real unordered list, not raw "-" markdown text', async () => {
+    mockAskVeyra.mockResolvedValue({ answer: '- Alpha\n- Beta', intent: 'daily_recap', scope: null });
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: 'summarize today' } });
+    fireEvent.click(screen.getByLabelText('Send to Veyra'));
+
+    const items = await screen.findAllByRole('listitem');
+    expect(items.map((item) => item.textContent)).toEqual(['Alpha', 'Beta']);
+  });
+
+  it('never applies markdown formatting to the user\'s own question — only Veyra\'s answer is formatted', async () => {
+    mockAskVeyra.mockResolvedValue({ answer: '**Formatted answer**', intent: 'general_help', scope: null });
+    renderVeyraPage();
+    await waitFor(() => expect(screen.getByLabelText('Ask Veyra')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Ask Veyra'), { target: { value: '**not bold** literally please' } });
+    fireEvent.click(screen.getByLabelText('Send to Veyra'));
+
+    // The user's own question bubble shows the raw text verbatim, asterisks and all.
+    await screen.findByText('**not bold** literally please');
+    // Veyra's answer, in contrast, is formatted — no visible "**".
+    await screen.findByText('Formatted answer');
   });
 
   it('transitions Thinking → Speaking → ready after a real response, and reads it aloud', async () => {

@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
+import VeyraAnswerText from '@/components/VeyraAnswerText';
 import BrandGlow from '@/components/brand/BrandGlow';
 import VeyraMark from '@/components/brand/VeyraMark';
 import AmbientOrb, { type AmbientOrbState } from '@/components/brand/AmbientOrb';
@@ -185,6 +186,7 @@ export default function VeyraPage() {
   const settingsQuery = useQuery({ queryKey: ['veyra-settings'], queryFn: fetchVeyraSettings });
   const settings = settingsQuery.data?.settings;
   const enabled = Boolean(settings?.enabled);
+  const isFullAccess = settings?.accessMode === 'full_access';
 
   const selectedScope = useMemo(
     () => settings?.scopes.find((scope) => scope.id === scopeId) || settings?.scopes[0],
@@ -195,7 +197,9 @@ export default function VeyraPage() {
   // spoken greeting. The subtitle intentionally names only Veyra's real,
   // currently-supported capabilities — no "I can do anything" framing.
   const greetingTitle = `Hi, ${firstName(user)}. I’m Veyra.`;
-  const greetingSubtitle = 'I can help you find links, PDFs, plans, and answer simple questions from your approved spaces.';
+  const greetingSubtitle = isFullAccess
+    ? 'I can answer general questions and find links, PDFs, plans, and more across your Blabber spaces.'
+    : 'I can help you find links, PDFs, plans, and answer simple questions from your approved spaces.';
   const greetingSpokenText = `${greetingTitle} ${greetingSubtitle}`;
 
   const voiceToggle = useMutation({
@@ -486,11 +490,7 @@ export default function VeyraPage() {
               <div className="leading-tight">
                 <p className="text-[15px] font-semibold tracking-wide text-[color:var(--bl-text)]">VEYRA</p>
                 <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-[color:var(--bl-text-muted)]">
-                  <span>
-                    {settingsQuery.data?.settings.accessMode === 'full_access'
-                      ? 'Full Blabber access enabled'
-                      : 'Approved spaces only'}
-                  </span>
+                  <span>{isFullAccess ? 'Full Blabber access enabled' : 'Approved spaces only'}</span>
                   <span aria-hidden="true">·</span>
                   <button
                     type="button"
@@ -788,7 +788,7 @@ export default function VeyraPage() {
                         </>
                       ) : (
                         <>
-                          <p className="mt-1">{turn.answer}</p>
+                          <VeyraAnswerText text={turn.answer} className="mt-1" />
                           {turn.suggestManageAiPrivacy && (
                             <button
                               type="button"
@@ -917,7 +917,7 @@ export default function VeyraPage() {
                     submitTyped();
                   }
                 }}
-                placeholder="Ask VEYRA about approved spaces…"
+                placeholder={isFullAccess ? 'Ask VEYRA anything…' : 'Ask VEYRA about approved spaces…'}
                 rows={1}
                 disabled={!enabled}
                 aria-label="Ask Veyra"
@@ -977,7 +977,9 @@ export default function VeyraPage() {
               </button>
             </div>
             <p className="mx-auto mt-3 max-w-2xl text-center text-xs text-[color:var(--bl-text-muted)]">
-              VEYRA only searches in your approved spaces.{' '}
+              {isFullAccess
+                ? 'Veyra can answer general questions and search your Blabber spaces.'
+                : 'VEYRA only searches in your approved spaces.'}{' '}
               <button type="button" onClick={() => navigate('/settings?s=ai')} className="font-semibold text-teal-600 underline-offset-2 hover:underline dark:text-teal-300">
                 Learn more
               </button>

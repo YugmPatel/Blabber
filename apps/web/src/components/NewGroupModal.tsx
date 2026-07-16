@@ -9,6 +9,7 @@ import { useFileUpload } from '@/hooks/useFileUpload';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Chat, User } from '@repo/types';
 import { formatDisplayName, formatUserSubtitle } from '@/utils/user-display';
+import Avatar from './Avatar';
 
 interface NewGroupModalProps {
   isOpen: boolean;
@@ -400,9 +401,7 @@ export default function NewGroupModal({ isOpen, onClose }: NewGroupModalProps) {
                           onClick={() => handleUserToggle(user)}
                           className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-800/70"
                         >
-                          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[#00a884] font-semibold text-white">
-                            {formatDisplayName(user)[0]?.toUpperCase() || '?'}
-                          </div>
+                          <Avatar src={user.avatarUrl} alt={formatDisplayName(user)} size="lg" />
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium text-slate-900 dark:text-white">
                               {formatDisplayName(user)}

@@ -36,6 +36,10 @@ vi.mock('@/api/client', () => ({
     post: vi.fn(),
   },
   searchUsers: vi.fn(),
+  // Avatar (rendered for every user row) calls this to resolve src URLs —
+  // a passthrough keeps the mock module usable without pulling in the real
+  // API-origin-resolution logic.
+  normalizeMediaUrl: (url?: string | null) => url ?? undefined,
 }));
 
 const existingChat: Chat = {
@@ -246,6 +250,119 @@ describe('NewGroupModal', () => {
     expect(screen.getByText('@devanshee')).toBeInTheDocument();
     expect(screen.queryByText('Yugm Patel')).not.toBeInTheDocument();
     expect(searchUsers).toHaveBeenCalledWith('devanshee');
+  });
+
+  it('renders the searched user\'s real profile photo, matching New Convo, instead of a generic initials circle', async () => {
+    vi.mocked(searchUsers).mockResolvedValue({
+      users: [
+        {
+          id: 'devanshee-1',
+          username: 'devanshee',
+          displayName: 'Devanshee Shah',
+          avatarUrl: 'https://cdn.example.com/avatars/devanshee.jpg',
+          isVerified: false,
+          relationshipStatus: 'accepted',
+          canMessage: true,
+          requiresMessageRequest: false,
+        },
+      ],
+      nextCursor: null,
+    });
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search people you can message...'), {
+      target: { value: 'devanshee' },
+    });
+
+    await screen.findByText('Devanshee Shah');
+    const avatarImg = screen.getByRole('img', { name: 'Devanshee Shah' });
+    expect(avatarImg).toHaveAttribute('src', 'https://cdn.example.com/avatars/devanshee.jpg');
+  });
+
+  it('falls back to an initials avatar (no broken image, no <img>) for a user without a profile photo', async () => {
+    vi.mocked(searchUsers).mockResolvedValue({
+      users: [
+        {
+          id: 'no-photo-1',
+          username: 'nophotouser',
+          displayName: 'No Photo User',
+          isVerified: false,
+          relationshipStatus: 'accepted',
+          canMessage: true,
+          requiresMessageRequest: false,
+        },
+      ],
+      nextCursor: null,
+    });
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search people you can message...'), {
+      target: { value: 'nophotouser' },
+    });
+
+    await screen.findByText('No Photo User');
+    expect(screen.queryByRole('img', { name: 'No Photo User' })).not.toBeInTheDocument();
+    // Avatar falls back to initials derived from the display name.
+    expect(screen.getByText('NU')).toBeInTheDocument();
+  });
+
+  it('shows profile photos for blank-state recent candidates when available, same as search results', async () => {
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === '/api/chats') {
+        return Promise.resolve({
+          data: {
+            chats: [
+              {
+                _id: 'chat-with-photo',
+                type: 'direct',
+                participants: ['me', 'friend-photo'],
+                participantProfiles: [
+                  { _id: 'me', name: 'Me', username: 'me', email: 'me@example.com' },
+                  {
+                    _id: 'friend-photo',
+                    name: 'Friend Photo',
+                    username: 'friendphoto',
+                    email: 'friend@example.com',
+                    avatarUrl: 'https://cdn.example.com/avatars/friend.jpg',
+                  },
+                ],
+                admins: [],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    const queryClient = createTestQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewGroupModal isOpen onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByText('Friend Photo');
+    const avatarImg = screen.getByRole('img', { name: 'Friend Photo' });
+    expect(avatarImg).toHaveAttribute('src', 'https://cdn.example.com/avatars/friend.jpg');
   });
 
   it('includes users who require a message request, not only users who can already be messaged directly', async () => {

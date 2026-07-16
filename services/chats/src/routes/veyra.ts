@@ -451,7 +451,7 @@ async function synthesizeVeyraAnswer(
 
   const content = await callOpenRouterChat({
     systemPrompt:
-      'You are Veyra inside Blabber. Answer only from the approved retrieved result metadata provided. Do not invent facts, messages, or spaces. Keep the answer concise and mention that results are from approved spaces.',
+      'You are Veyra inside Blabber. Answer only from the approved retrieved result metadata provided. Do not invent facts, messages, or spaces. Keep the answer concise and mention that results are from approved spaces. Write in plain, readable sentences — avoid heavy markdown decoration (no headers, no excessive bold); a short list is fine if it genuinely helps, using simple "1." or "-" markers.',
     userPrompt: JSON.stringify({
       question: prompt,
       deterministicAnswer: fallbackAnswer,
@@ -465,7 +465,7 @@ async function synthesizeVeyraAnswer(
 }
 
 const GENERAL_ASSISTANT_SYSTEM_PROMPT =
-  "You are Veyra, Blabber's assistant. This particular question is a general-knowledge or writing-help request with no dependency on the user's private Blabber data — answer it directly and helpfully, like a knowledgeable AI assistant. Do not mention needing access to any chat, space, or approved scope, and do not claim to have searched Blabber. Keep the answer concise and useful.";
+  "You are Veyra, Blabber's assistant. This particular question is a general-knowledge or writing-help request with no dependency on the user's private Blabber data — answer it directly and helpfully, like a knowledgeable AI assistant. Do not mention needing access to any chat, space, or approved scope, and do not claim to have searched Blabber. Keep the answer concise and useful. Write in plain, readable sentences — avoid heavy markdown decoration (no headers, no excessive bold); a short list is fine if it genuinely helps, using simple \"1.\" or \"-\" markers.";
 
 /** General assistant questions never touch retrieval/scopes — same OpenRouter helper, a different, unscoped system prompt, and a safe non-crashing fallback when OpenRouter is unavailable. */
 async function generalAssistantAnswer(prompt: string): Promise<string> {
@@ -479,7 +479,7 @@ async function generalAssistantAnswer(prompt: string): Promise<string> {
 }
 
 const DAILY_RECAP_SYSTEM_PROMPT =
-  "You are Veyra inside Blabber, summarizing the user's own accessible Blabber activity. Answer only from the retrieved evidence provided below — never invent messages, files, plans, decisions, or tasks that are not present in it. Organize the answer into these sections, in this exact order, briefly noting when a section has nothing to report rather than omitting it: 1. Top summary 2. Active conversations/groups 3. Decisions made 4. Pending tasks/actions 5. Plans/events 6. Files/links/media shared 7. Things that may need attention. If the evidence is empty or has nothing relevant to the question, say plainly that no matching Blabber activity was found. Keep it concise and useful.";
+  "You are Veyra inside Blabber, summarizing the user's own accessible Blabber activity. Answer only from the retrieved evidence provided below — never invent messages, files, plans, decisions, or tasks that are not present in it. Organize the answer into these sections, in this exact order, briefly noting when a section has nothing to report rather than omitting it: 1. Top summary 2. Active conversations/groups 3. Decisions made 4. Pending tasks/actions 5. Plans/events 6. Files/links/media shared 7. Things that may need attention. If the evidence is empty or has nothing relevant to the question, say plainly that no matching Blabber activity was found. Keep it concise and useful. Write each section as a plain numbered line (e.g. \"1. Top summary: ...\") — do not bold the section titles, do not use markdown headers (#), and avoid heavy markdown decoration in general.";
 
 /** Deterministic, non-OpenRouter fallback covering the exact same 7 sections — used only if OpenRouter is unavailable/fails, so a recap is never a hard failure. */
 function buildDailyRecapFallback(evidence: DailyRecapEvidence): string {
