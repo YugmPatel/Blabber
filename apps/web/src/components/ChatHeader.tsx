@@ -825,25 +825,27 @@ function GroupInfoModal({
 
           {canEdit && (
             <SectionCard icon={Sparkles} title="AI Intelligence" description="Allow Catch Me Up, Group Brain, and AI suggestions.">
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <p className="min-w-0 flex-1 text-sm text-[color:var(--bl-text-secondary)]">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+                <p className="min-w-0 text-sm text-[color:var(--bl-text-secondary)]">
                   {chat.aiEnabled === false ? 'AI features are off for this group.' : 'AI features are on for this group.'}
                 </p>
-                <button
-                  onClick={() => setAiEnabled(chat.aiEnabled === false)}
-                  role="switch"
-                  aria-checked={chat.aiEnabled !== false}
-                  aria-label="Toggle AI Intelligence"
-                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-                    chat.aiEnabled === false ? 'bg-slate-300 dark:bg-slate-700' : 'bg-teal-500'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                      chat.aiEnabled === false ? 'translate-x-0.5' : 'translate-x-[22px]'
+                <div className="shrink-0 justify-self-end pr-2 sm:pr-3">
+                  <button
+                    onClick={() => setAiEnabled(chat.aiEnabled === false)}
+                    role="switch"
+                    aria-checked={chat.aiEnabled !== false}
+                    aria-label="Toggle AI Intelligence"
+                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                      chat.aiEnabled === false ? 'bg-slate-300 dark:bg-slate-700' : 'bg-teal-500'
                     }`}
-                  />
-                </button>
+                  >
+                    <span
+                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                        chat.aiEnabled === false ? 'translate-x-0.5' : 'translate-x-[22px]'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </SectionCard>
           )}
