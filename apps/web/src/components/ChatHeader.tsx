@@ -825,8 +825,8 @@ function GroupInfoModal({
 
           {canEdit && (
             <SectionCard icon={Sparkles} title="AI Intelligence" description="Allow Catch Me Up, Group Brain, and AI suggestions.">
-              <div className="flex items-center justify-between gap-4">
-                <p className="text-sm text-[color:var(--bl-text-secondary)]">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <p className="min-w-0 flex-1 text-sm text-[color:var(--bl-text-secondary)]">
                   {chat.aiEnabled === false ? 'AI features are off for this group.' : 'AI features are on for this group.'}
                 </p>
                 <button
@@ -834,7 +834,7 @@ function GroupInfoModal({
                   role="switch"
                   aria-checked={chat.aiEnabled !== false}
                   aria-label="Toggle AI Intelligence"
-                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
                     chat.aiEnabled === false ? 'bg-slate-300 dark:bg-slate-700' : 'bg-teal-500'
                   }`}
                 >
