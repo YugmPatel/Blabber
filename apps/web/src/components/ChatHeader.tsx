@@ -824,12 +824,25 @@ function GroupInfoModal({
           )}
 
           {canEdit && (
-            <SectionCard icon={Sparkles} title="AI Intelligence" description="Allow Catch Me Up, Group Brain, and AI suggestions.">
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
-                <p className="min-w-0 text-sm text-[color:var(--bl-text-secondary)]">
+            // Bespoke section (not the shared SectionCard) so the toggle can
+            // live in its own bottom row below the title/description instead
+            // of sharing a line with them — that's what actually guarantees
+            // it never crowds the card's right edge, regardless of how long
+            // the title/description/status text gets.
+            <section className="overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] p-4 text-left">
+              <div className="flex items-start gap-2 min-w-0">
+                <Sparkles size={16} className="mt-0.5 flex-shrink-0 text-teal-600 dark:text-teal-300" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[color:var(--bl-text)]">AI Intelligence</p>
+                  <p className="mt-0.5 text-xs text-[color:var(--bl-text-muted)]">Allow Catch Me Up, Group Brain, and AI suggestions.</p>
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4 py-3">
+                <p className="min-w-0 flex-1 text-sm text-[color:var(--bl-text-secondary)]">
                   {chat.aiEnabled === false ? 'AI features are off for this group.' : 'AI features are on for this group.'}
                 </p>
-                <div className="shrink-0 justify-self-end pr-2 sm:pr-3">
+                <div className="shrink-0 pr-3">
                   <button
                     onClick={() => setAiEnabled(chat.aiEnabled === false)}
                     role="switch"
@@ -847,7 +860,7 @@ function GroupInfoModal({
                   </button>
                 </div>
               </div>
-            </SectionCard>
+            </section>
           )}
 
           {canEdit && (
