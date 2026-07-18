@@ -838,11 +838,13 @@ function GroupInfoModal({
                 </div>
               </div>
 
-              <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4 py-3">
-                <p className="min-w-0 flex-1 text-sm text-[color:var(--bl-text-secondary)]">
+              <div className="mt-4 grid w-full max-w-full grid-cols-[minmax(0,1fr)_max-content] items-center gap-4 overflow-hidden rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4 py-3">
+                <p className="min-w-0 break-words text-sm text-[color:var(--bl-text-secondary)]">
                   {chat.aiEnabled === false ? 'AI features are off for this group.' : 'AI features are on for this group.'}
                 </p>
-                <div className="shrink-0 pr-3">
+                {/* Real margin (not just alignment/parent padding) reserves
+                    visible empty space between the switch and the panel edge. */}
+                <div className="mr-3 shrink-0 justify-self-end sm:mr-4">
                   <button
                     onClick={() => setAiEnabled(chat.aiEnabled === false)}
                     role="switch"
