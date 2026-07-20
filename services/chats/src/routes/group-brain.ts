@@ -268,7 +268,7 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
     return res.status(400).json({ error: 'Validation Error', message: 'Invalid chat ID' });
   }
 
-  const chat = await getChatsCollection().findOne({ _id: chatObjectId });
+  const chat = await getChatsCollection().findOne({ _id: chatObjectId, deletedAt: { $exists: false } });
   if (!chat) {
     return res.status(404).json({ error: 'Not Found', message: 'Chat not found' });
   }
@@ -295,7 +295,7 @@ export const getGroupBrain = asyncHandler(async (req: Request, res: Response) =>
 
   const [latestSummary, actionDocs, decisionDocs, waitingOnDocs, messages, participants] = await Promise.all([
     getChatSummariesCollection().findOne({ chatId: chatObjectId }, { sort: { createdAt: -1 } }),
-    getChatActionsCollection().find({ chatId: chatObjectId }).sort({ createdAt: -1 }).toArray(),
+    getChatActionsCollection().find({ chatId: chatObjectId, deletedAt: { $exists: false } }).sort({ createdAt: -1 }).toArray(),
     getChatDecisionsCollection().find({ chatId: chatObjectId }).sort({ createdAt: -1 }).toArray(),
     getWaitingOnCollection().find({ chatId: chatObjectId }).sort({ createdAt: -1 }).toArray(),
     getDatabase()
@@ -438,7 +438,7 @@ export const askGroupBrain = asyncHandler(async (req: Request, res: Response) =>
     return res.status(400).json({ error: 'Validation Error', message: 'Invalid chat ID' });
   }
 
-  const chat = await getChatsCollection().findOne({ _id: chatObjectId });
+  const chat = await getChatsCollection().findOne({ _id: chatObjectId, deletedAt: { $exists: false } });
   if (!chat) {
     return res.status(404).json({ error: 'Not Found', message: 'Chat not found' });
   }

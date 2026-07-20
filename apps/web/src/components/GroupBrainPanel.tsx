@@ -99,17 +99,25 @@ export default function GroupBrainPanel({
   const copy = COPY[mode];
   const isGroup = mode === 'group';
 
-  const ask = async (rawQuestion: string) => {
+  const ask = async (rawQuestion: string, retryItemId?: number) => {
     const trimmed = rawQuestion.trim();
     if (!trimmed) return;
 
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
+    const requestId = retryItemId ?? requestIdRef.current + 1;
+    if (!retryItemId) requestIdRef.current = requestId;
     setQuestion('');
-    setTranscript((items) => [
-      ...items,
-      { id: requestId, question: trimmed, isLoading: true },
-    ]);
+    setTranscript((items) =>
+      retryItemId
+        ? items.map((item) =>
+            item.id === retryItemId
+              ? { ...item, isLoading: true, error: undefined, answer: undefined }
+              : item
+          )
+        : [
+            ...items,
+            { id: requestId, question: trimmed, isLoading: true },
+          ]
+    );
 
     try {
       const answer = await onAsk(trimmed);
@@ -248,7 +256,7 @@ export default function GroupBrainPanel({
                       <p className="text-sm text-rose-500">{item.error}</p>
                       <button
                         type="button"
-                        onClick={() => void ask(item.question)}
+                        onClick={() => void ask(item.question, item.id)}
                         className="rounded-md border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-300 dark:hover:bg-rose-950/30"
                       >
                         Retry

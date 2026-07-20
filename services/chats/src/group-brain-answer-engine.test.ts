@@ -157,4 +157,50 @@ describe('Group Brain answer engine', () => {
     expect(answer.answer).toMatch(/Sam:.*lease document/i);
     expect(answer.answer).not.toMatch(/Maya:.*parking/i);
   });
+
+  it('does not invent ownership for ambiguous responsibility questions', () => {
+    const answer = answerGroupBrainQuestion('Who owns these tasks?', [
+      msg('m1', 'Someone should check parking.', 'Yugm', 1),
+      msg('m2', 'Can anyone upload the lease?', 'Devanshee', 2),
+      msg('m3', 'We need to finish WiFi.', 'Yugm', 3),
+    ]);
+
+    expect(answer.answerState).toBe('insufficient_evidence');
+    expect(answer.answer).not.toMatch(/Yugm:|Devanshee:/i);
+    expect(answer.sourceMessageIds).toEqual([]);
+  });
+
+  it('preserves conditional final decisions and ignores stale alternatives', () => {
+    const answer = answerGroupBrainQuestion('What internet provider are we using?', [
+      msg('m1', "Let's use Xfinity.", 'Yugm', 1),
+      msg('m2', 'Wait, Xfinity is too expensive.', 'Devanshee', 2),
+      msg('m3', 'Final decision: use Sonic if available, otherwise Xfinity.', 'Yugm', 3),
+    ]);
+
+    expect(answer.answerState).toBe('grounded');
+    expect(answer.answer).toMatch(/Sonic if available, otherwise Xfinity/i);
+    expect(answer.sourceMessageIds[0]).toBe('m3');
+  });
+
+  it('returns insufficient evidence instead of guessing unsupported facts', () => {
+    const answer = answerGroupBrainQuestion('Has everyone paid rent?', [
+      msg('m1', 'Decision: we will use Xfinity 1Gbps if the price is under $80.', 'Yugm', 1),
+      msg('m2', 'I will upload the lease document tonight.', 'Devanshee', 2),
+    ]);
+
+    expect(answer.answerState).toBe('insufficient_evidence');
+    expect(answer.answer).toMatch(/couldn't find|supported answer/i);
+    expect(answer.answer).not.toMatch(/\byes\b|\bno\b|paid/i);
+    expect(answer.sourceMessageIds).toEqual([]);
+  });
+
+  it('treats malicious HTML as text while still using the grounded decision', () => {
+    const answer = answerGroupBrainQuestion('What did we decide?', [
+      msg('m1', '<img src=x onerror=alert(1)> Decision: use Xfinity', 'Yugm', 1),
+    ]);
+
+    expect(answer.answerState).toBe('grounded');
+    expect(answer.answer).toMatch(/Decision: use Xfinity/i);
+    expect(answer.sourceMessageIds).toEqual(['m1']);
+  });
 });

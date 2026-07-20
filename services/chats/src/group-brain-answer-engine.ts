@@ -48,6 +48,9 @@ const EXPANSIONS: Record<string, string[]> = {
   move: ['move', 'move-in', 'id', 'parking', 'mailbox', 'lease', 'utilities', 'wifi', 'xfinity', 'insurance'],
   'move-in': ['move-in', 'id', 'parking', 'mailbox', 'lease', 'utilities', 'wifi', 'xfinity', 'insurance'],
   apartment: ['apartment', 'lease', 'utilities', 'wifi', 'xfinity', 'insurance', 'parking', 'mailbox'],
+  internet: ['internet', 'provider', 'wifi', 'xfinity', 'sonic', 'verizon'],
+  provider: ['provider', 'internet', 'wifi', 'xfinity', 'sonic', 'verizon'],
+  wifi: ['wifi', 'internet', 'provider', 'xfinity', 'sonic', 'verizon'],
 };
 
 function normalize(value: string) {
@@ -65,7 +68,7 @@ export function classifyQuestion(question: string): GroupBrainAnswerCategory {
   if (/\b(link|links|url|document|doc|notion|sheet)\b/.test(text)) return 'link';
   if (/\b(changed|new|since|today|yesterday|last week|this week)\b/.test(text)) return 'change_summary';
   if (/\b(decide|decided|finalize|finalized|choose|chose|agreed)\b/.test(text)) return 'decision';
-  if (/\b(when|where|what date|what time|dinner|meeting)\b/.test(text)) return 'factual_lookup';
+  if (/\b(when|where|what date|what time|dinner|meeting|provider|internet|wifi)\b/.test(text)) return 'factual_lookup';
   return 'unknown';
 }
 
@@ -88,7 +91,7 @@ function phraseIncludes(text: string, term: string) {
 }
 
 function hasDecisionSignal(text: string) {
-  return /\b(final|finalize|finalized|finalizing|confirmed|locked|lock|decided|agreed|we'll|we will|switching to|switch to|is at|will be at)\b/.test(text);
+  return /\b(final|finalize|finalized|finalizing|confirmed|locked|lock|decision|decided|agreed|we'll|we will|switching to|switch to|is at|will be at)\b/.test(text);
 }
 
 function hasProposalSignal(text: string) {
@@ -165,11 +168,11 @@ function retrieve(messages: GroupBrainEvidenceMessage[], question: string, categ
 }
 
 function noEvidence(question: string, category: GroupBrainAnswerCategory, topic?: string): GroupBrainEngineAnswer {
-  const subject = topic || topicTermsForQuestion(question)[0] || 'that';
-  const categoryText = category === 'decision' ? `a group decision about ${subject}` : `a supported answer for ${subject}`;
   return {
     question,
-    answer: `I couldn't find ${categoryText} in this group.`,
+    answer: topic
+      ? `I couldn't find enough evidence about ${topic} in this group.`
+      : "I couldn't find enough evidence in this group to answer that.",
     answerState: 'insufficient_evidence',
     answerCategory: category,
     confidence: 'uncertain',
