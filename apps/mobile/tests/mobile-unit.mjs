@@ -22,6 +22,15 @@ const protectedRoute = read('src/auth/Protected.tsx');
 assert(protectedRoute.includes("status === 'restoring'"), 'protected routes block while auth restores');
 assert(protectedRoute.includes('<Redirect href="/(auth)/sign-in"'), 'unauthenticated protected routes redirect to sign-in');
 
+const screenPrimitive = read('src/components/Screen.tsx');
+assert(screenPrimitive.includes('KeyboardAvoidingView'), 'shared mobile Screen avoids the keyboard for forms');
+assert(screenPrimitive.includes('keyboardShouldPersistTaps="handled"'), 'shared mobile Screen keeps form buttons tappable while keyboard is open');
+assert(screenPrimitive.includes('paddingBottom: 24'), 'shared mobile Screen keeps bottom content above safe-area/keyboard edges');
+
+const chatDetail = read('app/(app)/chats/[chatId].tsx');
+assert(chatDetail.includes('<ScrollView'), 'chat detail keeps long message lists independently scrollable');
+assert(chatDetail.includes('keyboardAvoiding={false}'), 'chat detail avoids nested keyboard wrappers');
+
 const deepLinks = read('src/deep-links/routes.ts');
 for (const allowed of ['profile', 'community', 'reel', 'chat', 'discover', 'notifications']) {
   assert(deepLinks.includes(`name: '${allowed}'`) || deepLinks.includes(`name: '${allowed}'`), `deep link supports ${allowed}`);

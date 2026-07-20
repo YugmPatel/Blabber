@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { listMessages, sendTextMessage } from '@/api/blabber';
 import { getSocket } from '@/realtime/socket';
@@ -28,16 +28,34 @@ export default function ChatDetail() {
   if (messages.loading && !messages.data) return <LoadingState label="Loading chat..." />;
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <Screen scroll={false}>
+      <Screen scroll={false} keyboardAvoiding={false}>
         <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 22, fontWeight: '800' }}>Chat</Text>
         {messages.error ? <ErrorState message="This content is unavailable." /> : null}
-        <View style={{ flex: 1, gap: 8 }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1, gap: 8, paddingBottom: 8 }}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+        >
           {messages.data?.messages?.length ? messages.data.messages.map((message) => (
-            <Text key={message.id || message._id} style={{ alignSelf: message.isMine ? 'flex-end' : 'flex-start', maxWidth: '85%', color: theme.text, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 8, padding: 10 }}>
+            <Text
+              key={message.id || message._id}
+              style={{
+                alignSelf: message.isMine ? 'flex-end' : 'flex-start',
+                maxWidth: '85%',
+                flexShrink: 1,
+                color: theme.text,
+                backgroundColor: theme.surface,
+                borderWidth: 1,
+                borderColor: theme.border,
+                borderRadius: 8,
+                padding: 10,
+              }}
+            >
               {message.body || message.text || ''}
             </Text>
           )) : <EmptyState title="No messages yet" />}
-        </View>
+        </ScrollView>
         <Input label="Message" value={draft} onChangeText={setDraft} multiline />
         <Button label="Send" disabled={!draft.trim()} onPress={async () => {
           const body = draft.trim();

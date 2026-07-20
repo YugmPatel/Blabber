@@ -1007,12 +1007,13 @@ export const Composer = ({
       />
       {showStickerPicker && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="sticker-picker-title"
         >
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          <div className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
             <div className="flex items-center justify-between gap-3">
               <h2
                 id="sticker-picker-title"
@@ -1050,12 +1051,13 @@ export const Composer = ({
       )}
       {showEventComposer && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="event-composer-title"
         >
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
             <div className="flex items-center justify-between gap-3">
               <h2
                 id="event-composer-title"
@@ -1182,12 +1184,13 @@ export const Composer = ({
       )}
       {attachmentNotice && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="attachment-notice-title"
         >
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+          <div className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2

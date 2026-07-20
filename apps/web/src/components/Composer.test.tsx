@@ -190,6 +190,20 @@ describe('Composer', () => {
     });
   });
 
+  it('opens the event composer as a mobile-safe scrollable dialog', async () => {
+    const user = userEvent.setup();
+    render(<Composer chatId="chat-1" />);
+
+    await user.click(screen.getByLabelText('Open composer actions'));
+    await user.click(screen.getByRole('menuitem', { name: /event/i }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Event' });
+    expect(dialog).toHaveClass('overflow-y-auto');
+    expect(dialog).toHaveStyle('padding-bottom: max(1rem, env(safe-area-inset-bottom))');
+    expect(dialog.firstElementChild).toHaveClass('max-h-[calc(100dvh-2rem)]', 'overflow-y-auto');
+    expect(screen.getByRole('button', { name: 'Send event' })).toBeVisible();
+  });
+
   it('shows reply preview when replyToId is provided', () => {
     render(<Composer chatId="chat-1" replyToId="msg-1" />);
 
