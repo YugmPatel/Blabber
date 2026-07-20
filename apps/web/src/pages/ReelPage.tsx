@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Bookmark, Flag, MessageCircle, Trash2 } from 'lucide-react';
@@ -22,19 +22,32 @@ import ShareToChat from '@/components/ShareToChat';
 
 const reactions = ['❤️', '😂', '😮', '😢', '🙌'];
 
+type ReelPreviewFields = ReelItem & {
+  coverUrl?: string | null;
+  imageUrl?: string | null;
+  previewUrl?: string | null;
+};
+
+function reelPreviewUrl(reel?: ReelItem | null): string | undefined {
+  if (!reel) return undefined;
+  const item = reel as ReelPreviewFields;
+  return item.thumbnailUrl || item.posterUrl || item.coverUrl || item.previewUrl || item.imageUrl || undefined;
+}
+
 export default function ReelPage() {
   const { reelId = '' } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [playback, setPlayback] = useState<{ fallbackUrl: string; posterUrl: string } | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | undefined>();
   const [posterUrl, setPosterUrl] = useState<string | undefined>();
+  const [playbackFailed, setPlaybackFailed] = useState(false);
+  const [playbackReloadKey, setPlaybackReloadKey] = useState(0);
   const [eventToken, setEventToken] = useState('');
   const [commentBody, setCommentBody] = useState('');
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const videoRetryCountRef = useRef(0);
   const reel = useQuery({ queryKey: ['reel', reelId], queryFn: () => fetchReel(reelId), enabled: Boolean(reelId) });
   const comments = useQuery({ queryKey: ['reel-comments', reelId], queryFn: () => fetchReelComments(reelId), enabled: Boolean(reelId) && commentsOpen });
-  const session = useMutation({ mutationFn: () => createReelPlaybackSession(reelId), onSuccess: (value) => setPlayback(value) });
   const remove = useMutation({ mutationFn: () => deleteReel(reelId), onSuccess: () => navigate(-1) });
   const report = useMutation({ mutationFn: () => reportReel(reelId, { reason: 'Inappropriate Reel' }) });
   const updateReel = (patch: Partial<ReelItem>) => queryClient.setQueryData<ReelItem>(['reel', reelId], (old) => old ? { ...old, ...patch } : old);
@@ -56,15 +69,63 @@ export default function ReelPage() {
   });
 
   useEffect(() => {
-    setPlayback(null);
     setVideoUrl(undefined);
     setPosterUrl(undefined);
+    setPlaybackFailed(false);
+    setPlaybackReloadKey(0);
+    videoRetryCountRef.current = 0;
     setEventToken('');
   }, [reelId]);
 
   useEffect(() => {
-    if (reel.data?.processingStatus === 'ready' && !playback && !session.isPending) session.mutate();
-  }, [reel.data?.processingStatus, playback, session.isPending]);
+    if (reel.data?.processingStatus !== 'ready' || !reelId) return undefined;
+    let alive = true;
+    const objectUrls: string[] = [];
+    setVideoUrl(undefined);
+    setPosterUrl(undefined);
+    setPlaybackFailed(false);
+    const retry = () => {
+      if (videoRetryCountRef.current >= 1) {
+        setVideoUrl(undefined);
+        setPlaybackFailed(true);
+        return;
+      }
+      videoRetryCountRef.current += 1;
+      setVideoUrl(undefined);
+      setPosterUrl(undefined);
+      setPlaybackReloadKey((value) => value + 1);
+    };
+    const load = async () => {
+      try {
+        const playback = await createReelPlaybackSession(reelId);
+        const video = await fetchAuthorizedObjectUrl(playback.fallbackUrl);
+        if (!alive) return;
+        if (!video) throw new Error('reel_playback_unavailable');
+        objectUrls.push(video);
+        let poster: string | undefined;
+        if (reelPreviewUrl(reel.data) && playback.posterUrl) {
+          try {
+            poster = await fetchAuthorizedObjectUrl(playback.posterUrl);
+            if (poster) objectUrls.push(poster);
+          } catch {
+            poster = undefined;
+          }
+        }
+        if (!alive) return;
+        setVideoUrl(video);
+        setPosterUrl(poster);
+      } catch {
+        if (alive) retry();
+      }
+    };
+    void load();
+    return () => {
+      alive = false;
+      objectUrls.forEach((url) => {
+        if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+    };
+  }, [playbackReloadKey, reel.data?.posterUrl, reel.data?.processingStatus, reel.data?.thumbnailUrl, reelId]);
 
   useEffect(() => {
     if (!reel.data?.id) return;
@@ -83,28 +144,6 @@ export default function ReelPage() {
     if (eventToken && reelId) void recordReelEvent(reelId, { eventType: 'reel_open', eventToken });
   }, [eventToken, reelId]);
 
-  useEffect(() => {
-    if (!playback) return undefined;
-    let alive = true;
-    const objectUrls: string[] = [];
-    const load = async () => {
-      const [video, poster] = await Promise.all([
-        fetchAuthorizedObjectUrl(playback.fallbackUrl),
-        fetchAuthorizedObjectUrl(playback.posterUrl),
-      ]);
-      if (!alive) return;
-      if (!video || !poster) return;
-      objectUrls.push(video, poster);
-      setVideoUrl(video);
-      setPosterUrl(poster);
-    };
-    void load();
-    return () => {
-      alive = false;
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, [playback]);
-
   return (
     <main className="min-h-dvh bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white">
       <div className="mx-auto max-w-3xl">
@@ -115,8 +154,31 @@ export default function ReelPage() {
         {reel.data && (
           <section className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
             <div className="bg-black">
-              {playback ? (
-                <video className="mx-auto max-h-[70vh] w-full bg-black" controls preload="metadata" poster={posterUrl} src={videoUrl} />
+              {videoUrl ? (
+                <video
+                  className="mx-auto max-h-[70vh] w-full bg-black"
+                  controls
+                  preload="metadata"
+                  poster={posterUrl}
+                  src={videoUrl}
+                  onLoadedData={() => {
+                    videoRetryCountRef.current = 0;
+                    setPlaybackFailed(false);
+                  }}
+                  onError={() => {
+                    if (videoRetryCountRef.current >= 1) {
+                      setVideoUrl(undefined);
+                      setPlaybackFailed(true);
+                      return;
+                    }
+                    videoRetryCountRef.current += 1;
+                    setVideoUrl(undefined);
+                    setPosterUrl(undefined);
+                    setPlaybackReloadKey((value) => value + 1);
+                  }}
+                />
+              ) : playbackFailed ? (
+                <div className="flex aspect-video items-center justify-center text-sm text-slate-300">This Reel is unavailable.</div>
               ) : (
                 <div className="flex aspect-video items-center justify-center text-sm text-slate-300">Loading video...</div>
               )}

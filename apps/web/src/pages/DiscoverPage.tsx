@@ -19,7 +19,6 @@ import {
   fetchReel,
   fetchReelsBrowse,
   createReelPlaybackSession,
-  reelPosterUrl,
   createReelComment,
   fetchReelComments,
   followDiscoveryTopic,
@@ -120,6 +119,18 @@ function pickTopicStyle(seed: string): { Icon: typeof TrendingUp; from: string; 
 }
 
 const TOPIC_PREVIEW_COUNT = 10;
+
+type ReelPreviewFields = ReelItem & {
+  coverUrl?: string | null;
+  imageUrl?: string | null;
+  previewUrl?: string | null;
+};
+
+function reelPreviewUrl(reel?: ReelItem | null): string | undefined {
+  if (!reel) return undefined;
+  const item = reel as ReelPreviewFields;
+  return item.thumbnailUrl || item.posterUrl || item.coverUrl || item.previewUrl || item.imageUrl || undefined;
+}
 
 /** Section heading row with an optional real expand/collapse action — "View
     all" reveals the already-loaded remainder in place (there is no separate
@@ -379,9 +390,11 @@ function ReelPoster({ reel }: { reel: ReelItem }) {
   useEffect(() => {
     let alive = true;
     let createdUrl: string | undefined;
+    const sourceUrl = reelPreviewUrl(reel);
     setPosterUrl(undefined);
     setFailed(false);
-    fetchAuthorizedObjectUrl(reelPosterUrl(reel.id))
+    if (!sourceUrl) return undefined;
+    fetchAuthorizedObjectUrl(sourceUrl)
       .then((value) => {
         if (!alive) {
           if (value?.startsWith('blob:')) URL.revokeObjectURL(value);
@@ -397,7 +410,7 @@ function ReelPoster({ reel }: { reel: ReelItem }) {
       alive = false;
       if (createdUrl?.startsWith('blob:')) URL.revokeObjectURL(createdUrl);
     };
-  }, [reel.id]);
+  }, [reel.id, reel.posterUrl, reel.thumbnailUrl]);
   if (!posterUrl || failed) {
     return <div className="flex aspect-[9/12] w-full items-center justify-center bg-[color:var(--bl-hover)] text-xs text-[color:var(--bl-text-muted)]">Reel</div>;
   }
@@ -522,42 +535,64 @@ function ReelDetailDialog({ reelId, onClose }: { reelId: string; onClose: () => 
   const reel = useQuery({ queryKey: ['reel-detail', reelId], queryFn: () => fetchReel(reelId) });
   const [videoUrl, setVideoUrl] = useState<string | undefined>();
   const [posterUrl, setPosterUrl] = useState<string | undefined>();
+  const [playbackFailed, setPlaybackFailed] = useState(false);
+  const [playbackReloadKey, setPlaybackReloadKey] = useState(0);
   const [muted, setMuted] = useState(true);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentBody, setCommentBody] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRetryCountRef = useRef(0);
   const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const comments = useQuery({ queryKey: ['reel-comments', reelId], queryFn: () => fetchReelComments(reelId), enabled: commentsOpen });
   useEffect(() => {
     let alive = true;
-    let videoObjectUrl: string | undefined;
-    let posterObjectUrl: string | undefined;
+    const objectUrls: string[] = [];
     setVideoUrl(undefined);
     setPosterUrl(undefined);
+    setPlaybackFailed(false);
+    if (playbackReloadKey === 0) videoRetryCountRef.current = 0;
+    const retry = () => {
+      if (videoRetryCountRef.current >= 1) {
+        setVideoUrl(undefined);
+        setPlaybackFailed(true);
+        return;
+      }
+      videoRetryCountRef.current += 1;
+      setVideoUrl(undefined);
+      setPosterUrl(undefined);
+      setPlaybackReloadKey((value) => value + 1);
+    };
     createReelPlaybackSession(reelId)
-      .then((value) => {
-        return Promise.all([fetchAuthorizedObjectUrl(value.fallbackUrl), fetchAuthorizedObjectUrl(value.posterUrl)]);
-      })
-      .then(([nextVideoUrl, nextPosterUrl]) => {
-        if (!alive) {
-          if (nextVideoUrl?.startsWith('blob:')) URL.revokeObjectURL(nextVideoUrl);
-          if (nextPosterUrl?.startsWith('blob:')) URL.revokeObjectURL(nextPosterUrl);
-          return;
+      .then(async (value) => {
+        const nextVideoUrl = await fetchAuthorizedObjectUrl(value.fallbackUrl);
+        if (!alive) return;
+        if (!nextVideoUrl) throw new Error('reel_playback_unavailable');
+        objectUrls.push(nextVideoUrl);
+        let nextPosterUrl: string | undefined;
+        if (reelPreviewUrl(reel.data) && value.posterUrl) {
+          try {
+            nextPosterUrl = await fetchAuthorizedObjectUrl(value.posterUrl);
+            if (nextPosterUrl) objectUrls.push(nextPosterUrl);
+          } catch {
+            nextPosterUrl = undefined;
+          }
         }
-        videoObjectUrl = nextVideoUrl;
-        posterObjectUrl = nextPosterUrl;
+        if (!alive) return;
         setVideoUrl(nextVideoUrl);
         setPosterUrl(nextPosterUrl);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (alive) retry();
+      });
     return () => {
       alive = false;
       videoRef.current?.pause();
-      if (videoObjectUrl?.startsWith('blob:')) URL.revokeObjectURL(videoObjectUrl);
-      if (posterObjectUrl?.startsWith('blob:')) URL.revokeObjectURL(posterObjectUrl);
+      objectUrls.forEach((url) => {
+        if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
     };
-  }, [reelId]);
+  }, [playbackReloadKey, reel.data?.posterUrl, reel.data?.thumbnailUrl, reelId]);
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoUrl || reducedMotion) return;
@@ -597,9 +632,32 @@ function ReelDetailDialog({ reelId, onClose }: { reelId: string; onClose: () => 
         <button onClick={onClose} className="absolute right-3 top-3 z-10 rounded-full bg-black/60 p-2" aria-label="Close Reel detail"><X size={17} /></button>
         <div className="relative mx-auto aspect-[9/16] max-h-[74dvh] w-full max-w-[420px] overflow-hidden rounded-lg bg-black md:max-h-[88dvh] md:flex-1">
           {videoUrl ? (
-            <video ref={videoRef} src={videoUrl} poster={posterUrl} muted={muted} playsInline controls className="h-full w-full object-contain" />
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              poster={posterUrl}
+              muted={muted}
+              playsInline
+              controls
+              className="h-full w-full object-contain"
+              onLoadedData={() => {
+                videoRetryCountRef.current = 0;
+                setPlaybackFailed(false);
+              }}
+              onError={() => {
+                if (videoRetryCountRef.current >= 1) {
+                  setVideoUrl(undefined);
+                  setPlaybackFailed(true);
+                  return;
+                }
+                videoRetryCountRef.current += 1;
+                setVideoUrl(undefined);
+                setPosterUrl(undefined);
+                setPlaybackReloadKey((value) => value + 1);
+              }}
+            />
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-slate-300">{reel.isError ? 'Reel unavailable.' : 'Loading Reel...'}</div>
+            <div className="flex h-full items-center justify-center text-sm text-slate-300">{reel.isError || playbackFailed ? 'Reel unavailable.' : 'Loading Reel...'}</div>
           )}
           <button onClick={() => setMuted((value) => !value)} className="absolute left-3 top-3 rounded-full bg-black/65 px-3 py-2 text-xs font-semibold">
             {muted ? 'Muted' : 'Sound on'}

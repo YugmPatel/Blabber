@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Bookmark, CalendarClock, Flag, Menu, MessageCircle, Play, Share2, Upload, Volume2, VolumeX, XCircle } from 'lucide-react';
@@ -36,6 +36,17 @@ function formatDuration(seconds: number | null): string | null {
 
 const reactions = ['❤️', '😂', '😮', '😢', '🙌'];
 
+type ReelPreviewFields = ReelItem & {
+  coverUrl?: string | null;
+  imageUrl?: string | null;
+  previewUrl?: string | null;
+};
+
+function reelPreviewUrl(reel: ReelItem): string | undefined {
+  const item = reel as ReelPreviewFields;
+  return item.thumbnailUrl || item.posterUrl || item.coverUrl || item.previewUrl || item.imageUrl || undefined;
+}
+
 function ReelCard({
   reel,
   onHidden,
@@ -55,10 +66,10 @@ function ReelCard({
   const navigate = useNavigate();
   const stageRef = useRef<HTMLElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [playback, setPlayback] = useState<{ fallbackUrl: string; posterUrl: string } | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | undefined>();
   const [posterUrl, setPosterUrl] = useState<string | undefined>();
   const [playbackState, setPlaybackState] = useState<'loading' | 'ready' | 'playing' | 'paused' | 'failed'>('loading');
+  const [playbackReloadKey, setPlaybackReloadKey] = useState(0);
   const [muted, setMuted] = useState(true);
   const [commentBody, setCommentBody] = useState('');
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -66,6 +77,7 @@ function ReelCard({
   const [planOpen, setPlanOpen] = useState(false);
   const [eventToken, setEventToken] = useState(reel.eventToken || '');
   const [whyOpen, setWhyOpen] = useState(false);
+  const videoRetryCountRef = useRef(0);
   const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
   const comments = useQuery({
@@ -77,17 +89,11 @@ function ReelCard({
   useEffect(() => {
     let alive = true;
     setEventToken(reel.eventToken || '');
-    setPlayback(null);
     setVideoUrl(undefined);
     setPosterUrl(undefined);
     setPlaybackState('loading');
-    createReelPlaybackSession(reel.id)
-      .then((value) => {
-        if (alive) setPlayback(value);
-      })
-      .catch(() => {
-        if (alive) setPlaybackState('failed');
-      });
+    setPlaybackReloadKey(0);
+    videoRetryCountRef.current = 0;
     if (!reel.eventToken && allowSignals) {
       createReelEventToken(reel.id)
         .then((value) => {
@@ -100,29 +106,56 @@ function ReelCard({
     };
   }, [allowSignals, reel.eventToken, reel.id]);
 
+  const retryPlayback = useCallback(() => {
+    if (videoRetryCountRef.current >= 1) {
+      setVideoUrl(undefined);
+      setPlaybackState('failed');
+      return;
+    }
+    videoRetryCountRef.current += 1;
+    setVideoUrl(undefined);
+    setPosterUrl(undefined);
+    setPlaybackState('loading');
+    setPlaybackReloadKey((value) => value + 1);
+  }, []);
+
   useEffect(() => {
     if (!eventToken || !allowSignals) return;
     void recordReelEvent(reel.id, { eventType: 'reel_open', eventToken });
   }, [allowSignals, eventToken, reel.id]);
 
   useEffect(() => {
-    if (!playback) return undefined;
+    if (!active) {
+      setVideoUrl(undefined);
+      setPosterUrl(undefined);
+      setPlaybackState('paused');
+      return undefined;
+    }
     let alive = true;
     const objectUrls: string[] = [];
     const load = async () => {
       try {
-        const [nextVideoUrl, nextPosterUrl] = await Promise.all([
-          fetchAuthorizedObjectUrl(playback.fallbackUrl),
-          fetchAuthorizedObjectUrl(playback.posterUrl),
-        ]);
+        setPlaybackState('loading');
+        const session = await createReelPlaybackSession(reel.id);
+        const nextVideoUrl = await fetchAuthorizedObjectUrl(session.fallbackUrl);
         if (!alive) return;
-        if (!nextVideoUrl || !nextPosterUrl) throw new Error('playback_unavailable');
-        objectUrls.push(nextVideoUrl, nextPosterUrl);
+        if (!nextVideoUrl) throw new Error('playback_unavailable');
+        objectUrls.push(nextVideoUrl);
+        let nextPosterUrl: string | undefined;
+        if (reelPreviewUrl(reel) && session.posterUrl) {
+          try {
+            nextPosterUrl = await fetchAuthorizedObjectUrl(session.posterUrl);
+            if (nextPosterUrl) objectUrls.push(nextPosterUrl);
+          } catch {
+            nextPosterUrl = undefined;
+          }
+        }
+        if (!alive) return;
         setVideoUrl(nextVideoUrl);
         setPosterUrl(nextPosterUrl);
         setPlaybackState('ready');
       } catch {
-        if (alive) setPlaybackState('failed');
+        if (alive) retryPlayback();
       }
     };
     void load();
@@ -132,7 +165,7 @@ function ReelCard({
         if (url.startsWith('blob:')) URL.revokeObjectURL(url);
       });
     };
-  }, [playback]);
+  }, [active, playbackReloadKey, reel.id, retryPlayback]);
 
   useEffect(() => {
     const node = stageRef.current;
@@ -149,7 +182,7 @@ function ReelCard({
     if (!video) return;
     if (!active || document.visibilityState === 'hidden') {
       video.pause();
-      setPlaybackState((state) => state === 'failed' ? state : 'paused');
+      setPlaybackState('paused');
       return;
     }
     if (reducedMotion) return;
@@ -197,7 +230,7 @@ function ReelCard({
   const report = useMutation({ mutationFn: () => reportReel(reel.id, { reason: 'Inappropriate Reel' }) });
 
   return (
-    <article ref={stageRef} className="mx-auto flex min-h-[calc(100dvh-140px)] w-full max-w-4xl snap-start items-center justify-center py-6">
+    <article id={`reel-card-${reel.id}`} ref={stageRef} className="mx-auto flex min-h-[calc(100dvh-140px)] w-full max-w-4xl snap-start items-center justify-center py-6">
       <div
         className="relative aspect-[9/16] max-h-[calc(100dvh-160px)] w-full max-w-[430px] overflow-hidden rounded-2xl border border-[color:var(--bl-border)] bg-black shadow-2xl"
         style={{ boxShadow: 'var(--bl-glow-md), 0 25px 50px -12px rgba(0,0,0,0.5)' }}
@@ -213,9 +246,13 @@ function ReelCard({
             poster={posterUrl}
             src={videoUrl}
             onCanPlay={() => setPlaybackState((state) => state === 'failed' ? state : 'ready')}
+            onLoadedData={() => {
+              videoRetryCountRef.current = 0;
+              setPlaybackState((state) => state === 'failed' ? state : 'ready');
+            }}
             onPlaying={() => setPlaybackState('playing')}
             onPause={() => setPlaybackState((state) => state === 'failed' ? state : 'paused')}
-            onError={() => setPlaybackState('failed')}
+            onError={retryPlayback}
             onTimeUpdate={(event) => {
               if (!eventToken || !allowSignals) return;
               const video = event.currentTarget;
@@ -348,10 +385,9 @@ function ReelCard({
   );
 }
 
-/** Small suggested-Reel tile — reuses the same authorized playback-session
-    flow as the main player, resolving only the poster (not the video) to a
-    blob URL. No fake thumbnails, no invented view counts: everything shown
-    here is a real field already present on the loaded ReelItem. */
+/** Small suggested-Reel tile — resolves only the already-authorized poster
+    fields from the loaded ReelItem. No playback session is created for rail
+    thumbnails, and no fake thumbnails or invented view counts are shown. */
 function SuggestedReelThumb({ reel, onSelect }: { reel: ReelItem; onSelect: () => void }) {
   const [posterUrl, setPosterUrl] = useState<string | undefined>();
   const [failed, setFailed] = useState(false);
@@ -360,10 +396,11 @@ function SuggestedReelThumb({ reel, onSelect }: { reel: ReelItem; onSelect: () =
   useEffect(() => {
     let alive = true;
     let createdUrl: string | undefined;
+    const sourceUrl = reelPreviewUrl(reel);
     setPosterUrl(undefined);
     setFailed(false);
-    createReelPlaybackSession(reel.id)
-      .then((session) => fetchAuthorizedObjectUrl(session.posterUrl))
+    if (!sourceUrl) return undefined;
+    fetchAuthorizedObjectUrl(sourceUrl)
       .then((url) => {
         if (!alive) {
           if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
@@ -380,7 +417,7 @@ function SuggestedReelThumb({ reel, onSelect }: { reel: ReelItem; onSelect: () =
       alive = false;
       if (createdUrl?.startsWith('blob:')) URL.revokeObjectURL(createdUrl);
     };
-  }, [reel.id]);
+  }, [reel.id, reel.posterUrl, reel.thumbnailUrl]);
 
   return (
     <button
@@ -389,7 +426,7 @@ function SuggestedReelThumb({ reel, onSelect }: { reel: ReelItem; onSelect: () =
     >
       <div className="relative h-16 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-[color:var(--bl-hover)]">
         {posterUrl && !failed ? (
-          <img src={posterUrl} alt="" className="h-full w-full object-cover" />
+          <img src={posterUrl} alt={`${reel.caption || 'Reel'} cover`} className="h-full w-full object-cover" onError={() => setFailed(true)} />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-teal-600 dark:text-teal-300">
             <Play size={16} />
@@ -415,6 +452,7 @@ export default function ReelsPage() {
   const [tab, setTab] = useState<'for-you' | 'browse'>('for-you');
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [activeReelId, setActiveReelId] = useState<string | null>(null);
+  const [showAllSuggested, setShowAllSuggested] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const browse = useQuery({ queryKey: ['reels-browse'], queryFn: () => fetchReelsBrowse() });
   const forYou = useQuery({ queryKey: ['reels-for-you'], queryFn: () => fetchReelsForYou() });
@@ -450,14 +488,15 @@ export default function ReelsPage() {
     return () => observer.disconnect();
   }, [active.data?.nextCursor, loadMore.isPending, tab]);
 
-  const currentReelId = activeReelId || visibleReels[0]?.id;
+  const currentReelId = visibleReels.some((reel) => reel.id === activeReelId) ? activeReelId : visibleReels[0]?.id;
   // Derived entirely from the already-loaded, authorized Reels response —
   // no new endpoint, no fake entries. Hidden if fewer than 2 real Reels are
   // available to suggest, per the "no empty fake panel" requirement.
-  const suggestedReels = useMemo(
-    () => visibleReels.filter((reel) => reel.id !== currentReelId).slice(0, 5),
+  const allSuggestedReels = useMemo(
+    () => visibleReels.filter((reel) => reel.id !== currentReelId),
     [visibleReels, currentReelId]
   );
+  const suggestedReels = showAllSuggested ? allSuggestedReels : allSuggestedReels.slice(0, 5);
 
   return (
     <main className="flex h-dvh overflow-hidden bg-[color:var(--bl-bg)] text-[color:var(--bl-text)]">
@@ -571,15 +610,24 @@ export default function ReelsPage() {
             <h2 className="px-2 text-sm font-semibold text-[color:var(--bl-text)]">Suggested Reels</h2>
             <div className="mt-2 space-y-1">
               {suggestedReels.map((reel) => (
-                <SuggestedReelThumb key={reel.id} reel={reel} onSelect={() => navigate(`/reels/${reel.id}`)} />
+                <SuggestedReelThumb
+                  key={reel.id}
+                  reel={reel}
+                  onSelect={() => {
+                    setActiveReelId(reel.id);
+                    document.getElementById(`reel-card-${reel.id}`)?.scrollIntoView?.({ block: 'center' });
+                  }}
+                />
               ))}
             </div>
-            <button
-              onClick={() => setTab('browse')}
-              className="bl-focus-ring mt-3 w-full rounded-xl border border-[color:var(--bl-border)] py-2 text-sm font-medium text-teal-700 transition hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
-            >
-              View all
-            </button>
+            {allSuggestedReels.length > 5 && (
+              <button
+                onClick={() => setShowAllSuggested((value) => !value)}
+                className="bl-focus-ring mt-3 w-full rounded-xl border border-[color:var(--bl-border)] py-2 text-sm font-medium text-teal-700 transition hover:bg-teal-50 dark:text-teal-300 dark:hover:bg-teal-500/10"
+              >
+                {showAllSuggested ? 'Show less' : 'View all'}
+              </button>
+            )}
           </aside>
         )}
       </div>
