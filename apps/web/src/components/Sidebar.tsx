@@ -181,21 +181,21 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* ── New Convo button ──────────────────────────── */}
+      {/* ── New Chat button ──────────────────────────── */}
       <div className={`px-4 py-4 ${collapsed ? 'flex justify-center' : ''}`}>
         <button
           onClick={() => {
             onNewConversation();
             onNavigateMobile?.();
           }}
-          aria-label="New Convo"
-          title={collapsed ? 'New Convo' : undefined}
+          aria-label="New Chat"
+          title={collapsed ? 'New Chat' : undefined}
           className={`bl-focus-ring flex items-center justify-center gap-2 rounded-xl bg-teal-600 text-white shadow-sm transition hover:bg-teal-700 hover:shadow dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 ${
             collapsed ? 'h-10 w-10' : 'h-10 w-full px-3.5 text-[13px] font-semibold'
           }`}
         >
           <Plus size={16} strokeWidth={2.5} />
-          {!collapsed && 'New Convo'}
+          {!collapsed && 'New Chat'}
         </button>
       </div>
 

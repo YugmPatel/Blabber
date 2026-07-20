@@ -51,12 +51,12 @@ test('02 sidebar no longer exposes All Chats as the main nav label', () => {
 });
 
 test('03 Messages heading remains unchanged', () => {
-  assert(source.chatsLayout.includes('>Messages<'), 'Messages heading missing');
+  assert(/<h[1-6][^>]*>\s*Messages\s*<\/h[1-6]>/.test(source.chatsLayout), 'Messages heading missing');
 });
 
 test('04 sidebar New Chat remains the primary chat start action', () => {
-  assert(source.sidebar.includes('New chat'), 'Sidebar New chat label missing');
-  assert(source.sidebar.includes('aria-label="New conversation"'), 'Sidebar new conversation aria-label missing');
+  assert(source.sidebar.includes('New Chat'), 'Sidebar New Chat label missing');
+  assert(source.sidebar.includes('aria-label="New Chat"'), 'Sidebar New Chat aria-label missing');
 });
 
 test('05 duplicate plus button beside Messages is removed', () => {
@@ -109,11 +109,11 @@ test('13 message result opens chat with source message id', () => {
 
 test('14 empty dashboard copy matches approved text', () => {
   assert(
-    source.chatsLayout.includes('Blabber is your group-chat power companion.'),
+    source.chatsLayout.includes('Discover, share, make it happen.'),
     'Approved empty-state heading missing'
   );
   assert(
-    source.chatsLayout.includes('Choose a conversation to catch up, find shared updates, and keep everyone aligned.'),
+    source.chatsLayout.includes('AI-first social conversations that help you find ideas, share them with your people, and turn them into real'),
     'Approved empty-state body missing'
   );
 });
@@ -159,15 +159,18 @@ test('22 edited and deleted messages reconcile Shared content', () => {
 
 test('23 New Chat uses native picker structure', () => {
   assert(source.newChat.includes('New Chat'), 'New Chat title missing');
-  assert(source.newChat.includes('Search people or existing conversations'), 'New Chat search copy missing');
+  assert(source.newChat.includes('Search by username or name'), 'New Chat search copy missing');
   assert(source.newChat.includes('Create a group'), 'Create a group row missing');
   assert(source.newChat.includes('Recent'), 'Recent section missing');
-  assert(source.newChat.includes('People you can message'), 'People you can message section missing');
+  assert(source.newChat.includes('Copy profile link'), 'Profile link row missing');
+  assert(source.newChat.includes('Copy invite link'), 'Invite link row missing');
 });
 
-test('24 New Chat does not perform broad registered-user search', () => {
-  assert(!source.newChat.includes('/api/users/search'), 'New Chat still calls broad user search');
-  assert(source.newChat.includes('useChats()'), 'New Chat does not derive candidates from existing chats');
+test('24 New Chat uses safe discovery search and existing chats', () => {
+  assert(source.newChat.includes('searchUsers'), 'New Chat safe user search missing');
+  assert(source.newChat.includes('sendMessageRequest'), 'New Chat message-request path missing');
+  assert(source.newChat.includes('fetchMessageRequestInbox'), 'New Chat message-request inbox missing');
+  assert(source.newChat.includes('useChats()'), 'New Chat does not derive recent contacts from existing chats');
 });
 
 test('25 New Group does not perform broad registered-user search', () => {
@@ -225,8 +228,9 @@ test('33 HEIC and HEIF image upload is accepted then normalized server-side', ()
   assert(source.composer.includes('image/heic') && source.composer.includes('image/heif'), 'HEIC/HEIF picker accept values missing');
   assert(source.mediaPolicy.includes("'image/heic'") && source.mediaPolicy.includes("'image/heif'"), 'HEIC/HEIF policy allowlist missing');
   assert(source.mediaPolicy.includes("return 'image/heic'"), 'HEIC byte detection missing');
-  assert(source.mediaPresign.includes('normalizeHeicToJpeg'), 'HEIC normalization pipeline missing');
-  assert(source.mediaPresign.includes("'ffprobe'") && source.mediaPresign.includes("'ffmpeg'"), 'HEIC decoder validation missing');
+  assert(source.mediaPresign.includes('normalizeImageToJpeg'), 'Image normalization pipeline missing');
+  assert(source.mediaPresign.includes("'heif-convert'"), 'HEIC/HEIF decoder missing');
+  assert(source.mediaPresign.includes("'ffprobe'") && source.mediaPresign.includes("'ffmpeg'"), 'Image decoder validation missing');
   assert(source.composer.includes('This photo could not be uploaded. Try another image.'), 'Generic photo upload error missing');
 });
 

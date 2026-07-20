@@ -207,7 +207,7 @@ export default function ChatsLayout() {
                     <Menu size={16} />
                   </button>
                   <h2 className="text-[22px] font-semibold tracking-tight text-slate-900 dark:text-white">
-                    Conversations
+                    Messages
                   </h2>
                 </div>
               </div>
@@ -239,7 +239,7 @@ export default function ChatsLayout() {
                     }
                   }}
                   className="w-full rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] py-2.5 pl-9 pr-11 text-sm text-[color:var(--bl-text)] outline-none transition placeholder:text-[color:var(--bl-text-muted)] focus:border-teal-400 focus:bg-[color:var(--bl-panel)] focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-500/20"
-                  placeholder="Search convos and messages"
+                  placeholder="Search chats and messages"
                 />
                 {trimmedSearchQuery && (
                   <button
@@ -293,7 +293,7 @@ export default function ChatsLayout() {
                 <div className="flex h-56 flex-col items-center justify-center px-6 text-center">
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">No groups yet</p>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    Use New Convo to create a group with people you can message.
+                    Use New Chat to create a group with people you can message.
                   </p>
                 </div>
               ) : (

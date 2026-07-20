@@ -126,7 +126,7 @@ function UserPreviewModal({ user, onClose, onMessage, onRequest, isRequesting }:
     },
   });
   const report = useMutation({
-    mutationFn: () => createReport({ targetType: 'user', targetId: user.id, reason: 'Reported from New Convo search' }),
+    mutationFn: () => createReport({ targetType: 'user', targetId: user.id, reason: 'Reported from New Chat search' }),
     onSuccess: () => setNotice('Report submitted.'),
   });
 
@@ -430,7 +430,7 @@ export default function NewChatModal({ isOpen, onClose, onOpenNewGroup }: NewCha
           >
             <ArrowLeft size={18} />
           </button>
-          <h2 className="flex-1 text-[15px] font-semibold text-slate-900 dark:text-white">New Convo</h2>
+          <h2 className="flex-1 text-[15px] font-semibold text-slate-900 dark:text-white">New Chat</h2>
           <button
             onClick={() => setShowRequests(true)}
             className="relative flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
