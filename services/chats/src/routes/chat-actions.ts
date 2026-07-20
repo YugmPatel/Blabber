@@ -778,15 +778,15 @@ export const createChatAction = asyncHandler(async (req: Request, res: Response)
   }
 
   const isDirectChat = chatResult.chat.type === 'direct';
-  const requestedOwnerUserId = bodyResult.data.ownerUserId || userId;
+  const requestedOwnerUserId = bodyResult.data.ownerUserId?.trim() || undefined;
   const ownerUserId = isDirectChat ? userId : requestedOwnerUserId;
-  if (isDirectChat && requestedOwnerUserId !== userId) {
+  if (isDirectChat && requestedOwnerUserId && requestedOwnerUserId !== userId) {
     return res.status(403).json({
       error: 'Forbidden',
       message: 'Direct chat Actions can only be created as your private personal Action.',
     });
   }
-  if (!isDirectChat) {
+  if (!isDirectChat && ownerUserId) {
     if (!isCurrentGroupParticipant(chatResult.chat, ownerUserId)) {
       return res.status(400).json({
         error: 'Validation Error',
@@ -801,22 +801,25 @@ export const createChatAction = asyncHandler(async (req: Request, res: Response)
     }
   }
   const userNames = await loadUserNames([
-    ownerUserId,
+    ...(ownerUserId ? [ownerUserId] : []),
     userId,
     ...chatResult.chat.participants.map((participantId) => participantId.toString()),
   ]);
   const now = new Date();
   const actor = actionPerson(userId, userNames);
   const dueAt = parseDueAt(bodyResult.data.dueAt, bodyResult.data.dueDate);
+  const assignedTo = ownerUserId
+    ? {
+        userId: ownerUserId,
+        name: bodyResult.data.ownerName || userNames.get(ownerUserId),
+      }
+    : undefined;
   const actionCandidate: ChatActionItem = {
     chatId,
     type: 'task',
     title: bodyResult.data.title,
     description: bodyResult.data.description,
-    assignedTo: {
-      userId: ownerUserId,
-      name: bodyResult.data.ownerName || userNames.get(ownerUserId),
-    },
+    assignedTo,
     createdBy: actor,
     dueDate: bodyResult.data.dueDate,
     dueAt: dueAt?.toISOString(),
@@ -876,7 +879,7 @@ export const createChatAction = asyncHandler(async (req: Request, res: Response)
     type: 'task',
     title: bodyResult.data.title,
     description: bodyResult.data.description,
-    assignedTo: actionCandidate.assignedTo,
+    assignedTo,
     createdBy: actionCandidate.createdBy,
     dueDate: bodyResult.data.dueDate,
     dueAt,

@@ -1463,17 +1463,20 @@ function ChatIntelligenceDrawer({
                 chatId,
                 type: 'task',
                 title: pendingTask.title,
-                assignedTo: currentUserCanManageActions
-                  ? { userId: pendingTask.assignedToUserId ?? currentUser?._id, name: pendingTask.assignedTo ?? currentUser?.name ?? currentUser?.username ?? undefined }
-                  : { userId: currentUser?._id, name: currentUser?.name ?? currentUser?.username ?? 'You' },
+                assignedTo: currentUserCanManageActions && pendingTask.assignedToUserId
+                  ? { userId: pendingTask.assignedToUserId, name: pendingTask.assignedTo ?? undefined }
+                  : !currentUserCanManageActions
+                    ? { userId: currentUser?._id, name: currentUser?.name ?? currentUser?.username ?? 'You' }
+                    : undefined,
                 dueDate: pendingTask.dueDate ?? undefined,
                 status: 'open',
                 sourceMessageIds: [pendingTask.sourceMessageId],
               }}
               ownerOptions={actionOwnerOptions}
               isSaving={isCreatingAction}
-                defaultOwnerUserId={currentUserCanManageActions ? pendingTask.assignedToUserId ?? currentUser?._id : currentUser?._id}
-                existingActions={actions}
+              defaultOwnerUserId={currentUserCanManageActions ? pendingTask.assignedToUserId ?? undefined : currentUser?._id}
+              existingActions={actions}
+              ownerOptional={isGroupChat && currentUserCanManageActions && !pendingTask.assignedToUserId}
               ownerLocked={!isGroupChat || !currentUserCanManageActions}
               onCancel={() => setPendingTask(null)}
               onUpdate={(_actionId, patch) => {

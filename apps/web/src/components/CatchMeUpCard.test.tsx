@@ -116,4 +116,36 @@ describe('CatchMeUpCard', () => {
     // the summary rather than appending to it.
     expect(screen.getAllByText('Finalize WiFi by tomorrow', { selector: 'p' })).toHaveLength(2);
   });
+
+  it('shows an existing Action instead of another Add button for a sourced task', () => {
+    const onAddTaskToActions = vi.fn();
+    const onOpenAction = vi.fn();
+
+    render(
+      <CatchMeUpCard
+        summary={fallbackSummary()}
+        actions={[{
+          id: 'action-1',
+          chatId: 'chat-1',
+          type: 'task',
+          title: 'Check renters insurance',
+          status: 'open',
+          sourceMessageIds: ['m2'],
+        }]}
+        isGroupChat
+        isLoading={false}
+        isGenerating={false}
+        currentUserId="user-1"
+        currentUserCanManageActions
+        onCatchMeUp={() => {}}
+        onAddTaskToActions={onAddTaskToActions}
+        onOpenAction={onOpenAction}
+      />
+    );
+
+    expect(screen.getByText('Added to Actions')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Action' }));
+    expect(onOpenAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'action-1' }));
+    expect(onAddTaskToActions).not.toHaveBeenCalled();
+  });
 });

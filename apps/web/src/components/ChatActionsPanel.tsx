@@ -88,6 +88,7 @@ export function ActionForm({
   existingActions = [],
   ownerRequiredMessage = 'Choose an owner before creating this Action.',
   ownerLocked = false,
+  ownerOptional = false,
   children,
 }: {
   action?: ChatActionItem;
@@ -100,6 +101,7 @@ export function ActionForm({
   existingActions?: ChatActionItem[];
   ownerRequiredMessage?: string;
   ownerLocked?: boolean;
+  ownerOptional?: boolean;
   children?: ReactNode;
 }) {
   const [title, setTitle] = useState(action?.title || '');
@@ -120,11 +122,11 @@ export function ActionForm({
 
   const submit = () => {
     const trimmedTitle = title.trim();
-    if (!trimmedTitle || !ownerUserId) return;
+    if (!trimmedTitle || (!ownerOptional && !ownerUserId)) return;
     const payload = {
       title: trimmedTitle,
       description: description.trim() || undefined,
-      ownerUserId,
+      ownerUserId: ownerUserId || undefined,
       ownerName: selectedOwner?.name,
       dueDate: dueDate || undefined,
       dueAt: dueDate || undefined,
@@ -160,7 +162,7 @@ export function ActionForm({
             disabled={ownerLocked}
             className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-teal-400 dark:border-slate-700 dark:bg-slate-900"
           >
-            <option value="">Choose owner</option>
+            <option value="">{ownerOptional ? 'Unassigned' : 'Choose owner'}</option>
             {ownerOptions.map((option) => (
               <option key={option.userId} value={option.userId}>
                 {option.name}
@@ -174,7 +176,7 @@ export function ActionForm({
             className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-teal-400 dark:border-slate-700 dark:bg-slate-900"
           />
         </div>
-        {!ownerUserId && (
+        {!ownerOptional && !ownerUserId && (
           <p className="text-xs font-medium text-amber-700 dark:text-amber-300">{ownerRequiredMessage}</p>
         )}
       </div>
@@ -192,7 +194,7 @@ export function ActionForm({
         <button
           type="button"
           onClick={submit}
-          disabled={isSaving || !title.trim() || !ownerUserId}
+          disabled={isSaving || !title.trim() || (!ownerOptional && !ownerUserId)}
           className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-teal-700 disabled:opacity-50"
         >
           {isEditing ? 'Save' : 'Create'}
