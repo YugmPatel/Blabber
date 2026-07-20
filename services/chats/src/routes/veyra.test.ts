@@ -284,6 +284,24 @@ describe('POST /veyra/ask', () => {
       expect(response.body.results[0].deepLink).toEqual({ kind: 'chat_message', chatId: chatId.toString(), messageId: expect.any(String) });
     });
 
+    it('excludes globally deleted messages from link retrieval even inside an approved space', async () => {
+      await enableVeyra();
+      const chatId = await seedChatWithUser('Apartment Hunt');
+      await grantScope('chat', chatId.toString());
+      await seedMessage(chatId, { body: 'Active renters link: https://example.com/renters' });
+      await seedMessage(chatId, {
+        body: 'Deleted secret link: https://example.com/secret-code-12345',
+        deletedAt: new Date(),
+      });
+
+      const response = await request(app).post('/veyra/ask').send({ prompt: 'What links were shared in Apartment Hunt?' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.results).toHaveLength(1);
+      expect(response.body.results[0].title).toBe('https://example.com/renters');
+      expect(JSON.stringify(response.body)).not.toContain('secret-code-12345');
+    });
+
     it('finds a matching Plan This proposal for "where did we plan the trip" style questions', async () => {
       await enableVeyra();
       const chatId = await seedChatWithUser('Family');
@@ -1040,6 +1058,21 @@ describe('POST /veyra/ask', () => {
       const response = await request(app).get('/veyra/settings');
       expect(response.status).toBe(200);
       expect(response.body.settings.accessMode).toBe('approved_spaces');
+    });
+
+    it('granting the same approved space twice stays idempotent and never serializes duplicate scopes', async () => {
+      await enableVeyra();
+      const chatId = await seedChatWithUser('Apartment Hunt');
+
+      const first = await request(app).post('/veyra/scopes').send({ type: 'chat', targetId: chatId.toString() });
+      const second = await request(app).post('/veyra/scopes').send({ type: 'chat', targetId: chatId.toString() });
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(second.body.settings.scopes.filter((scope: any) => scope.id === `chat:${chatId.toString()}`)).toHaveLength(1);
+
+      const persisted = await request(app).get('/veyra/settings');
+      expect(persisted.body.settings.scopes.filter((scope: any) => scope.id === `chat:${chatId.toString()}`)).toHaveLength(1);
     });
 
     it('approved_spaces mode only searches spaces the user explicitly granted, even if they belong to other chats', async () => {

@@ -2877,7 +2877,6 @@ function AISection() {
     queryClient.setQueryData(['veyra-settings'], (current: any) =>
       current ? { ...current, settings } : { settings, globalAiEnabled: enabled }
     );
-    void queryClient.invalidateQueries({ queryKey: ['veyra-settings'] });
     void queryClient.invalidateQueries({ queryKey: ['veyra-scope-candidates'] });
   };
   const updateVeyra = useMutation({

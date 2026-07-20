@@ -372,7 +372,7 @@ async function chatAnswer(chatId: ObjectId, userId: ObjectId, intent: 'decision_
     return `Based on current actions in ${label}: ${actions.map((action) => action.title).join('; ')}.`;
   }
   const message = await getDatabase().collection('messages').findOne(
-    { chatId, deletedFor: { $ne: userId }, $or: [{ 'media.type': 'document' }, { body: /https?:\/\//i }] },
+    { chatId, deletedAt: { $exists: false }, deletedFor: { $ne: userId }, $or: [{ 'media.type': 'document' }, { body: /https?:\/\//i }] },
     { sort: { createdAt: -1 }, projection: { body: 1, media: 1, createdAt: 1 } }
   );
   if (!message) return `From shared items in ${label}: nothing is available right now.`;

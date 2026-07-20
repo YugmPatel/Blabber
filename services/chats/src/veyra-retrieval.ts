@@ -247,7 +247,7 @@ export async function listAttachments(
 ): Promise<VeyraResultCard[]> {
   const names = await loadUserNames(chat.participants);
   const chatLabel = chatLabelFor(chat, userId, names);
-  const filter: Record<string, unknown> = { chatId: chat._id, deletedFor: { $ne: userId } };
+  const filter: Record<string, unknown> = { chatId: chat._id, deletedAt: { $exists: false }, deletedFor: { $ne: userId } };
   if (type === 'pdf') {
     filter['media.type'] = 'document';
     filter['media.mimeType'] = 'application/pdf';
@@ -289,6 +289,7 @@ export async function listLinks(chat: Chat, userId: ObjectId, query?: string): P
   const chatLabel = chatLabelFor(chat, userId, names);
   const filter: Record<string, unknown> = {
     chatId: chat._id,
+    deletedAt: { $exists: false },
     deletedFor: { $ne: userId },
     body: { $regex: 'https?://', $options: 'i' },
   };
@@ -325,7 +326,7 @@ export async function listLinks(chat: Chat, userId: ObjectId, query?: string): P
 export async function searchMessagesInChat(chat: Chat, userId: ObjectId, query: string): Promise<VeyraResultCard[]> {
   const names = await loadUserNames(chat.participants);
   const chatLabel = chatLabelFor(chat, userId, names);
-  const filter: Record<string, unknown> = { chatId: chat._id, deletedFor: { $ne: userId } };
+  const filter: Record<string, unknown> = { chatId: chat._id, deletedAt: { $exists: false }, deletedFor: { $ne: userId } };
   if (query.trim()) filter.$text = { $search: query };
 
   const messages = await getDatabase()
@@ -411,6 +412,7 @@ export async function findPlansAndEventsAndTasks(
     const eventFilter: Record<string, unknown> = {
       chatId: { $in: authorizedChatIds },
       type: 'event',
+      deletedAt: { $exists: false },
       deletedFor: { $ne: userId },
     };
     if (searchWords) eventFilter.$text = { $search: searchWords };
@@ -699,7 +701,7 @@ export async function gatherDailyRecapEvidence(
   const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
   const recentMessages = await getDatabase()
     .collection('messages')
-    .find({ chatId: { $in: authorizedChatIds }, deletedFor: { $ne: userId }, createdAt: { $gte: sinceDate } })
+    .find({ chatId: { $in: authorizedChatIds }, deletedAt: { $exists: false }, deletedFor: { $ne: userId }, createdAt: { $gte: sinceDate } })
     .sort({ createdAt: -1 })
     .limit(150)
     .toArray();
