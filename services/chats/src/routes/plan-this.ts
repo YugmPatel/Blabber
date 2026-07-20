@@ -719,7 +719,9 @@ export const finalizePlan = asyncHandler(async (req: Request, res: Response) => 
   const result = await loadPlanForParticipant(req.params.planId, userObjectId, true);
   if (result.status !== 200 || !result.plan || !result.chat) return chatAccessError(result.status, res);
   if (!result.plan.creatorUserId.equals(userObjectId)) return res.status(403).json({ error: 'Forbidden', message: 'Only the plan creator can finalize.' });
-  if (result.plan.state === 'finalized') return res.status(400).json({ error: 'Validation Error', message: 'Plan already finalized.' });
+  if (result.plan.state === 'finalized') {
+    return res.status(200).json({ plan: await serializePlan(result.plan, userObjectId) });
+  }
   if (result.plan.state === 'cancelled' || result.plan.state === 'expired') return res.status(400).json({ error: 'Validation Error', message: 'Plan is closed.' });
   const now = new Date();
   const finalDateTime = parsed.data.finalDateTime ? new Date(parsed.data.finalDateTime) : result.plan.suggestedAt;
