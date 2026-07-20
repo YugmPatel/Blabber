@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
-import { asyncHandler, logger } from '@repo/utils';
+import { AppError, asyncHandler, logger } from '@repo/utils';
 import { ChatIntelligenceSummarySchema, SummarizeChatDTOSchema } from '@repo/types';
 import { getChatsCollection } from '../models/chat';
 import { getChatSummariesCollection } from '../models/chat-summary';
@@ -10,6 +10,7 @@ import {
   createAISummaryService,
   type SummaryInputMessage,
 } from '../intelligence/ai-summary-service';
+import { buildHeuristicSummary } from '../intelligence/heuristic-summary';
 import { materializeSummarySources } from '../intelligence-source-materializer';
 import { personalizeSummary } from '../summary-personalization';
 
@@ -19,6 +20,56 @@ interface MessageDocument {
   senderId: ObjectId;
   type?: string;
   body: string;
+  media?: {
+    type?: string;
+    fileName?: string;
+    mimeType?: string;
+    size?: number;
+    duration?: number;
+  };
+  poll?: {
+    question?: string;
+    options?: Array<{
+      id?: string;
+      text?: string;
+      votes?: ObjectId[];
+      voteCount?: number;
+    }>;
+    allowMultiple?: boolean;
+    closesAt?: Date;
+    closedAt?: Date;
+    closed?: boolean;
+    votes?: Array<{
+      userId: ObjectId;
+      optionIds: string[];
+      votedAt?: Date;
+      updatedAt?: Date;
+    }>;
+  };
+  event?: {
+    title?: string;
+    startAt?: Date;
+    startsAt?: string;
+    endAt?: Date;
+    timezone?: string;
+    location?: string;
+    meetingUrl?: string;
+    description?: string;
+    cancelledAt?: Date;
+    rsvps?: Array<{
+      userId: ObjectId;
+      status: 'going' | 'maybe' | 'declined';
+    }>;
+  };
+  planThis?: {
+    planId?: ObjectId;
+    kind?: 'proposal' | 'finalized' | 'updated' | 'cancelled';
+    planVersion?: number;
+    title?: string;
+    status?: string;
+    createdAt?: Date;
+    updatedAt?: Date;
+  };
   createdAt: Date;
   deletedFor: ObjectId[];
 }
@@ -42,6 +93,64 @@ function dateInputValue(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function dateToIso(value?: Date | string | null) {
+  if (!value) return undefined;
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function maybeObjectIdToString(value?: ObjectId | string | null) {
+  if (!value) return undefined;
+  return typeof value === 'string' ? value : value.toString();
+}
+
+function serializePollForSummary(message: MessageDocument): SummaryInputMessage['poll'] {
+  const poll = message.poll;
+  if (!poll) return undefined;
+  const voteRecords = poll.votes || [];
+  return {
+    question: poll.question,
+    options: (poll.options || []).map((option) => ({
+      id: option.id,
+      text: option.text,
+      voteCount:
+        option.voteCount ??
+        voteRecords.filter((vote) => option.id && vote.optionIds.includes(option.id)).length ??
+        option.votes?.length ??
+        0,
+      votes: (option.votes || []).map((vote) => vote.toString()),
+    })),
+    allowMultiple: poll.allowMultiple,
+    closesAt: dateToIso(poll.closesAt),
+    closedAt: dateToIso(poll.closedAt),
+    closed: Boolean(poll.closed || poll.closedAt || (poll.closesAt && poll.closesAt.getTime() <= Date.now())),
+    votes: voteRecords.map((vote) => ({
+      userId: vote.userId.toString(),
+      optionIds: vote.optionIds,
+      votedAt: dateToIso(vote.votedAt),
+      updatedAt: dateToIso(vote.updatedAt),
+    })),
+  };
+}
+
+function serializeEventForSummary(message: MessageDocument): SummaryInputMessage['event'] {
+  const event = message.event;
+  if (!event) return undefined;
+  return {
+    title: event.title,
+    startAt: dateToIso(event.startAt) || event.startsAt,
+    endAt: dateToIso(event.endAt),
+    timezone: event.timezone,
+    location: event.location,
+    meetingUrl: event.meetingUrl,
+    description: event.description,
+    cancelledAt: dateToIso(event.cancelledAt),
+    rsvps: event.rsvps?.map((rsvp) => ({
+      userId: rsvp.userId.toString(),
+      status: rsvp.status,
+    })),
+  };
+}
+
 function resolveSummaryDueDate(value: string | null | undefined, sourceCreatedAt?: string): string | null {
   const raw = (value || '').trim();
   if (!raw) return null;
@@ -51,7 +160,7 @@ function resolveSummaryDueDate(value: string | null | undefined, sourceCreatedAt
   const next = new Date(base);
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  if (lower === 'today' || lower.includes('end of day') || lower === 'eod') return dateInputValue(base);
+  if (lower === 'today' || lower === 'tonight' || lower.includes('end of day') || lower === 'eod') return dateInputValue(base);
   if (lower === 'tomorrow') {
     next.setDate(base.getDate() + 1);
     return dateInputValue(next);
@@ -156,10 +265,17 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
       message: 'You are not a participant in this chat',
     });
   }
-  if (isChatExpired(chat)) {
+  // An ended temporary group with "end only" behavior stays readable in the
+  // app, so a historical Catch Me Up is still allowed for members. Deleted
+  // chats and end-and-delete groups (even if the expiry sweep hasn't marked
+  // deletedAt yet) are inaccessible.
+  const chatInaccessible =
+    Boolean(chat.deletedAt) ||
+    (chat.groupKind === 'temporary' && chat.temporaryCompletionBehavior === 'end_and_delete' && isChatExpired(chat));
+  if (chatInaccessible) {
     return res.status(400).json({
       error: 'Validation Error',
-      message: 'This temporary group has ended',
+      message: 'This chat is no longer available to summarize',
     });
   }
 
@@ -261,11 +377,32 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
       body: message.body,
       type: message.type ?? 'text',
       createdAt: message.createdAt.toISOString(),
+      media: message.media
+        ? {
+            type: message.media.type,
+            fileName: message.media.fileName,
+            mimeType: message.media.mimeType,
+            size: message.media.size,
+            duration: message.media.duration,
+          }
+        : undefined,
+      poll: serializePollForSummary(message),
+      event: serializeEventForSummary(message),
+      planThis: message.planThis
+        ? {
+            planId: maybeObjectIdToString(message.planThis.planId),
+            kind: message.planThis.kind,
+            planVersion: message.planThis.planVersion,
+            title: message.planThis.title,
+            status: message.planThis.status,
+            createdAt: dateToIso(message.planThis.createdAt),
+            updatedAt: dateToIso(message.planThis.updatedAt),
+          }
+        : undefined,
     }));
   const messageById = new Map(contextMessages.map((message) => [message._id, message]));
 
-  const summaryService = createAISummaryService();
-  const summary = await summaryService.generateSummary({
+  const summaryContext = {
     chatId,
     currentUserId: userId,
     currentUserName: userNamesById.get(userId) ?? null,
@@ -277,18 +414,45 @@ export const summarizeChat = asyncHandler(async (req: Request, res: Response) =>
       name: displayName(user),
     })),
     messages: contextMessages,
-  });
+  };
 
-  const parsedSummary = ChatIntelligenceSummarySchema.safeParse(summary);
-  if (!parsedSummary.success) {
-    logger.error(
-      { issues: parsedSummary.error.flatten() },
-      'Generated summary failed schema validation'
+  const summaryService = createAISummaryService();
+  let summary;
+  try {
+    summary = await summaryService.generateSummary(summaryContext);
+  } catch (error) {
+    // "AI not configured at all" keeps its explicit 503 (surfaced by the
+    // availability endpoint too). Every other failure — provider, network,
+    // schema — degrades to the grounded deterministic summary instead of a
+    // user-facing 5xx. Defense in depth: the service normally falls back on
+    // its own; this catch also covers unexpected throw paths.
+    if (error instanceof AppError && error.code === 'AI_NOT_CONFIGURED') throw error;
+    logger.warn(
+      {
+        chatId,
+        feature: 'catch_me_up',
+        reason: error instanceof Error ? error.message : 'unknown_summary_error',
+      },
+      'Summary generation failed; serving deterministic heuristic summary'
     );
-    return res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Summary generation produced invalid structured output',
-    });
+    summary = buildHeuristicSummary(summaryContext);
+  }
+
+  let parsedSummary = ChatIntelligenceSummarySchema.safeParse(summary);
+  if (!parsedSummary.success) {
+    logger.warn(
+      { issues: parsedSummary.error.flatten(), chatId, feature: 'catch_me_up' },
+      'Generated summary failed schema validation; serving deterministic heuristic summary'
+    );
+    parsedSummary = ChatIntelligenceSummarySchema.safeParse(buildHeuristicSummary(summaryContext));
+    if (!parsedSummary.success) {
+      // The heuristic output is schema-shaped by construction, so this is
+      // effectively unreachable — kept as a last-resort guard.
+      return res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Summary generation produced invalid structured output',
+      });
+    }
   }
 
   const now = new Date();

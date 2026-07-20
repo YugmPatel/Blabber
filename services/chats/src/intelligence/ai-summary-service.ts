@@ -10,6 +10,55 @@ export interface SummaryInputMessage {
   body: string;
   type?: string;
   createdAt: string;
+  media?: {
+    type?: string;
+    fileName?: string;
+    mimeType?: string;
+    size?: number;
+    duration?: number;
+  } | null;
+  poll?: {
+    question?: string;
+    options?: Array<{
+      id?: string;
+      text?: string;
+      voteCount?: number;
+      votes?: string[];
+    }>;
+    allowMultiple?: boolean;
+    closesAt?: string;
+    closedAt?: string;
+    closed?: boolean;
+    votes?: Array<{
+      userId: string;
+      optionIds: string[];
+      votedAt?: string;
+      updatedAt?: string;
+    }>;
+  } | null;
+  event?: {
+    title?: string;
+    startAt?: string;
+    endAt?: string;
+    timezone?: string;
+    location?: string;
+    meetingUrl?: string;
+    description?: string;
+    cancelledAt?: string;
+    rsvps?: Array<{
+      userId: string;
+      status: 'going' | 'maybe' | 'declined';
+    }>;
+  } | null;
+  planThis?: {
+    planId?: string;
+    kind?: 'proposal' | 'finalized' | 'updated' | 'cancelled';
+    planVersion?: number;
+    title?: string;
+    status?: string;
+    createdAt?: string;
+    updatedAt?: string;
+  } | null;
 }
 
 export interface AISummaryContext {
@@ -67,8 +116,9 @@ function createFallbackProvider(
           {
             error: error instanceof Error ? error.message : 'Unknown AI summary error',
             chatId: context.chatId,
+            feature: 'catch_me_up',
           },
-          'AI summary provider failed; using mock fallback'
+          'AI summary provider failed; using deterministic heuristic fallback'
         );
         return fallback.generateSummary(context);
       }
@@ -94,9 +144,9 @@ export function createAISummaryService(): AISummaryService {
     referer: process.env.OPENROUTER_HTTP_REFERER || process.env.OPENROUTER_REFERER,
   });
 
-  if (shouldUseMockFallback()) {
-    return new AISummaryService(createFallbackProvider(openRouterProvider, mockProvider));
-  }
-
-  return new AISummaryService(openRouterProvider);
+  // The deterministic fallback is ALWAYS on when a real provider is
+  // configured — not gated behind an env flag. A user asking "Catch Me Up"
+  // must never see a 502 because OpenRouter errored, timed out, or returned
+  // off-schema output; they get the grounded heuristic summary instead.
+  return new AISummaryService(createFallbackProvider(openRouterProvider, mockProvider));
 }

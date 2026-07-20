@@ -8,6 +8,25 @@ interface SourceMessageDocument {
   senderId: ObjectId;
   body?: string;
   type?: string;
+  media?: {
+    type?: string;
+    fileName?: string;
+  };
+  poll?: {
+    question?: string;
+    options?: Array<{ text?: string }>;
+  };
+  event?: {
+    title?: string;
+    startAt?: Date;
+    startsAt?: string;
+    location?: string;
+  };
+  planThis?: {
+    title?: string;
+    status?: string;
+    kind?: string;
+  };
   deletedFor?: ObjectId[];
   createdAt: Date;
 }
@@ -22,9 +41,19 @@ function displayName(user: SourceUserDocument | undefined, fallbackId: string) {
   return user?.name || user?.username || fallbackId;
 }
 
-function makeSnippet(body?: string, type?: string) {
-  const normalized = (body || '').replace(/\s+/g, ' ').trim();
-  if (normalized) return normalized.length > 180 ? `${normalized.slice(0, 177).trim()}...` : normalized;
+function makeSnippet(message: SourceMessageDocument) {
+  const normalized = (message.body || '').replace(/\s+/g, ' ').trim();
+  const fallback = [
+    message.poll?.question ? `Poll: ${message.poll.question}` : null,
+    message.event?.title
+      ? `Event: ${message.event.title}${message.event.startAt ? ` at ${message.event.startAt.toISOString()}` : message.event.startsAt ? ` at ${message.event.startsAt}` : ''}`
+      : null,
+    message.planThis?.title ? `Plan This ${message.planThis.status || message.planThis.kind || 'card'}: ${message.planThis.title}` : null,
+    message.media ? `${message.media.type || message.type || 'Attachment'}${message.media.fileName ? `: ${message.media.fileName}` : ''}` : null,
+  ].find(Boolean);
+  const text = normalized || fallback || '';
+  if (text) return text.length > 180 ? `${text.slice(0, 177).trim()}...` : text;
+  const type = message.type;
   if (type && type !== 'text') return `[${type} message]`;
   return '[message]';
 }
@@ -69,6 +98,10 @@ export async function buildSourceReferences({
       senderId: 1,
       body: 1,
       type: 1,
+      media: 1,
+      poll: 1,
+      event: 1,
+      planThis: 1,
       createdAt: 1,
     })
     .toArray();
@@ -96,7 +129,7 @@ export async function buildSourceReferences({
         senderId,
         senderDisplayName: displayName(userById.get(senderId), senderId),
         createdAt: message.createdAt.toISOString(),
-        snippet: makeSnippet(message.body, message.type),
+        snippet: makeSnippet(message),
         label,
       };
     });

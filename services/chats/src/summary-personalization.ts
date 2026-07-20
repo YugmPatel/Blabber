@@ -103,6 +103,26 @@ export function filterSafeToSkip(
   });
 }
 
+/**
+ * Provider-supplied questions survive personalization only when they are
+ * grounded, open asks: the cited source message must really exist, really
+ * contain a question mark, and not be the viewer's own message. This keeps
+ * group-wide open questions ("Can someone confirm parking and mailbox
+ * access?") visible while still dropping anything fabricated or irrelevant.
+ */
+function groundedOpenQuestions(
+  questions: ChatSummaryQuestion[],
+  messagesById: Map<string, PersonalizationMessage>,
+  viewer: PersonalizationUser
+): ChatSummaryQuestion[] {
+  return (questions || []).filter((question) => {
+    const source = messagesById.get(question.sourceMessageId);
+    if (!source) return false;
+    if (source.senderId.equals(viewer._id)) return false;
+    return /[?]/.test(source.body || '');
+  });
+}
+
 export function personalizeSummary({
   summary,
   messages,
@@ -113,9 +133,23 @@ export function personalizeSummary({
   viewer: PersonalizationUser;
 }): ChatIntelligenceSummary {
   const messagesById = new Map(messages.map((message) => [message._id.toString(), message]));
+
+  // Viewer-directed asks first, then remaining grounded open questions from
+  // the provider — deduped by source message so one message never shows twice.
+  const merged: ChatSummaryQuestion[] = [];
+  const seenSources = new Set<string>();
+  for (const question of [
+    ...questionsForViewer(messages, viewer),
+    ...groundedOpenQuestions(summary.questionsForMe || [], messagesById, viewer),
+  ]) {
+    if (seenSources.has(question.sourceMessageId)) continue;
+    seenSources.add(question.sourceMessageId);
+    merged.push(question);
+  }
+
   return {
     ...summary,
-    questionsForMe: questionsForViewer(messages, viewer),
+    questionsForMe: merged.slice(0, 8),
     noise: filterSafeToSkip(summary.noise || [], messagesById),
   };
 }
