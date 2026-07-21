@@ -26,7 +26,6 @@ AI-native social messaging platform for chat, reels, planning, actions, and perm
   · <a href="#tech-stack">Tech Stack</a>
   · <a href="#local-setup">Local Setup</a>
   · <a href="#testing-and-reliability">Testing</a>
-  · <a href="#roadmap">Roadmap</a>
 </p>
 
 <p align="center">
@@ -39,7 +38,7 @@ Blabber helps people find ideas, share them with their people, and turn conversa
 
 The problem is simple: conversations contain decisions, tasks, links, files, plans, and questions, but they get buried. Blabber makes conversations useful again by turning live discussion into structured context that users can search, summarize, act on, and revisit.
 
-The primary demo surface is the production web/PWA at [app.blabber.dev](https://app.blabber.dev). The repo also includes an Expo mobile app as a partial native surface, with ongoing work toward fuller native parity.
+The primary demo surface is the production web app with mobile-friendly browser support at [app.blabber.dev](https://app.blabber.dev). The repo also includes an Expo mobile app as a partial native surface, with ongoing work toward fuller native parity.
 
 ## Features
 
@@ -86,18 +85,92 @@ Veyra uses permission-aware retrieval against accessible content and is designed
 
 ## Product Gallery
 
-Screenshots are coming soon. Planned gallery structure:
+Real production screenshots from Blabber's web app and mobile-friendly browser experience.
 
-| Area | Planned path |
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./docs/assets/screenshots/01-messages/messages-dashboard.jpg" alt="Messages dashboard" />
+      <br />
+      <strong>Messages</strong>
+      <br />
+      <sub>New Chat, search, conversations, and the core messaging workspace.</sub>
+    </td>
+    <td width="50%">
+      <img src="./docs/assets/screenshots/02-chat-intelligence/group-catch-me-up.jpg" alt="Group Catch Me Up" />
+      <br />
+      <strong>Catch Me Up</strong>
+      <br />
+      <sub>Conversation summaries with decisions, links, tasks, and grounded source jumps.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./docs/assets/screenshots/03-actions/my-actions.jpg" alt="My Actions" />
+      <br />
+      <strong>Actions / My Actions</strong>
+      <br />
+      <sub>Action items from direct chats, groups, and planning flows in one place.</sub>
+    </td>
+    <td width="50%">
+      <img src="./docs/assets/screenshots/04-group-brain/group-brain.jpg" alt="Group Brain" />
+      <br />
+      <strong>Group Brain</strong>
+      <br />
+      <sub>Group-only Q&A over shared decisions, files, links, plans, and open questions.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./docs/assets/screenshots/07-reels-feed-discover/reels.jpg" alt="Reels" />
+      <br />
+      <strong>Reels</strong>
+      <br />
+      <sub>Short-form video discovery with suggested reels and Plan This entry points.</sub>
+    </td>
+    <td width="50%">
+      <img src="./docs/assets/screenshots/07-reels-feed-discover/discover-browse.jpg" alt="Discover Browse" />
+      <br />
+      <strong>Discover</strong>
+      <br />
+      <sub>Trending topics, suggested people, posts, profiles, and reels.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./docs/assets/screenshots/06-veyra/veyra-home.jpg" alt="Veyra home" />
+      <br />
+      <strong>Veyra</strong>
+      <br />
+      <sub>Permission-aware AI assistant for approved spaces and accessible Blabber context.</sub>
+    </td>
+    <td width="50%">
+      <img src="./docs/assets/screenshots/06-veyra/ai-privacy-settings.jpg" alt="AI Privacy settings" />
+      <br />
+      <strong>AI Privacy</strong>
+      <br />
+      <sub>Approved Spaces and Full Access controls for user-controlled retrieval.</sub>
+    </td>
+  </tr>
+</table>
+
+<details>
+  <summary><strong>More screenshots</strong></summary>
+
+| Area | Screenshot |
 | --- | --- |
-| Messages | `docs/assets/screenshots/01-messages/` |
-| Chat Intelligence | `docs/assets/screenshots/02-chat-intelligence/` |
-| Actions | `docs/assets/screenshots/03-actions/` |
-| Group Brain | `docs/assets/screenshots/04-group-brain/` |
-| Plan This | `docs/assets/screenshots/05-plan-this/` |
-| Veyra | `docs/assets/screenshots/06-veyra/` |
-| Reels, Feed, Discover | `docs/assets/screenshots/07-reels-feed-discover/` |
-| Mobile | `docs/assets/screenshots/08-mobile/` |
+| Login | <img src="./docs/assets/screenshots/00-auth/login.jpg" alt="Login" width="520" /> |
+| Direct Chat | <img src="./docs/assets/screenshots/01-messages/direct-chat.jpg" alt="Direct chat" width="520" /> |
+| New Chat | <img src="./docs/assets/screenshots/01-messages/new-chat-modal.jpg" alt="New Chat modal" width="520" /> |
+| Direct Catch Me Up | <img src="./docs/assets/screenshots/02-chat-intelligence/direct-catch-me-up.jpg" alt="Direct Catch Me Up" width="520" /> |
+| Group Actions | <img src="./docs/assets/screenshots/03-actions/group-actions.jpg" alt="Group Actions" width="520" /> |
+| Moments | <img src="./docs/assets/screenshots/09-moments/moments.jpg" alt="Moments" width="520" /> |
+| Feed | <img src="./docs/assets/screenshots/07-reels-feed-discover/feed.jpg" alt="Feed" width="520" /> |
+| Discover For You | <img src="./docs/assets/screenshots/07-reels-feed-discover/discover-for-you.jpg" alt="Discover For You" width="520" /> |
+| Public Profile | <img src="./docs/assets/screenshots/10-profile/public-profile.jpg" alt="Public profile" width="520" /> |
+| Mobile Web | <img src="./docs/assets/screenshots/08-mobile/mobile-navigation.jpg" alt="Mobile navigation" width="260" /> |
+
+</details>
 
 ## Architecture
 
@@ -105,7 +178,7 @@ Screenshots are coming soon. Planned gallery structure:
   <img src="./docs/assets/architecture/blabber-system-architecture.png" alt="Blabber system architecture" width="100%" />
 </p>
 
-Blabber is organized as a production-style monorepo with a React web/PWA, an Expo mobile app, an API gateway, dedicated backend services, shared packages, and Docker Compose orchestration. The web/PWA is the primary demo surface; the Expo app provides a native foundation for mobile experiences.
+Blabber is organized as a production-style monorepo with a React web app, an Expo mobile app, an API gateway, dedicated backend services, shared packages, and Docker Compose orchestration. The production web app with mobile-friendly browser support is the primary demo surface; the Expo app provides a native foundation for mobile experiences.
 
 Production runs behind Caddy with HTTPS for `app.blabber.dev`, `api.blabber.dev`, and `livekit.blabber.dev`. The web app talks to the API gateway, which handles browser-facing HTTP routing and Socket.IO realtime connections before forwarding service-specific work to auth, users, chats, messages, media, and notifications services.
 
@@ -130,7 +203,7 @@ External integrations include LiveKit for calls, ClamAV for media scanning, Open
 
 | Path | Purpose |
 | --- | --- |
-| `apps/web` | React web/PWA application. |
+| `apps/web` | React web application with PWA-oriented assets. |
 | `apps/mobile` | Expo mobile app foundation. |
 | `apps/gateway` | API gateway, HTTP proxying, Socket.IO, rate limits, realtime room handling. |
 | `services/auth` | Registration, login, refresh sessions, logout, password reset, Google OAuth, current user routes. |
@@ -151,7 +224,7 @@ Blabber is deployed on GCP Compute Engine using Docker Compose and Caddy-managed
 
 | Domain | Role |
 | --- | --- |
-| `https://app.blabber.dev` | Web/PWA app shell |
+| `https://app.blabber.dev` | Production web app |
 | `https://api.blabber.dev` | Public API gateway |
 | `https://livekit.blabber.dev` | LiveKit endpoint |
 
@@ -167,7 +240,7 @@ Blabber includes a layered verification strategy:
 - Production configuration verification for unsafe environment settings.
 - Docker health/readiness checks for the composed stack.
 
-Recent hardening has focused on Catch Me Up, Actions, Group Brain, Plan This, Veyra approved spaces/full access, mobile web/PWA ergonomics, Reels/Feed/Discover playback and navigation, media scanning, upload compatibility, and static smoke coverage.
+Recent hardening has focused on Catch Me Up, Actions, Group Brain, Plan This, Veyra approved spaces/full access, mobile-friendly browser ergonomics, Reels/Feed/Discover playback and navigation, media scanning, upload compatibility, and static smoke coverage.
 
 Useful commands:
 
@@ -290,37 +363,9 @@ All browser-facing APIs go through the gateway.
 | Redis | `6380` on host, `6379` in Docker network |
 | LiveKit | `7880`, `7881`, `7882/udp` in the full stack |
 
-## Roadmap
-
-Completed:
-
-- [x] Direct/group messaging
-- [x] Reels/Feed/Discover
-- [x] Moments
-- [x] Catch Me Up
-- [x] Actions/My Actions
-- [x] Group Brain
-- [x] Plan This
-- [x] Veyra approved spaces/full access
-- [x] GCP deployment
-- [x] Mobile web polish
-
-Next:
-
-- [ ] Native mobile hero parity
-- [ ] Recommendation quality
-- [ ] More advanced permissions
-- [ ] More robust e2e browser testing
-- [ ] Admin/moderation dashboards
-- [ ] Product analytics
-
 ## Author
 
-Built by **Yugm Patel**.
+Built by Yugm Patel.
 
 - GitHub: [YugmPatel](https://github.com/YugmPatel)
 - LinkedIn: Coming soon / add your LinkedIn URL
-
-## Project Status
-
-Blabber is a personal product engineering project in active development. It demonstrates a production-style AI/social/messaging architecture with a deployed web/PWA surface, but it should not be treated as a finished commercial security or compliance product. The app is privacy-aware and permission-aware by design, with approved spaces and user-controlled access as core concepts, but no legal, compliance, or advanced cryptography claims are made here.

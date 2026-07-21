@@ -1,0 +1,192 @@
+[
+  {
+    "path": "docs/assets/screenshots/00-auth/login.jpg",
+    "alt": "Login",
+    "caption": "Polished authentication screen with email and Google sign-in.",
+    "size_kb": 61.9,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/01-messages/messages-dashboard.jpg",
+    "alt": "Messages dashboard",
+    "caption": "Messages, New Chat, search, and conversation list.",
+    "size_kb": 58.2,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/01-messages/direct-chat.jpg",
+    "alt": "Direct chat",
+    "caption": "Private conversation with message composer and call controls.",
+    "size_kb": 60.7,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/01-messages/new-chat-modal.jpg",
+    "alt": "New Chat modal",
+    "caption": "Start direct chats, create groups, and manage message requests.",
+    "size_kb": 40.4,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/02-chat-intelligence/direct-catch-me-up.jpg",
+    "alt": "Direct Catch Me Up",
+    "caption": "AI summary with links, tasks, and source jumps.",
+    "size_kb": 81.4,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/03-actions/direct-actions.jpg",
+    "alt": "Direct Actions",
+    "caption": "Track action items that emerge from a conversation.",
+    "size_kb": 64.1,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/02-chat-intelligence/group-catch-me-up.jpg",
+    "alt": "Group Catch Me Up",
+    "caption": "Group summaries with decisions and grounded source references.",
+    "size_kb": 91.8,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/03-actions/group-actions.jpg",
+    "alt": "Group Actions",
+    "caption": "Group action ownership, due dates, source context, and updates.",
+    "size_kb": 67.9,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/04-group-brain/group-brain.jpg",
+    "alt": "Group Brain",
+    "caption": "Ask questions over the group\u2019s shared conversation history.",
+    "size_kb": 88.1,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/09-moments/moments.jpg",
+    "alt": "Moments",
+    "caption": "Text, photo, video, and audio moments with audience-aware sharing.",
+    "size_kb": 101.4,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/07-reels-feed-discover/feed.jpg",
+    "alt": "Feed",
+    "caption": "Social feed with media posts, reactions, comments, saves, and sharing.",
+    "size_kb": 140.2,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/07-reels-feed-discover/reels.jpg",
+    "alt": "Reels",
+    "caption": "Short-form video playback with suggested reels and Plan This.",
+    "size_kb": 116.0,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/07-reels-feed-discover/discover-for-you.jpg",
+    "alt": "Discover For You",
+    "caption": "Personalized discovery across posts, reels, and profiles.",
+    "size_kb": 213.3,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/07-reels-feed-discover/discover-browse.jpg",
+    "alt": "Discover Browse",
+    "caption": "Trending topics, suggested people, and suggested reels.",
+    "size_kb": 115.2,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/03-actions/my-actions.jpg",
+    "alt": "My Actions",
+    "caption": "Centralized view of tasks assigned to the user or created by the user.",
+    "size_kb": 63.1,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/06-veyra/veyra-home.jpg",
+    "alt": "Veyra",
+    "caption": "Permission-aware AI assistant for approved Blabber spaces.",
+    "size_kb": 74.5,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/06-veyra/ai-privacy-settings.jpg",
+    "alt": "AI Privacy settings",
+    "caption": "Approved spaces and full-access controls for Veyra.",
+    "size_kb": 81.0,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/10-profile/public-profile.jpg",
+    "alt": "Public profile",
+    "caption": "User profile with banner, posts, reels, communities, saved items, and about.",
+    "size_kb": 80.5,
+    "dimensions": [
+      1600,
+      799
+    ]
+  },
+  {
+    "path": "docs/assets/screenshots/08-mobile/mobile-navigation.jpg",
+    "alt": "Mobile navigation",
+    "caption": "Mobile-friendly browser navigation and PWA-style layout.",
+    "size_kb": 23.7,
+    "dimensions": [
+      400,
+      869
+    ]
+  }
+]
