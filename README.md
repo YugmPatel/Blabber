@@ -1,374 +1,326 @@
+<p align="center">
+  <img src="./docs/assets/cover/blabber-github-cover-dark.png" alt="Blabber — AI-powered social conversations" width="100%" />
+</p>
+
 # Blabber
 
-An AI-powered real-time conversation workspace that turns everyday chats into summaries, decisions, action items, and shared context.
+AI-native social messaging platform for chat, reels, planning, actions, and permission-aware conversation intelligence.
 
-Blabber is not just a chat application. It combines real-time messaging, group collaboration, media sharing, and chat intelligence so conversations remain useful after they happen.
+<p align="center">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white" />
+  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=0B1020" />
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-20-5FA04E?logo=node.js&logoColor=white" />
+  <img alt="MongoDB" src="https://img.shields.io/badge/MongoDB-7-47A248?logo=mongodb&logoColor=white" />
+  <img alt="Redis" src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white" />
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" />
+  <img alt="GCP" src="https://img.shields.io/badge/GCP-Compute%20Engine-4285F4?logo=googlecloud&logoColor=white" />
+  <img alt="PWA" src="https://img.shields.io/badge/PWA-ready-5A0FC8?logo=pwa&logoColor=white" />
+  <img alt="LiveKit" src="https://img.shields.io/badge/LiveKit-realtime-FF635C" />
+  <img alt="OpenRouter" src="https://img.shields.io/badge/OpenRouter-AI-111827" />
+</p>
 
-## The Problem
+<p align="center">
+  <a href="https://app.blabber.dev"><strong>Live App</strong></a>
+  · <a href="#architecture">Architecture</a>
+  · <a href="#features">Features</a>
+  · <a href="#tech-stack">Tech Stack</a>
+  · <a href="#local-setup">Local Setup</a>
+  · <a href="#testing-and-reliability">Testing</a>
+  · <a href="#roadmap">Roadmap</a>
+</p>
 
-Most chat apps are good at sending messages, but they are poor at helping people keep track of what was decided, what needs to be done, and what is still waiting for someone.
+<p align="center">
+  YouTube Walkthrough: Coming soon
+</p>
 
-In busy group chats, important context gets buried quickly:
+## Overview
 
-- Decisions are scattered across long threads.
-- Action items are mentioned once and forgotten.
-- Follow-ups depend on memory instead of structure.
-- New participants have to scroll through old messages to understand what happened.
+Blabber helps people find ideas, share them with their people, and turn conversations into real plans. It is built as an AI-native social messaging platform where chat, media, reels, planning, tasks, calls, and permission-aware intelligence all live in one product surface.
 
-Blabber is designed around a different idea: communication should create useful context, not just more messages.
+The problem is simple: conversations contain decisions, tasks, links, files, plans, and questions, but they get buried. Blabber makes conversations useful again by turning live discussion into structured context that users can search, summarize, act on, and revisit.
 
-## Why Blabber Is Different
+The primary demo surface is the production web/PWA at [app.blabber.dev](https://app.blabber.dev). The repo also includes an Expo mobile app as a partial native surface, with ongoing work toward fuller native parity.
 
-Traditional chat apps focus on delivery. Blabber focuses on understanding.
+## Features
 
-| Capability | Traditional chat apps | Blabber |
+| Feature | What it does | Why it matters |
 | --- | --- | --- |
-| Message delivery | Send and receive messages | Real-time delivery with structured backend services |
-| Long conversation understanding | Manual scrolling and searching | Chat summaries and conversation context |
-| Action item tracking | Buried in messages | Extracted action items and follow-up awareness |
-| Decision tracking | Spread across the thread | Decision extraction and decision history |
-| Waiting-on tracking | Users remember manually | Waiting-on items surface pending responsibilities |
-| Group memory | Depends on individual memory | Group brain acts as shared conversation context |
-| AI summaries | Usually external or absent | Built into chat intelligence routes |
-| Media/context handling | Attach files and links | Media uploads, avatars, documents, and link previews |
-| Architecture | Often a single app/server | Gateway plus dedicated microservices |
+| Direct & Group Messaging | Real-time 1:1 and group chats with replies, reactions, reads, pinning, saves, reports, polls, events, and media attachments. | Keeps everyday coordination fast while preserving the context that matters later. |
+| Moments | Short-lived social updates with audience-aware viewing and interactions. | Adds lightweight social presence beyond long-running chats. |
+| Feed & Discover | Public and permission-aware social browsing surfaces for posts, profiles, topics, and reels. | Helps users find ideas and people without losing privacy boundaries. |
+| Reels | Video-first discovery and playback with direct reel routes and suggested content. | Makes visual ideas easy to browse, share, and turn into plans. |
+| Catch Me Up | Summarizes recent direct or group conversation context. | Reduces catch-up time when a chat moves faster than the user can read. |
+| Actions / My Actions | Extracts and tracks action items from conversations. | Turns "we should do this" into visible follow-through. |
+| Group Brain | Answers questions from group conversation context. | Gives a group shared memory without making everyone scroll. |
+| Plan This | Converts a post or reel into a planning flow with duplicate prevention and retry-safe finalization. | Bridges inspiration and coordination. |
+| Veyra | A personal AI layer with approved spaces, full-access mode, and permission-aware retrieval. | Lets users ask across accessible context while keeping access user-controlled. |
+| Calls | Audio/video calling built around LiveKit and chat-linked call flows. | Keeps real-time conversation inside the same workspace. |
+| Media Uploads | Images, documents, voice, avatars, HEIC/HEIF/JPG/PNG compatibility, scanning, and local/S3-style media flows. | Makes shared context richer while validating and scanning uploads. |
+| Profiles & Settings | Profiles, handles, avatars, privacy controls, blocked users, notifications, theme, and account settings. | Gives users identity and control over how they participate. |
 
-## Key Features
+## AI Intelligence
 
-### Core Messaging
+Blabber's intelligence features are designed around conversation utility, not generic chatbot novelty. The goal is to help users recover context, understand decisions, and move from discussion to action while respecting the permissions attached to each chat, post, reel, or space.
 
-- One-to-one chats
-- Group chats
-- Real-time message delivery
-- Chat list and chat detail views
-- Message editing
-- Message deletion
-- Reactions
-- Read receipts
-- Poll-style message support
-- Reply support
+### Catch Me Up
 
-### AI Conversation Intelligence
+Catch Me Up summarizes recent conversation context in direct chats and groups. It is built for the moment when a user opens a busy thread and needs the shape of what happened without manually scrolling through every message.
 
-- Chat summaries
-- Action item extraction
-- Decision extraction
-- Waiting-on tracking
-- Group brain / shared conversation memory
-- Intelligent conversation context for long threads
+### Actions
 
-These features are intended to help users avoid scrolling through long conversations to recover what matters.
-
-### Conversation-to-Action Workflow
-
-Blabber is built around the idea that conversations often create work. The app includes backend and frontend flows for surfacing:
-
-- What needs to be done
-- Who may be responsible
-- What was decided
-- What is still pending
-- What the group should remember
+Actions identify follow-ups that emerge from conversation. My Actions gives users a place to see their own outstanding items, while ambiguous group actions can remain unassigned until ownership is clear.
 
 ### Group Brain
 
-Group Brain is Blabber's shared memory layer for a chat. Instead of every participant manually remembering decisions, context, and follow-ups, the conversation can preserve useful knowledge and make it easier to access later.
+Group Brain answers questions using group chat context. It is meant for questions like "what did we decide?", "who is handling this?", or "what are the open questions?" It is hidden where group context does not apply.
 
-### User and Profile
+### Plan This
 
-- Register
-- Login
-- Refresh session
-- Logout
-- Current user profile
-- Profile update
-- Avatar management
-- Password reset flow
+Plan This turns posts and reels into shared planning flows. It is designed to keep planning grounded in the original source, prevent duplicate plans, and handle retries gracefully.
 
-### Media and Rich Context
+### Veyra
 
-- Image upload
-- Document upload
-- Avatar upload
-- Group avatar upload
-- Link preview support
-- Local media serving
-- S3-style presigned upload support when configured
+Veyra is Blabber's personal conversation intelligence layer. Users can approve specific spaces for access, enable full access when they want broader retrieval, and return to approved-space mode when they prefer narrower scope.
 
-Blabber treats media as part of the conversation context, not just as isolated attachments.
+Veyra uses permission-aware retrieval against accessible content and is designed to give grounded answers. When there is not enough evidence in the user's accessible context, the intended behavior is to say so rather than inventing an answer. Blabber does not claim that AI can never be wrong; it is built to make scope, evidence, and user-controlled access first-class parts of the experience.
 
-### Realtime Layer
+## Product Gallery
 
-- Socket.IO gateway
-- Live message events
-- Message update events
-- Message delete events
-- Reactions
-- Read receipts
-- Typing and presence-style realtime events
-- Call signaling support
-- Redis-backed pub/sub flow for realtime broadcasting
+Screenshots are coming soon. Planned gallery structure:
 
-### Notifications
-
-- Push subscription routes
-- Push unsubscribe routes
-- Notification sending routes
-
-## Product Use Cases
-
-- Student project groups tracking decisions, responsibilities, and open questions
-- Startup teams discussing product ideas, next steps, and ownership
-- Friends planning trips, dinners, events, or shared purchases
-- Communities managing long-running group conversations
-- Teams that need summaries instead of scrolling through chat history
-- Any group that wants chat to become useful context instead of disappearing into the thread
+| Area | Planned path |
+| --- | --- |
+| Messages | `docs/assets/screenshots/01-messages/` |
+| Chat Intelligence | `docs/assets/screenshots/02-chat-intelligence/` |
+| Actions | `docs/assets/screenshots/03-actions/` |
+| Group Brain | `docs/assets/screenshots/04-group-brain/` |
+| Plan This | `docs/assets/screenshots/05-plan-this/` |
+| Veyra | `docs/assets/screenshots/06-veyra/` |
+| Reels, Feed, Discover | `docs/assets/screenshots/07-reels-feed-discover/` |
+| Mobile | `docs/assets/screenshots/08-mobile/` |
 
 ## Architecture
 
-```text
-Web App
-  |
-  v
-API Gateway + Socket.IO
-  |
-  +--> Auth Service
-  +--> Users Service
-  +--> Chats Service
-  +--> Messages Service
-  +--> Media Service
-  +--> Notifications Service
-  |
-  +--> MongoDB
-  +--> Redis
-```
+<p align="center">
+  <img src="./docs/assets/architecture/blabber-system-architecture.png" alt="Blabber system architecture" width="100%" />
+</p>
 
-The web app talks to the gateway. The gateway proxies HTTP requests to the appropriate backend service and also hosts the Socket.IO realtime layer.
+Blabber is organized as a production-style monorepo with a React web/PWA, an Expo mobile app, an API gateway, dedicated backend services, shared packages, and Docker Compose orchestration. The web/PWA is the primary demo surface; the Expo app provides a native foundation for mobile experiences.
 
-MongoDB stores app data such as users, chats, messages, media records, sessions, and intelligence outputs. Redis supports pub/sub, presence-related workflows, caching, and realtime communication patterns.
+Production runs behind Caddy with HTTPS for `app.blabber.dev`, `api.blabber.dev`, and `livekit.blabber.dev`. The web app talks to the API gateway, which handles browser-facing HTTP routing and Socket.IO realtime connections before forwarding service-specific work to auth, users, chats, messages, media, and notifications services.
 
-This structure makes Blabber closer to a production-style distributed system than a single-server chat demo.
+MongoDB stores users, sessions, chats, messages, media metadata, social content, and intelligence state. Redis supports pub/sub, realtime fanout, rate limits, and service coordination. Media flows include local development storage and S3-style presign support when configured.
+
+External integrations include LiveKit for calls, ClamAV for media scanning, OpenRouter for AI provider access, Google OAuth for sign-in, Brevo-compatible SMTP for email, and Web Push/VAPID for browser notifications. Secrets are supplied through environment configuration and are not committed to the repository.
 
 ## Tech Stack
 
-| Layer | Technology |
+| Area | Technologies |
 | --- | --- |
-| Frontend | React `19.1.1`, TypeScript, Vite `7`, Tailwind CSS |
-| Frontend state/data | React Query, Zustand, React Router |
-| Backend runtime | Node.js |
-| Backend framework | Express |
-| API gateway | Express, http-proxy-middleware |
-| Realtime | Socket.IO, Socket.IO client |
-| Database | MongoDB 7 |
-| Cache/pubsub | Redis 7 |
-| Auth | JWT access tokens, HttpOnly refresh cookies, bcrypt |
-| Validation | Zod |
-| Media | Local media flow, AWS S3 presign support via AWS SDK |
-| AI provider integration | OpenRouter-compatible provider code with chat completion flows |
-| Package manager | pnpm workspaces, pnpm `8.15.0` |
-| Build orchestration | Turbo |
-| Containers | Docker, Docker Compose |
+| Frontend | React, TypeScript, Vite, Tailwind CSS, React Query, Zustand, React Router, PWA assets |
+| Backend | Node.js, Express, TypeScript, Zod, shared config/types/utils packages |
+| Data | MongoDB, Redis |
+| AI | OpenRouter-compatible chat completion flows, permission-aware retrieval, grounded response patterns |
+| Media & Realtime | LiveKit, Socket.IO, ClamAV, local media storage, S3-style presigned upload support, Web Push/VAPID |
+| Infrastructure | Docker Compose, GCP Compute Engine, Caddy HTTPS, NGINX web container, pnpm workspaces, Turbo |
+| Testing | Vitest, service tests, static smoke checks, release smoke harnesses, production config verification |
+| Mobile | Expo, React Native, Expo Router, secure storage, native media/push foundations |
 
 ## Project Structure
 
 | Path | Purpose |
 | --- | --- |
-| `apps/web` | React frontend application. |
-| `apps/gateway` | API gateway and Socket.IO server. |
-| `services/auth` | Registration, login, refresh sessions, logout, password reset, and current user routes. |
-| `services/users` | User profiles, profile update, search, block/unblock, and presence lookup. |
-| `services/chats` | Direct/group chats, group management, chat preferences, and intelligence routes. |
-| `services/messages` | Message retrieval, sending, editing, deletion, reactions, read state, and poll votes. |
-| `services/media` | Media presign, local upload, media serving, media records, and link previews. |
-| `services/notifications` | Push notification subscription, unsubscribe, and send routes. |
+| `apps/web` | React web/PWA application. |
+| `apps/mobile` | Expo mobile app foundation. |
+| `apps/gateway` | API gateway, HTTP proxying, Socket.IO, rate limits, realtime room handling. |
+| `services/auth` | Registration, login, refresh sessions, logout, password reset, Google OAuth, current user routes. |
+| `services/users` | Profiles, handles, search, blocks, follows, communities, settings, invite and discovery APIs. |
+| `services/chats` | Direct/group chats, members, chat intelligence, actions, Group Brain, Veyra, planning routes. |
+| `services/messages` | Message list/send/edit/delete, reactions, read state, polls, events, shared content. |
+| `services/media` | Upload policy, media records, local upload serving, link previews, reels, scanning, normalization. |
+| `services/notifications` | Push subscriptions, notification preferences, and web push delivery routes. |
 | `packages/types` | Shared TypeScript types and Zod schemas. |
-| `packages/config` | Shared environment configuration loaders. |
-| `packages/utils` | Shared utilities, errors, auth middleware, logging, and Redis pub/sub helpers. |
-| `docker-compose.full.yml` | Full-stack Docker setup for web, gateway, services, MongoDB, and Redis. |
+| `packages/config` | Shared environment loaders and production safety checks. |
+| `packages/utils` | Shared errors, middleware, logging, Redis/pubsub helpers, and service utilities. |
+| `docs` | Architecture, production, release, hardening, and operational documentation. |
+| `scripts` | Smoke suites, release verification, backup helpers, config checks, and controlled content tooling. |
 
-## Local Development
+## Production Deployment
 
-Docker is the most reliable way to run the full application because it starts the web app, gateway, backend services, MongoDB, and Redis together.
+Blabber is deployed on GCP Compute Engine using Docker Compose and Caddy-managed HTTPS. The production domains are:
+
+| Domain | Role |
+| --- | --- |
+| `https://app.blabber.dev` | Web/PWA app shell |
+| `https://api.blabber.dev` | Public API gateway |
+| `https://livekit.blabber.dev` | LiveKit endpoint |
+
+Deployment documentation lives in [`docs/production-cicd.md`](./docs/production-cicd.md). Production secrets, provider keys, OAuth credentials, SMTP credentials, VAPID keys, and database credentials are not stored in the repository.
+
+## Testing And Reliability
+
+Blabber includes a layered verification strategy:
+
+- Unit and service tests through Vitest.
+- Static smoke checks for dashboard copy, chat controls, media compatibility, and durable product contracts.
+- Release smoke harnesses for auth, safety, operations, Moments, profiles, feed, communities, discovery, reels, mobile foundation, cross-platform QA, and hardening.
+- Production configuration verification for unsafe environment settings.
+- Docker health/readiness checks for the composed stack.
+
+Recent hardening has focused on Catch Me Up, Actions, Group Brain, Plan This, Veyra approved spaces/full access, mobile web/PWA ergonomics, Reels/Feed/Discover playback and navigation, media scanning, upload compatibility, and static smoke coverage.
+
+Useful commands:
+
+```bash
+pnpm test
+pnpm smoke:chat-dashboard
+pnpm smoke:release-g-hardening
+pnpm verify:production-config
+pnpm verify:launch-gate
+```
+
+## Local Setup
 
 ### Prerequisites
 
-- Node.js `20.11.0`, based on `.nvmrc`
+- Node.js `20.11.0` or compatible Node 20 runtime
 - pnpm `8.15.0`
-- Docker Desktop or another Docker-compatible runtime
+- Docker Desktop or another Docker Compose compatible runtime
 
-### Install Dependencies
+### Clone And Install
 
 ```bash
+git clone https://github.com/YugmPatel/Blabber.git
+cd Blabber
 pnpm install
+cp .env.example .env
 ```
 
-### Start The Full Stack
+Fill in local development values in `.env`. Do not commit real secrets.
 
-Docker Compose v2:
+### Run The Full Stack With Docker
 
 ```bash
-docker compose -f docker-compose.full.yml up -d
+pnpm docker:full:up
 ```
 
-Legacy Compose command:
-
-```bash
-docker-compose -f docker-compose.full.yml up -d
-```
-
-Open the web app:
+Open:
 
 ```text
 http://localhost:5173
 ```
 
-Gateway health check:
+Gateway health:
 
 ```text
 http://localhost:3000/healthz
 ```
 
-### Check Containers
+Check and stop containers:
 
 ```bash
 docker compose -f docker-compose.full.yml ps
+pnpm docker:full:logs
+pnpm docker:full:down
 ```
 
-or:
+### Run Individual Workspaces
 
 ```bash
-docker-compose -f docker-compose.full.yml ps
-```
-
-### Stop Containers
-
-```bash
-docker compose -f docker-compose.full.yml down
-```
-
-or:
-
-```bash
-docker-compose -f docker-compose.full.yml down
-```
-
-### Run Individual Parts Locally
-
-Frontend:
-
-```bash
+pnpm dev
 pnpm --filter ./apps/web dev
-```
-
-Gateway:
-
-```bash
 pnpm --filter @apps/gateway dev
-```
-
-Example service:
-
-```bash
 pnpm --filter @services/auth dev
+pnpm --filter @services/users dev
+pnpm --filter @services/chats dev
+pnpm --filter @services/media dev
+pnpm --filter @services/notifications dev
+pnpm --filter @apps/mobile start
 ```
 
-Build all packages:
+### Build
 
 ```bash
 pnpm build
-```
-
-Run tests:
-
-```bash
-pnpm test
+pnpm --filter web build
+pnpm --filter @apps/mobile check
 ```
 
 ## Environment Variables
 
-The project uses environment variables for service configuration. See `.env.example` for the full template.
+Use `.env.example` as the template. Keep real values out of Git and avoid putting secrets in `VITE_` or `EXPO_PUBLIC_` variables unless they are intentionally public client values.
 
-| Variable | Purpose |
+| Group | Examples |
 | --- | --- |
-| `VITE_API_URL` | Frontend API base URL. |
-| `VITE_SOCKET_URL` | Frontend Socket.IO URL. |
-| `MONGO_URI` | MongoDB connection string. |
-| `MONGO_DB_NAME` | MongoDB database name. |
-| `REDIS_HOST` | Redis host. |
-| `REDIS_PORT` | Redis port. |
-| `REDIS_PASSWORD` | Optional Redis password. |
-| `JWT_ACCESS_SECRET` | Access token signing secret. |
-| `JWT_REFRESH_SECRET` | Refresh token signing secret. |
-| `JWT_ACCESS_TTL` | Access token lifetime. |
-| `JWT_REFRESH_TTL` | Refresh token lifetime. |
-| `ALLOWED_ORIGINS` | Comma-separated CORS origins. |
-| `AUTH_SERVICE_URL` | Gateway target for auth service. |
-| `USERS_SERVICE_URL` | Gateway target for users service. |
-| `CHATS_SERVICE_URL` | Gateway target for chats service. |
-| `MESSAGES_SERVICE_URL` | Gateway target for messages service. |
-| `MEDIA_SERVICE_URL` | Gateway target for media service. |
-| `NOTIFICATIONS_SERVICE_URL` | Gateway target for notifications service. |
-| `INTELLIGENCE_SERVICE_URL` | Gateway target for chat intelligence routes. |
-| `LOCAL_MEDIA_DIR` | Local directory for stored media files. |
-| `LOCAL_MEDIA_UPLOAD_BASE_URL` | Base URL used for local media upload targets. |
-| `PUBLIC_MEDIA_BASE_URL` | Public base URL returned for local media records. |
-| `S3_MEDIA_BUCKET` | Optional S3 bucket for S3-style media upload. |
-| `S3_REGION` | Optional S3 region. |
-| `MEDIA_BASE_URL` | Public media base URL for S3-style media. |
-| `AWS_ACCESS_KEY_ID` | Optional AWS access key for S3. |
-| `AWS_SECRET_ACCESS_KEY` | Optional AWS secret for S3. |
-| `VAPID_PUBLIC_KEY` | Web push public key. |
-| `VAPID_PRIVATE_KEY` | Web push private key. |
-| `VAPID_SUBJECT` | Web push contact subject. |
-| `OPENROUTER_API_KEY` | Optional AI provider key for chat intelligence. |
-| `OPENROUTER_MODEL` | Optional model name for the AI provider. |
-| `OPENROUTER_HTTP_REFERER` / `OPENROUTER_REFERER` | Optional provider metadata. |
-
-Example placeholder values:
-
-```env
-VITE_API_URL=http://localhost:3000
-VITE_SOCKET_URL=http://localhost:3000
-MONGO_URI=mongodb://localhost:27017
-MONGO_DB_NAME=blabber
-REDIS_HOST=localhost
-REDIS_PORT=6379
-JWT_ACCESS_SECRET=replace-with-at-least-32-characters
-JWT_REFRESH_SECRET=replace-with-at-least-32-characters
-ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
-OPENROUTER_API_KEY=
-```
-
-AI provider keys can be configured through environment variables such as `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`.
+| Database | `MONGO_URI`, `MONGO_DB_NAME`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` |
+| Auth | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, token TTLs, `ALLOWED_ORIGINS`, Google OAuth client settings |
+| AI | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, OpenRouter referer metadata, mock fallback flags |
+| Email | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_STARTTLS`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` |
+| Push | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` |
+| LiveKit | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_WS_URL`, `VITE_LIVEKIT_WS_URL` |
+| Media scanning | `CLAMAV_HOST`, `CLAMAV_PORT`, scanner timeout settings, media base/upload URLs |
+| Frontend routing | `VITE_API_URL`, `VITE_SOCKET_URL`, allowed local fallback flags |
 
 ## API Overview
 
-All browser-facing HTTP APIs go through the gateway.
+All browser-facing APIs go through the gateway.
 
 | Gateway path | Service | Purpose |
 | --- | --- | --- |
-| `/api/auth` | Auth service | Register, login, refresh, logout, password reset, current user. |
-| `/api/users` | Users service | User profiles, search, profile updates, block/unblock, presence lookup. |
-| `/api/chats` | Chats service | Direct chats, group chats, chat metadata, members, pin/archive. |
-| `/api/messages` | Messages service | Message list, send, edit, delete, reactions, read state, poll voting. |
-| `/api/media` | Media service | Presign uploads, local media upload, media serving, link previews. |
-| `/api/intelligence` | Chats service | Summaries, actions, decisions, waiting-on items, group brain. |
-| `/api/notifications` | Notifications service | Push subscribe, unsubscribe, and send routes. |
+| `/api/auth` | Auth service | Register, login, refresh, logout, password reset, OAuth, current user. |
+| `/api/users` | Users service | Profiles, settings, search, blocks, follows, communities, invites, discovery. |
+| `/api/chats` | Chats service | Direct/group chats, members, archive/pin, actions, Group Brain, planning, Veyra. |
+| `/api/messages` | Messages service | Message list/send/edit/delete, reactions, reads, polls, events, shared content. |
+| `/api/media` | Media service | Uploads, media records, local media, previews, reels, scanner-backed validation. |
+| `/api/notifications` | Notifications service | Push subscription, preferences, unsubscribe, and delivery routes. |
 
 ## Service Ports
 
-| Service | Port |
+| Service | Local port |
 | --- | --- |
-| Web app | 5173 |
-| Gateway | 3000 |
-| Auth service | 3001 |
-| Users service | 3002 |
-| Chats service | 3003 |
-| Messages service | 3004 |
-| Media service | 3005 |
-| Notifications service | 3006 |
-| MongoDB | 27018 on host, 27017 in Docker network |
-| Redis | 6380 on host, 6379 in Docker network |
+| Web app | `5173` |
+| Gateway | `3000` |
+| Auth service | `3001` |
+| Users service | `3002` |
+| Chats service | `3003` |
+| Messages service | `3004` |
+| Media service | `3005` |
+| Notifications service | `3006` |
+| MongoDB | `27018` on host, `27017` in Docker network |
+| Redis | `6380` on host, `6379` in Docker network |
+| LiveKit | `7880`, `7881`, `7882/udp` in the full stack |
 
-## License
+## Roadmap
 
-MIT
+Completed:
+
+- [x] Direct/group messaging
+- [x] Reels/Feed/Discover
+- [x] Moments
+- [x] Catch Me Up
+- [x] Actions/My Actions
+- [x] Group Brain
+- [x] Plan This
+- [x] Veyra approved spaces/full access
+- [x] GCP deployment
+- [x] Mobile web polish
+
+Next:
+
+- [ ] Native mobile hero parity
+- [ ] Recommendation quality
+- [ ] More advanced permissions
+- [ ] More robust e2e browser testing
+- [ ] Admin/moderation dashboards
+- [ ] Product analytics
+
+## Author
+
+Built by **Yugm Patel**.
+
+- GitHub: [YugmPatel](https://github.com/YugmPatel)
+- LinkedIn: Coming soon / add your LinkedIn URL
+
+## Project Status
+
+Blabber is a personal product engineering project in active development. It demonstrates a production-style AI/social/messaging architecture with a deployed web/PWA surface, but it should not be treated as a finished commercial security or compliance product. The app is privacy-aware and permission-aware by design, with approved spaces and user-controlled access as core concepts, but no legal, compliance, or advanced cryptography claims are made here.
