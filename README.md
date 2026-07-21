@@ -368,4 +368,4 @@ All browser-facing APIs go through the gateway.
 Built by Yugm Patel.
 
 - GitHub: [YugmPatel](https://github.com/YugmPatel)
-- LinkedIn: Coming soon / add your LinkedIn URL
+- LinkedIn: [yugmpatel](https://www.linkedin.com/in/yugmpatel/)
