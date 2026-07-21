@@ -256,9 +256,8 @@ function firstName(name?: string, email?: string) {
   return value.split(/\s+/)[0] || 'there';
 }
 
-function subjectFor(count: number) {
-  if (count > 0) return `You have ${count} open Actions in Blabber`;
-  return 'Your Actions are waiting';
+function subjectFor() {
+  return 'Your Actions are waiting 👀';
 }
 
 function funnyLineFor(count: number) {
@@ -396,7 +395,7 @@ export function buildActionsDigestEmail(params: {
   `.trim();
 
   return {
-    subject: subjectFor(count),
+    subject: subjectFor(),
     html,
     text,
     funnyLine,

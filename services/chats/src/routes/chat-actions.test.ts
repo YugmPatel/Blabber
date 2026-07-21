@@ -497,7 +497,7 @@ describe('chat Actions routes', () => {
     const message = sendDigestMock.mock.calls[0][0];
     expect(message.to).toBe(`user_${mockUserId.toString()}@example.com`);
     expect(message.to).not.toBe('attacker@example.com');
-    expect(message.subject).toContain('2 open Actions');
+    expect(message.subject).toBe('Your Actions are waiting 👀');
     expect(message.text).toContain('Book elevator');
     expect(message.text).toContain('Send packing checklist');
     expect(message.text).toContain('Move Crew');
@@ -684,7 +684,7 @@ describe('chat Actions routes', () => {
     });
 
     expect(digest.count).toBe(2);
-    expect(digest.subject).toBe('You have 2 open Actions in Blabber');
+    expect(digest.subject).toBe('Your Actions are waiting 👀');
     expect(digest.text).toContain('Hi Yugm,');
     expect(digest.text).toContain('Overdue');
     expect(digest.text).toContain('No due date');
