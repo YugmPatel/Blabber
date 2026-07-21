@@ -48,7 +48,7 @@ function smtpConfigured() {
 }
 
 function appBaseUrl() {
-  return (process.env.APP_BASE_URL || process.env.FRONTEND_URL || 'https://app.blabber.dev').replace(/\/+$/, '');
+  return (process.env.APP_BASE_URL || process.env.CLIENT_URL || process.env.FRONTEND_URL || 'https://app.blabber.dev').replace(/\/+$/, '');
 }
 
 function readLine(socket: net.Socket): Promise<string> {

@@ -105,6 +105,13 @@ function validateProduction(env) {
     }
   }
 
+  if (value(env, 'MY_ACTIONS_EMAIL_DIGEST_ENABLED') !== 'false') {
+    requirePresent(env, findings, 'actions-email-digest', ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM']);
+    if (!value(env, 'APP_BASE_URL') && !value(env, 'CLIENT_URL') && !value(env, 'FRONTEND_URL')) {
+      addFinding(findings, 'fail', 'actions-email-digest', 'APP_BASE_URL', 'digest links require APP_BASE_URL, CLIENT_URL, or FRONTEND_URL');
+    }
+  }
+
   if (value(env, 'PUSH_NOTIFICATIONS_ENABLED') === 'true') {
     requirePresent(env, findings, 'web-push', ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT']);
     if (value(env, 'MOBILE_PUSH_PROVIDER_MODE') !== 'expo' && value(env, 'MOBILE_PUSH_PROVIDER_MODE') !== 'apns-fcm') {

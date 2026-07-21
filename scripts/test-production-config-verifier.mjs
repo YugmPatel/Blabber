@@ -31,7 +31,7 @@ assert(invalid.status === 1, 'invalid synthetic production fixture should fail')
 const invalidSummary = parseJson(invalid.stdout);
 assert(invalidSummary.passed === false, 'invalid fixture summary should fail');
 const categories = new Set(invalidSummary.findings.map((finding) => finding.category));
-for (const category of ['environment', 'database', 'redis', 'secrets', 'cors', 'auth', 'public-runtime', 'public-secret-boundary', 'provider-mode', 'mobile-push']) {
+for (const category of ['environment', 'database', 'redis', 'secrets', 'cors', 'auth', 'public-runtime', 'public-secret-boundary', 'provider-mode', 'actions-email-digest', 'mobile-push']) {
   assert(categories.has(category), `invalid fixture should report ${category}`);
 }
 
