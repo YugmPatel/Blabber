@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import MyActionsPage from './MyActionsPage';
-import { emailMyActionsDigest } from '@/api/client';
+import { emailMyActionsDigest, fetchMyActionsDigestPreference, updateMyActionsDigestPreference } from '@/api/client';
 import { useMyActions } from '@/hooks/useChatActions';
 
 vi.mock('@/components/ui/AppShell', () => ({
@@ -60,10 +60,14 @@ vi.mock('@/hooks/useChatActions', () => ({
 vi.mock('@/api/client', () => ({
   apiErrorMessage: vi.fn((_error: unknown, fallback: string) => fallback),
   emailMyActionsDigest: vi.fn(),
+  fetchMyActionsDigestPreference: vi.fn(),
   respondPlanThisAssignment: vi.fn(),
+  updateMyActionsDigestPreference: vi.fn(),
 }));
 
 const mockEmailMyActionsDigest = vi.mocked(emailMyActionsDigest);
+const mockFetchMyActionsDigestPreference = vi.mocked(fetchMyActionsDigestPreference);
+const mockUpdateMyActionsDigestPreference = vi.mocked(updateMyActionsDigestPreference);
 const mockUseMyActions = vi.mocked(useMyActions);
 
 function renderPage() {
@@ -80,6 +84,24 @@ function renderPage() {
 describe('MyActionsPage email digest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetchMyActionsDigestPreference.mockResolvedValue({
+      preference: {
+        enabled: false,
+        hourLocal: 9,
+        timezone: 'UTC',
+        createdAt: '2026-07-21T00:00:00.000Z',
+        updatedAt: '2026-07-21T00:00:00.000Z',
+      },
+    });
+    mockUpdateMyActionsDigestPreference.mockResolvedValue({
+      preference: {
+        enabled: true,
+        hourLocal: 9,
+        timezone: 'UTC',
+        createdAt: '2026-07-21T00:00:00.000Z',
+        updatedAt: '2026-07-21T00:00:00.000Z',
+      },
+    });
     mockUseMyActions.mockReturnValue({
       actions: [
         {
@@ -112,6 +134,85 @@ describe('MyActionsPage email digest', () => {
     expect(button).toBeInTheDocument();
     expect(button).toHaveClass('w-full');
     expect(button).toHaveClass('sm:w-auto');
+  });
+
+  it('renders the Daily digest toggle disabled by default', async () => {
+    renderPage();
+
+    const toggle = await screen.findByRole('checkbox', { name: 'Daily digest' });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText('Get one email each morning when you have open Actions.')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Daily digest time' })).toHaveValue('9');
+  });
+
+  it('turns on Daily digest with the selected hour and timezone', async () => {
+    renderPage();
+
+    const toggle = await screen.findByRole('checkbox', { name: 'Daily digest' });
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(mockUpdateMyActionsDigestPreference.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      enabled: true,
+      hourLocal: 9,
+      timezone: expect.any(String),
+    })));
+    expect(await screen.findByText('Daily Actions digest turned on.')).toBeInTheDocument();
+  });
+
+  it('turns off Daily digest when already enabled', async () => {
+    mockFetchMyActionsDigestPreference.mockResolvedValue({
+      preference: {
+        enabled: true,
+        hourLocal: 10,
+        timezone: 'America/Los_Angeles',
+        createdAt: '2026-07-21T00:00:00.000Z',
+        updatedAt: '2026-07-21T00:00:00.000Z',
+      },
+    });
+    mockUpdateMyActionsDigestPreference.mockResolvedValue({
+      preference: {
+        enabled: false,
+        hourLocal: 10,
+        timezone: 'America/Los_Angeles',
+        createdAt: '2026-07-21T00:00:00.000Z',
+        updatedAt: '2026-07-21T00:00:00.000Z',
+      },
+    });
+    renderPage();
+
+    const toggle = await screen.findByRole('checkbox', { name: 'Daily digest' });
+    await waitFor(() => expect(toggle).toBeChecked());
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(mockUpdateMyActionsDigestPreference.mock.calls[0]?.[0]).toEqual({
+      enabled: false,
+      hourLocal: 10,
+      timezone: 'America/Los_Angeles',
+    }));
+    expect(await screen.findByText('Daily Actions digest turned off.')).toBeInTheDocument();
+  });
+
+  it('updates the Daily digest time', async () => {
+    renderPage();
+
+    const selector = await screen.findByRole('combobox', { name: 'Daily digest time' });
+    fireEvent.change(selector, { target: { value: '10' } });
+
+    await waitFor(() => expect(mockUpdateMyActionsDigestPreference.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      enabled: false,
+      hourLocal: 10,
+      timezone: expect.any(String),
+    })));
+  });
+
+  it('shows an error when Daily digest preference update fails', async () => {
+    mockUpdateMyActionsDigestPreference.mockRejectedValue(new Error('nope'));
+    renderPage();
+
+    const toggle = await screen.findByRole('checkbox', { name: 'Daily digest' });
+    fireEvent.click(toggle);
+
+    expect(await screen.findByText('Unable to update daily digest right now.')).toBeInTheDocument();
   });
 
   it('disables the digest button while sending', async () => {

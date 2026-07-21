@@ -7,6 +7,15 @@ import { getChatActionsCollection } from '../models/chat-action';
 import { seedChatUsers } from '../test-fixtures';
 import { buildActionsDigestEmail, remainingDigestActions } from '../actions-email-digest';
 import { setActionsDigestEmailSenderForTest } from './chat-actions';
+import { ActionEmailDigestProcessor } from '../action-email-digests';
+import {
+  createActionEmailDigestDeliveryIndexes,
+  getActionEmailDigestDeliveriesCollection,
+} from '../models/action-email-digest-delivery';
+import {
+  createActionEmailDigestPreferenceIndexes,
+  getActionEmailDigestPreferencesCollection,
+} from '../models/action-email-digest-preference';
 
 const mockUserId = new ObjectId();
 const otherUserId = new ObjectId();
@@ -34,6 +43,11 @@ describe('chat Actions routes', () => {
     await db.collection('chat_actions').deleteMany({});
     await db.collection('plan_this').deleteMany({});
     await db.collection('userSettings').deleteMany({});
+    await db.collection('actionEmailDigestPreferences').deleteMany({});
+    await db.collection('actionEmailDigestDeliveries').deleteMany({});
+    await db.collection('processor_locks').deleteMany({});
+    await createActionEmailDigestPreferenceIndexes();
+    await createActionEmailDigestDeliveryIndexes();
     await seedChatUsers([mockUserId, otherUserId, adminUserId, outsiderUserId]);
     sendDigestMock = vi.fn(async () => true);
     setActionsDigestEmailSenderForTest(sendDigestMock);
@@ -43,6 +57,63 @@ describe('chat Actions routes', () => {
     setActionsDigestEmailSenderForTest(async () => false);
     await closeDatabase();
   });
+
+  async function insertGroupAction(params: {
+    userId?: ObjectId;
+    chatId?: ObjectId;
+    title?: string;
+    status?: string;
+    deletedAt?: Date;
+    participants?: ObjectId[];
+  } = {}) {
+    const now = new Date();
+    const chatId = params.chatId || new ObjectId();
+    const ownerId = params.userId || mockUserId;
+    await getDatabase().collection('chats').updateOne(
+      { _id: chatId },
+      {
+        $setOnInsert: {
+          _id: chatId,
+          type: 'group',
+          groupKind: 'standard',
+          participants: params.participants || [ownerId, otherUserId],
+          admins: [ownerId],
+          title: 'Daily Digest Crew',
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      { upsert: true }
+    );
+    await getChatActionsCollection().insertOne({
+      _id: new ObjectId(),
+      chatId,
+      actionKey: `daily-${new ObjectId().toString()}`,
+      type: 'task',
+      title: params.title || 'Book elevator',
+      status: (params.status || 'open') as any,
+      assignedTo: { userId: ownerId.toString(), name: 'Me' },
+      sourceMessageIds: [],
+      ...(params.deletedAt ? { deletedAt: params.deletedAt } : {}),
+      generatedByUserId: ownerId,
+      lastActivityAt: now,
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+    return chatId;
+  }
+
+  async function enableDailyDigest(userId = mockUserId, patch: Partial<{ hourLocal: number; timezone: string }> = {}) {
+    const now = new Date();
+    await getActionEmailDigestPreferencesCollection().insertOne({
+      userId,
+      enabled: true,
+      hourLocal: patch.hourLocal ?? 9,
+      timezone: patch.timezone || 'UTC',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 
   it('marks actions from an ended temporary group with chatEndedAt, and leaves an active group unmarked', async () => {
     const db = getDatabase();
@@ -363,6 +434,144 @@ describe('chat Actions routes', () => {
     expect(response.status).toBe(403);
     expect(response.body.message).toBe('You are not a participant in this chat');
     expect(JSON.stringify(response.body)).not.toContain('Secret task');
+  });
+
+  it('returns a disabled Daily Actions digest preference by default', async () => {
+    const response = await request(app).get('/intelligence/actions/digest/preferences');
+
+    expect(response.status).toBe(200);
+    expect(response.body.preference).toMatchObject({
+      enabled: false,
+      hourLocal: 9,
+      timezone: 'UTC',
+    });
+  });
+
+  it('allows the authenticated user to enable and disable Daily Actions digest', async () => {
+    const enabledResponse = await request(app)
+      .patch('/intelligence/actions/digest/preferences')
+      .send({ enabled: true, hourLocal: 8, timezone: 'America/Los_Angeles' });
+
+    expect(enabledResponse.status).toBe(200);
+    expect(enabledResponse.body.preference).toMatchObject({
+      enabled: true,
+      hourLocal: 8,
+      timezone: 'America/Los_Angeles',
+    });
+
+    const disabledResponse = await request(app)
+      .patch('/intelligence/actions/digest/preferences')
+      .send({ enabled: false, hourLocal: 10, timezone: 'America/Los_Angeles' });
+
+    expect(disabledResponse.status).toBe(200);
+    expect(disabledResponse.body.preference).toMatchObject({
+      enabled: false,
+      hourLocal: 10,
+      timezone: 'America/Los_Angeles',
+    });
+  });
+
+  it('validates Daily Actions digest hour and timezone', async () => {
+    const hourResponse = await request(app)
+      .patch('/intelligence/actions/digest/preferences')
+      .send({ enabled: true, hourLocal: 24, timezone: 'UTC' });
+    expect(hourResponse.status).toBe(400);
+    expect(hourResponse.body.message).toBe('hourLocal must be an integer from 0 to 23');
+
+    const timezoneResponse = await request(app)
+      .patch('/intelligence/actions/digest/preferences')
+      .send({ enabled: true, hourLocal: 9, timezone: '   ' });
+    expect(timezoneResponse.status).toBe(400);
+    expect(timezoneResponse.body.message).toBe('timezone must be a non-empty string under 100 characters');
+  });
+
+  it('ignores client-supplied user IDs when updating Daily Actions digest preference', async () => {
+    const response = await request(app)
+      .patch('/intelligence/actions/digest/preferences')
+      .send({ enabled: true, hourLocal: 9, timezone: 'UTC', userId: otherUserId.toString() });
+
+    expect(response.status).toBe(200);
+    const currentUserPreference = await getActionEmailDigestPreferencesCollection().findOne({ userId: mockUserId });
+    const otherUserPreference = await getActionEmailDigestPreferencesCollection().findOne({ userId: otherUserId });
+    expect(currentUserPreference?.enabled).toBe(true);
+    expect(otherUserPreference).toBeNull();
+  });
+
+  it('daily digest processor sends one email per local day for enabled users with open Actions', async () => {
+    await enableDailyDigest(mockUserId, { hourLocal: 9, timezone: 'UTC' });
+    await insertGroupAction({ title: 'Book elevator' });
+    await insertGroupAction({ title: 'Completed item', status: 'completed' });
+    await insertGroupAction({ title: 'Deleted item', deletedAt: new Date() });
+    await insertGroupAction({ title: 'Hidden item', participants: [otherUserId] });
+    const sender = { send: vi.fn(async () => true) };
+
+    const processor = new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T09:05:00.000Z'));
+    const firstRun = await processor.runOnce();
+    const secondRun = await processor.runOnce();
+    const nextDayRun = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-22T09:05:00.000Z')).runOnce();
+
+    expect(firstRun).toMatchObject({ checked: 1, reserved: 1, sent: 1 });
+    expect(secondRun).toMatchObject({ checked: 1, reserved: 0, sent: 0 });
+    expect(nextDayRun).toMatchObject({ checked: 1, reserved: 1, sent: 1 });
+    expect(sender.send).toHaveBeenCalledTimes(2);
+    expect(sender.send.mock.calls[0][0].subject).toBe('Your Actions are waiting 👀');
+    expect(sender.send.mock.calls[0][0].text).toContain('you still have 1 open Action');
+    expect(sender.send.mock.calls[0][0].text).toContain('Book elevator');
+    expect(sender.send.mock.calls[0][0].text).not.toContain('Completed item');
+    expect(sender.send.mock.calls[0][0].text).not.toContain('Deleted item');
+    expect(sender.send.mock.calls[0][0].text).not.toContain('Hidden item');
+
+    const deliveries = await getActionEmailDigestDeliveriesCollection().find({ userId: mockUserId }).sort({ localDate: 1 }).toArray();
+    expect(deliveries.map((delivery) => [delivery.localDate, delivery.status, delivery.count])).toEqual([
+      ['2026-07-21', 'sent', 1],
+      ['2026-07-22', 'sent', 1],
+    ]);
+  });
+
+  it('daily digest processor skips disabled users and users with no open Actions', async () => {
+    await getActionEmailDigestPreferencesCollection().insertOne({
+      userId: mockUserId,
+      enabled: false,
+      hourLocal: 9,
+      timezone: 'UTC',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await enableDailyDigest(otherUserId, { hourLocal: 9, timezone: 'UTC' });
+    const sender = { send: vi.fn(async () => true) };
+
+    const result = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T09:05:00.000Z')).runOnce();
+
+    expect(result).toMatchObject({ checked: 1, reserved: 1, skipped: 1, sent: 0 });
+    expect(sender.send).not.toHaveBeenCalled();
+    const delivery = await getActionEmailDigestDeliveriesCollection().findOne({ userId: otherUserId, localDate: '2026-07-21' });
+    expect(delivery).toMatchObject({ status: 'skipped', count: 0, errorCategory: 'no_open_actions' });
+  });
+
+  it('daily digest processor skips users without email', async () => {
+    await enableDailyDigest(mockUserId, { hourLocal: 9, timezone: 'UTC' });
+    await insertGroupAction({ title: 'Book elevator' });
+    await getDatabase().collection('users').updateOne({ _id: mockUserId }, { $unset: { email: '' } });
+    const sender = { send: vi.fn(async () => true) };
+
+    const result = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T09:05:00.000Z')).runOnce();
+
+    expect(result).toMatchObject({ checked: 1, reserved: 1, skipped: 1, sent: 0 });
+    expect(sender.send).not.toHaveBeenCalled();
+    const delivery = await getActionEmailDigestDeliveriesCollection().findOne({ userId: mockUserId, localDate: '2026-07-21' });
+    expect(delivery).toMatchObject({ status: 'skipped', count: 0, errorCategory: 'no_email' });
+  });
+
+  it('daily digest processor records sanitized failures without crashing', async () => {
+    await enableDailyDigest(mockUserId, { hourLocal: 9, timezone: 'UTC' });
+    await insertGroupAction({ title: 'Book elevator' });
+    const sender = { send: vi.fn(async () => false) };
+
+    const result = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T09:05:00.000Z')).runOnce();
+
+    expect(result).toMatchObject({ checked: 1, reserved: 1, failed: 1, sent: 0 });
+    const delivery = await getActionEmailDigestDeliveriesCollection().findOne({ userId: mockUserId, localDate: '2026-07-21' });
+    expect(delivery).toMatchObject({ status: 'failed', count: 1, errorCategory: 'send_failed' });
   });
 
   it('emails a My Actions digest only to the current user email', async () => {

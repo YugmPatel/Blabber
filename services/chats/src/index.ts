@@ -11,6 +11,8 @@ import { createUserChatPreferencesIndexes } from './models/user-chat-preferences
 import { createChatReadStateIndexes } from './models/chat-read-state';
 import { createCallHistoryIndexes } from './models/call-history';
 import { createActionReminderDeliveryIndexes } from './models/action-reminder-delivery';
+import { createActionEmailDigestDeliveryIndexes } from './models/action-email-digest-delivery';
+import { createActionEmailDigestPreferenceIndexes } from './models/action-email-digest-preference';
 import { createGroupInviteLinkIndexes } from './models/group-invite-link';
 import { createGroupModerationActivityIndexes } from './models/group-moderation-activity';
 import { createPlanThisIndexes } from './models/plan-this';
@@ -19,6 +21,7 @@ import { createMessageRequestIndexes } from './models/message-request';
 import { initPubSub, closePubSub } from './pubsub';
 import { connectToRedis, closeRedis } from './redis';
 import { startActionReminderProcessor, stopActionReminderProcessor } from './action-reminders';
+import { startActionEmailDigestProcessor, stopActionEmailDigestProcessor } from './action-email-digests';
 
 const config = loadCommonConfig();
 
@@ -37,6 +40,8 @@ async function startServer() {
     await createChatReadStateIndexes();
     await createCallHistoryIndexes();
     await createActionReminderDeliveryIndexes();
+    await createActionEmailDigestPreferenceIndexes();
+    await createActionEmailDigestDeliveryIndexes();
     await createGroupInviteLinkIndexes();
     await createGroupModerationActivityIndexes();
     await createPlanThisIndexes();
@@ -45,6 +50,7 @@ async function startServer() {
     connectToRedis();
     initPubSub();
     startActionReminderProcessor();
+    startActionEmailDigestProcessor();
     logger.info('Database indexes created');
 
     // Start Express server
@@ -65,6 +71,7 @@ async function startServer() {
       server.close(async () => {
         logger.info('HTTP server closed');
         stopActionReminderProcessor();
+        stopActionEmailDigestProcessor();
         await closePubSub();
         await closeRedis();
         await closeDatabase();

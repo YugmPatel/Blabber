@@ -37,6 +37,11 @@ import {
   sendActionsDigestEmail,
   type DigestActionItem,
 } from '../actions-email-digest';
+import {
+  defaultActionEmailDigestPreference,
+  getActionEmailDigestPreferencesCollection,
+  type ActionEmailDigestPreferenceDocument,
+} from '../models/action-email-digest-preference';
 
 interface MessageDocument {
   _id: ObjectId;
@@ -62,6 +67,14 @@ type MyVisibleActionItem = ChatActionItem & {
   chatEndedAt?: string;
 };
 
+interface ActionEmailDigestPreferenceResponse {
+  enabled: boolean;
+  hourLocal: number;
+  timezone: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 function assertObjectId(value: string): ObjectId | null {
   return ObjectId.isValid(value) ? new ObjectId(value) : null;
 }
@@ -72,6 +85,68 @@ function personName(user: UserDocument): string {
 
 function serializeDate(value?: Date): string | undefined {
   return value ? value.toISOString() : undefined;
+}
+
+function serializeActionEmailDigestPreference(preference: ActionEmailDigestPreferenceDocument): ActionEmailDigestPreferenceResponse {
+  return {
+    enabled: preference.enabled,
+    hourLocal: preference.hourLocal,
+    timezone: preference.timezone,
+    createdAt: preference.createdAt.toISOString(),
+    updatedAt: preference.updatedAt.toISOString(),
+  };
+}
+
+async function getOrCreateActionEmailDigestPreference(userObjectId: ObjectId): Promise<ActionEmailDigestPreferenceDocument> {
+  const collection = getActionEmailDigestPreferencesCollection();
+  const existing = await collection.findOne({ userId: userObjectId });
+  if (existing) return existing;
+
+  const preference = defaultActionEmailDigestPreference(userObjectId);
+  try {
+    await collection.insertOne(preference);
+    return preference;
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      const createdByOtherRequest = await collection.findOne({ userId: userObjectId });
+      if (createdByOtherRequest) return createdByOtherRequest;
+    }
+    throw error;
+  }
+}
+
+function validateActionEmailDigestPreferencePatch(body: unknown): {
+  ok: true;
+  value: { enabled?: boolean; hourLocal?: number; timezone?: string };
+} | {
+  ok: false;
+  message: string;
+} {
+  const payload = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  const value: { enabled?: boolean; hourLocal?: number; timezone?: string } = {};
+
+  if ('enabled' in payload) {
+    if (typeof payload.enabled !== 'boolean') return { ok: false, message: 'enabled must be a boolean' };
+    value.enabled = payload.enabled;
+  }
+
+  if ('hourLocal' in payload) {
+    if (!Number.isInteger(payload.hourLocal) || Number(payload.hourLocal) < 0 || Number(payload.hourLocal) > 23) {
+      return { ok: false, message: 'hourLocal must be an integer from 0 to 23' };
+    }
+    value.hourLocal = Number(payload.hourLocal);
+  }
+
+  if ('timezone' in payload) {
+    if (typeof payload.timezone !== 'string') return { ok: false, message: 'timezone must be a non-empty string' };
+    const timezone = payload.timezone.trim();
+    if (!timezone || timezone.length > 100 || /[\r\n\t]/.test(timezone)) {
+      return { ok: false, message: 'timezone must be a non-empty string under 100 characters' };
+    }
+    value.timezone = timezone;
+  }
+
+  return { ok: true, value };
 }
 
 function permissionsForAction(
@@ -654,6 +729,55 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
   }
 
   return res.status(200).json({ actions });
+});
+
+export const getMyActionsDigestPreference = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const userObjectId = assertObjectId(userId);
+  if (!userObjectId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
+  }
+
+  const preference = await getOrCreateActionEmailDigestPreference(userObjectId);
+  return res.status(200).json({ preference: serializeActionEmailDigestPreference(preference) });
+});
+
+export const updateMyActionsDigestPreference = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const userObjectId = assertObjectId(userId);
+  if (!userObjectId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
+  }
+
+  const parsed = validateActionEmailDigestPreferencePatch(req.body);
+  if (!parsed.ok) {
+    return res.status(400).json({ error: 'Validation Error', message: parsed.message });
+  }
+
+  const existing = await getOrCreateActionEmailDigestPreference(userObjectId);
+  const now = new Date();
+  const update = {
+    enabled: parsed.value.enabled ?? existing.enabled,
+    hourLocal: parsed.value.hourLocal ?? existing.hourLocal,
+    timezone: parsed.value.timezone ?? existing.timezone,
+    updatedAt: now,
+  };
+  const result = await getActionEmailDigestPreferencesCollection().findOneAndUpdate(
+    { userId: userObjectId },
+    { $set: update, $setOnInsert: { userId: userObjectId, createdAt: existing.createdAt || now } },
+    { upsert: true, returnDocument: 'after' }
+  );
+  const preference = result || { ...existing, ...update };
+
+  return res.status(200).json({ preference: serializeActionEmailDigestPreference(preference) });
 });
 
 export const emailMyActionsDigest = asyncHandler(async (req: Request, res: Response) => {

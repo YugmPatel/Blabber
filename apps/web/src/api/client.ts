@@ -1900,6 +1900,32 @@ export async function emailMyActionsDigest(): Promise<EmailMyActionsDigestRespon
   return data;
 }
 
+export interface MyActionsDigestPreference {
+  enabled: boolean;
+  hourLocal: number;
+  timezone: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MyActionsDigestPreferenceResponse {
+  preference: MyActionsDigestPreference;
+}
+
+export async function fetchMyActionsDigestPreference(): Promise<MyActionsDigestPreferenceResponse> {
+  const { data } = await apiClient.get<MyActionsDigestPreferenceResponse>('/api/intelligence/actions/digest/preferences');
+  return data;
+}
+
+export async function updateMyActionsDigestPreference(payload: {
+  enabled?: boolean;
+  hourLocal?: number;
+  timezone?: string;
+}): Promise<MyActionsDigestPreferenceResponse> {
+  const { data } = await apiClient.patch<MyActionsDigestPreferenceResponse>('/api/intelligence/actions/digest/preferences', payload);
+  return data;
+}
+
 export async function createMyAction(
   payload: CreateChatActionDTO
 ): Promise<{ action: ChatActionItem; duplicate?: boolean }> {

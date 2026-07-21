@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Circle, Clock3, Mail, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import Avatar from '@/components/Avatar';
@@ -9,7 +9,14 @@ import SegmentedTabs from '@/components/ui/SegmentedTabs';
 import BrandBadge from '@/components/ui/BrandBadge';
 import SourceEvidence from '@/components/SourceEvidence';
 import { ActionForm, type ActionOwnerOption } from '@/components/ChatActionsPanel';
-import { apiErrorMessage, emailMyActionsDigest, respondPlanThisAssignment } from '@/api/client';
+import {
+  apiErrorMessage,
+  emailMyActionsDigest,
+  fetchMyActionsDigestPreference,
+  respondPlanThisAssignment,
+  updateMyActionsDigestPreference,
+  type MyActionsDigestPreference,
+} from '@/api/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { chatActionKeys, useMyActions } from '@/hooks/useChatActions';
 import { canJumpToSource, navigateToSource } from '@/lib/source-jump';
@@ -38,6 +45,16 @@ const dueOptions: { value: DueFilter; label: string }[] = [
   { value: 'overdue', label: 'Overdue' },
   { value: 'none', label: 'No Due Date' },
 ];
+
+const dailyDigestHours = [
+  { value: 8, label: '8 AM' },
+  { value: 9, label: '9 AM' },
+  { value: 10, label: '10 AM' },
+];
+
+function browserTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
 
 function normalizeStatus(status: string): 'open' | 'in_progress' | 'completed' {
   if (status === 'completed' || status === 'dismissed') return 'completed';
@@ -126,6 +143,10 @@ export default function MyActionsPage() {
   const pendingRevealActionIdRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
   const { actions, isLoading, error, createAction, updateAction, updateActionStatus, deleteAction, isCreatingAction, isUpdating, updateError } = useMyActions();
+  const digestPreferenceQuery = useQuery({
+    queryKey: ['my-actions-digest-preference'],
+    queryFn: fetchMyActionsDigestPreference,
+  });
   const respondAssignment = useMutation({
     mutationFn: ({ planId, assignmentId, status }: { planId: string; assignmentId: string; status: 'accepted' | 'declined' }) =>
       respondPlanThisAssignment(planId, assignmentId, status),
@@ -147,7 +168,34 @@ export default function MyActionsPage() {
       });
     },
   });
+  const updateDigestPreference = useMutation({
+    mutationFn: updateMyActionsDigestPreference,
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(['my-actions-digest-preference'], data);
+      if (typeof variables.enabled === 'boolean') {
+        setDigestMessage({
+          type: 'success',
+          text: variables.enabled ? 'Daily Actions digest turned on.' : 'Daily Actions digest turned off.',
+        });
+      } else {
+        setDigestMessage({ type: 'success', text: 'Daily Actions digest updated.' });
+      }
+    },
+    onError: (mutationError) => {
+      setDigestMessage({
+        type: 'error',
+        text: apiErrorMessage(mutationError, 'Unable to update daily digest right now.'),
+      });
+    },
+  });
   const targetActionId = searchParams.get('actionId');
+  const digestPreference: MyActionsDigestPreference = digestPreferenceQuery.data?.preference || {
+    enabled: false,
+    hourLocal: 9,
+    timezone: browserTimezone(),
+    createdAt: '',
+    updatedAt: '',
+  };
 
   const myActionOwnerOptions = useMemo<ActionOwnerOption[]>(() => {
     if (!user?._id) return [];
@@ -271,15 +319,51 @@ export default function MyActionsPage() {
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <PageHeader title="My Actions" subtitle="What you need to do, and what you created for others." />
-          <button
-            type="button"
-            disabled={emailDigest.isPending}
-            onClick={() => emailDigest.mutate()}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm font-semibold text-[color:var(--bl-text)] transition hover:bg-[color:var(--bl-hover)] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-          >
-            <Mail size={16} />
-            {emailDigest.isPending ? 'Sending...' : 'Email me my Actions'}
-          </button>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
+            <button
+              type="button"
+              disabled={emailDigest.isPending}
+              onClick={() => emailDigest.mutate()}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm font-semibold text-[color:var(--bl-text)] transition hover:bg-[color:var(--bl-hover)] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              <Mail size={16} />
+              {emailDigest.isPending ? 'Sending...' : 'Email me my Actions'}
+            </button>
+            <div className="w-full rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 sm:min-w-72">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-[color:var(--bl-text)]">
+                  <input
+                    type="checkbox"
+                    checked={digestPreference.enabled}
+                    disabled={digestPreferenceQuery.isLoading || updateDigestPreference.isPending}
+                    onChange={(event) => updateDigestPreference.mutate({
+                      enabled: event.target.checked,
+                      hourLocal: digestPreference.hourLocal,
+                      timezone: digestPreference.timezone || browserTimezone(),
+                    })}
+                    className="h-4 w-4 rounded border-[color:var(--bl-border)] text-teal-600 focus:ring-teal-500"
+                  />
+                  Daily digest
+                </label>
+                <select
+                  aria-label="Daily digest time"
+                  value={digestPreference.hourLocal}
+                  disabled={digestPreferenceQuery.isLoading || updateDigestPreference.isPending}
+                  onChange={(event) => updateDigestPreference.mutate({
+                    enabled: digestPreference.enabled,
+                    hourLocal: Number(event.target.value),
+                    timezone: digestPreference.timezone || browserTimezone(),
+                  })}
+                  className="rounded-lg border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] px-2 py-1 text-xs font-semibold text-[color:var(--bl-text)] outline-none focus:border-teal-400"
+                >
+                  {dailyDigestHours.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+              <p className="mt-1 text-xs text-[color:var(--bl-text-muted)]">
+                Get one email each morning when you have open Actions.
+              </p>
+            </div>
+          </div>
         </div>
 
         {actionUnavailable && (

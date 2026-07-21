@@ -124,6 +124,8 @@ import {
   extractChatActions,
   getChatActions,
   getMyChatActions,
+  getMyActionsDigestPreference,
+  updateMyActionsDigestPreference,
   updateChatAction,
 } from './routes/chat-actions';
 import {
@@ -206,6 +208,8 @@ app.post('/intelligence/chats/:chatId/actions', authMiddleware, requireChatIntel
 app.get('/intelligence/chats/:chatId/actions', authMiddleware, requireChatIntelligenceEnabled, getChatActions);
 app.get('/intelligence/actions/mine', authMiddleware, requireChatIntelligenceEnabled, getMyChatActions);
 app.post('/intelligence/actions/mine', authMiddleware, requireChatIntelligenceEnabled, createMyChatAction);
+app.get('/intelligence/actions/digest/preferences', authMiddleware, requireChatIntelligenceEnabled, getMyActionsDigestPreference);
+app.patch('/intelligence/actions/digest/preferences', authMiddleware, requireChatIntelligenceEnabled, updateMyActionsDigestPreference);
 app.post('/intelligence/actions/digest/email', authMiddleware, requireChatIntelligenceEnabled, emailMyActionsDigest);
 app.patch('/intelligence/actions/:actionId', authMiddleware, requireChatIntelligenceEnabled, updateChatAction);
 app.post('/intelligence/actions/:actionId/updates', authMiddleware, requireChatIntelligenceEnabled, addChatActionUpdate);

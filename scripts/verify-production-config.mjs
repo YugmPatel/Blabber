@@ -105,10 +105,18 @@ function validateProduction(env) {
     }
   }
 
-  if (value(env, 'MY_ACTIONS_EMAIL_DIGEST_ENABLED') !== 'false') {
+  const actionsEmailDigestAvailable =
+    value(env, 'MY_ACTIONS_EMAIL_DIGEST_ENABLED') !== 'false' || value(env, 'ACTIONS_EMAIL_DIGEST_WORKER_ENABLED') !== 'false';
+  if (actionsEmailDigestAvailable) {
     requirePresent(env, findings, 'actions-email-digest', ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM']);
     if (!value(env, 'APP_BASE_URL') && !value(env, 'CLIENT_URL') && !value(env, 'FRONTEND_URL')) {
       addFinding(findings, 'fail', 'actions-email-digest', 'APP_BASE_URL', 'digest links require APP_BASE_URL, CLIENT_URL, or FRONTEND_URL');
+    }
+  }
+  if (value(env, 'ACTIONS_EMAIL_DIGEST_WORKER_ENABLED') !== 'false') {
+    const intervalMs = Number(value(env, 'ACTIONS_EMAIL_DIGEST_WORKER_INTERVAL_MS') || '900000');
+    if (!Number.isFinite(intervalMs) || intervalMs < 60000) {
+      addFinding(findings, 'fail', 'actions-email-digest', 'ACTIONS_EMAIL_DIGEST_WORKER_INTERVAL_MS', 'worker interval must be at least 60000 ms');
     }
   }
 

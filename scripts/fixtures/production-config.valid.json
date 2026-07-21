@@ -37,6 +37,8 @@
   "SMTP_USER": "${SMTP_USER}",
   "SMTP_PASS": "${SMTP_PASS}",
   "SMTP_FROM": "${SMTP_FROM}",
+  "ACTIONS_EMAIL_DIGEST_WORKER_ENABLED": "true",
+  "ACTIONS_EMAIL_DIGEST_WORKER_INTERVAL_MS": "900000",
   "LIVEKIT_API_KEY": "livekit-prod-fixture-key",
   "LIVEKIT_API_SECRET": "livekit-prod-fixture-random-material",
   "OPS_DIAGNOSTIC_TOKEN": "ops-prod-fixture-random-material",
