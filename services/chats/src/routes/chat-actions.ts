@@ -31,6 +31,12 @@ import {
 import { getPubSub } from '../pubsub';
 import { isChatExpired } from '../serialize-chat';
 import { materializeItemSources } from '../intelligence-source-materializer';
+import {
+  buildActionsDigestEmail,
+  remainingDigestActions,
+  sendActionsDigestEmail,
+  type DigestActionItem,
+} from '../actions-email-digest';
 
 interface MessageDocument {
   _id: ObjectId;
@@ -48,6 +54,13 @@ interface UserDocument {
   email?: string;
   name?: string;
 }
+
+type MyVisibleActionItem = ChatActionItem & {
+  chatTitle?: string;
+  chatAvatarUrl?: string;
+  chatType?: 'direct' | 'group';
+  chatEndedAt?: string;
+};
 
 function assertObjectId(value: string): ObjectId | null {
   return ObjectId.isValid(value) ? new ObjectId(value) : null;
@@ -493,15 +506,10 @@ export const getChatActions = asyncHandler(async (req: Request, res: Response) =
   return res.status(200).json({ actions: sourcedActions });
 });
 
-export const getMyChatActions = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.userId;
-  if (!userId) {
-    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
-  }
-
+export async function getVisibleMyChatActionItems(userId: string): Promise<MyVisibleActionItem[] | null> {
   const userObjectId = assertObjectId(userId);
   if (!userObjectId) {
-    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
+    return null;
   }
 
   const chats = await getChatsCollection()
@@ -625,7 +633,87 @@ export const getMyChatActions = asyncHandler(async (req: Request, res: Response)
     })
     .filter(Boolean) as Array<ChatActionItem & { chatTitle: string; chatAvatarUrl?: string; chatType?: 'direct' | 'group'; chatEndedAt?: string }>;
 
-  return res.status(200).json({ actions: [...standaloneItems, ...planActions, ...sourcedActions] });
+  return [...standaloneItems, ...planActions, ...sourcedActions] as MyVisibleActionItem[];
+}
+
+let actionsDigestEmailSender = sendActionsDigestEmail;
+
+export function setActionsDigestEmailSenderForTest(sender: typeof sendActionsDigestEmail) {
+  actionsDigestEmailSender = sender;
+}
+
+export const getMyChatActions = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const actions = await getVisibleMyChatActionItems(userId);
+  if (!actions) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
+  }
+
+  return res.status(200).json({ actions });
+});
+
+export const emailMyActionsDigest = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+  }
+
+  const userObjectId = assertObjectId(userId);
+  if (!userObjectId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
+  }
+
+  const user = await getDatabase()
+    .collection<UserDocument>('users')
+    .findOne({ _id: userObjectId, deletedAt: { $exists: false }, deactivatedAt: { $exists: false } } as any);
+  const email = user?.email?.trim();
+  if (!email) {
+    return res.status(400).json({ error: 'Validation Error', message: 'No email address is available for this account.' });
+  }
+
+  const visibleActions = await getVisibleMyChatActionItems(userId);
+  if (!visibleActions) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Invalid user ID' });
+  }
+
+  const remaining = remainingDigestActions(visibleActions as DigestActionItem[]);
+  if (remaining.length === 0) {
+    return res.status(200).json({
+      sent: false,
+      count: 0,
+      message: 'No open Actions to email.',
+    });
+  }
+
+  const digest = buildActionsDigestEmail({
+    userName: user?.name || user?.username,
+    userEmail: email,
+    actions: remaining,
+  });
+
+  const sent = await actionsDigestEmailSender({
+    to: email,
+    subject: digest.subject,
+    html: digest.html,
+    text: digest.text,
+  });
+
+  if (!sent) {
+    return res.status(502).json({
+      error: 'Bad Gateway',
+      message: 'Could not send digest. Please try again.',
+    });
+  }
+
+  return res.status(200).json({
+    sent: true,
+    count: digest.count,
+    message: 'Actions digest sent to your email.',
+  });
 });
 
 export const createMyChatAction = asyncHandler(async (req: Request, res: Response) => {

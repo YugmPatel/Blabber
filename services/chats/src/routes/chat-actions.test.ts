@@ -5,11 +5,14 @@ import app from '../app';
 import { connectToDatabase, closeDatabase, getDatabase } from '../db';
 import { getChatActionsCollection } from '../models/chat-action';
 import { seedChatUsers } from '../test-fixtures';
+import { buildActionsDigestEmail, remainingDigestActions } from '../actions-email-digest';
+import { setActionsDigestEmailSenderForTest } from './chat-actions';
 
 const mockUserId = new ObjectId();
 const otherUserId = new ObjectId();
 const adminUserId = new ObjectId();
 const outsiderUserId = new ObjectId();
+let sendDigestMock: ReturnType<typeof vi.fn>;
 
 vi.mock('@repo/utils', async () => {
   const actual = await vi.importActual('@repo/utils');
@@ -32,9 +35,12 @@ describe('chat Actions routes', () => {
     await db.collection('plan_this').deleteMany({});
     await db.collection('userSettings').deleteMany({});
     await seedChatUsers([mockUserId, otherUserId, adminUserId, outsiderUserId]);
+    sendDigestMock = vi.fn(async () => true);
+    setActionsDigestEmailSenderForTest(sendDigestMock);
   });
 
   afterEach(async () => {
+    setActionsDigestEmailSenderForTest(async () => false);
     await closeDatabase();
   });
 
@@ -357,5 +363,334 @@ describe('chat Actions routes', () => {
     expect(response.status).toBe(403);
     expect(response.body.message).toBe('You are not a participant in this chat');
     expect(JSON.stringify(response.body)).not.toContain('Secret task');
+  });
+
+  it('emails a My Actions digest only to the current user email', async () => {
+    const db = getDatabase();
+    const now = new Date();
+    const chatId = new ObjectId();
+    const outsiderChatId = new ObjectId();
+    const endedChatId = new ObjectId();
+
+    await db.collection('chats').insertMany([
+      {
+        _id: chatId,
+        type: 'group',
+        groupKind: 'standard',
+        participants: [mockUserId, otherUserId],
+        admins: [mockUserId],
+        title: 'Move Crew',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        _id: outsiderChatId,
+        type: 'group',
+        groupKind: 'standard',
+        participants: [otherUserId],
+        admins: [otherUserId],
+        title: 'Hidden Crew',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        _id: endedChatId,
+        type: 'group',
+        groupKind: 'temporary',
+        participants: [mockUserId],
+        admins: [mockUserId],
+        title: 'Ended Crew',
+        expiresAt: new Date(now.getTime() - 60 * 60 * 1000),
+        endedAt: new Date(now.getTime() - 30 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    await getChatActionsCollection().insertMany([
+      {
+        _id: new ObjectId(),
+        chatId,
+        actionKey: 'assigned-open',
+        type: 'task',
+        title: 'Book elevator',
+        status: 'open',
+        assignedTo: { userId: mockUserId.toString(), name: 'Me' },
+        createdBy: { userId: otherUserId.toString(), name: 'Other' },
+        dueAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        sourceMessageIds: [],
+        generatedByUserId: otherUserId,
+        lastActivityAt: now,
+        createdAt: now,
+        updatedAt: now,
+      } as any,
+      {
+        _id: new ObjectId(),
+        chatId,
+        actionKey: 'created-in-progress',
+        type: 'task',
+        title: 'Send packing checklist',
+        status: 'in_progress',
+        createdBy: { userId: mockUserId.toString(), name: 'Me' },
+        dueAt: now,
+        sourceMessageIds: [],
+        generatedByUserId: mockUserId,
+        lastActivityAt: now,
+        createdAt: now,
+        updatedAt: now,
+      } as any,
+      {
+        _id: new ObjectId(),
+        chatId,
+        actionKey: 'done',
+        type: 'task',
+        title: 'Already done',
+        status: 'completed',
+        assignedTo: { userId: mockUserId.toString(), name: 'Me' },
+        sourceMessageIds: [],
+        generatedByUserId: mockUserId,
+        lastActivityAt: now,
+        createdAt: now,
+        updatedAt: now,
+      } as any,
+      {
+        _id: new ObjectId(),
+        chatId: outsiderChatId,
+        actionKey: 'hidden',
+        type: 'task',
+        title: 'Should not leak',
+        status: 'open',
+        assignedTo: { userId: mockUserId.toString(), name: 'Me' },
+        sourceMessageIds: [],
+        generatedByUserId: otherUserId,
+        lastActivityAt: now,
+        createdAt: now,
+        updatedAt: now,
+      } as any,
+      {
+        _id: new ObjectId(),
+        chatId: endedChatId,
+        actionKey: 'ended',
+        type: 'task',
+        title: 'Ended group item',
+        status: 'open',
+        assignedTo: { userId: mockUserId.toString(), name: 'Me' },
+        sourceMessageIds: [],
+        generatedByUserId: mockUserId,
+        lastActivityAt: now,
+        createdAt: now,
+        updatedAt: now,
+      } as any,
+    ]);
+
+    const response = await request(app)
+      .post('/intelligence/actions/digest/email')
+      .send({ recipient: 'attacker@example.com' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      sent: true,
+      count: 2,
+      message: 'Actions digest sent to your email.',
+    });
+    expect(sendDigestMock).toHaveBeenCalledTimes(1);
+    const message = sendDigestMock.mock.calls[0][0];
+    expect(message.to).toBe(`user_${mockUserId.toString()}@example.com`);
+    expect(message.to).not.toBe('attacker@example.com');
+    expect(message.subject).toContain('2 open Actions');
+    expect(message.text).toContain('Book elevator');
+    expect(message.text).toContain('Send packing checklist');
+    expect(message.text).toContain('Move Crew');
+    expect(message.text).not.toContain('Already done');
+    expect(message.text).not.toContain('Should not leak');
+    expect(message.text).not.toContain('Ended group item');
+    expect(message.html).toContain('Open My Actions');
+  });
+
+  it('returns a no-actions digest response without sending email', async () => {
+    const response = await request(app).post('/intelligence/actions/digest/email');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      sent: false,
+      count: 0,
+      message: 'No open Actions to email.',
+    });
+    expect(sendDigestMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a clean error when the Actions digest email cannot be sent', async () => {
+    sendDigestMock = vi.fn(async () => false);
+    setActionsDigestEmailSenderForTest(sendDigestMock);
+    const db = getDatabase();
+    const now = new Date();
+    const chatId = new ObjectId();
+
+    await db.collection('chats').insertOne({
+      _id: chatId,
+      type: 'group',
+      groupKind: 'standard',
+      participants: [mockUserId],
+      admins: [mockUserId],
+      title: 'Errands',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await getChatActionsCollection().insertOne({
+      _id: new ObjectId(),
+      chatId,
+      actionKey: 'open',
+      type: 'task',
+      title: 'Pick up keys',
+      status: 'open',
+      assignedTo: { userId: mockUserId.toString(), name: 'Me' },
+      sourceMessageIds: [],
+      generatedByUserId: mockUserId,
+      lastActivityAt: now,
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+
+    const response = await request(app).post('/intelligence/actions/digest/email');
+
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({
+      error: 'Bad Gateway',
+      message: 'Could not send digest. Please try again.',
+    });
+    expect(sendDigestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('filters, dedupes, and sorts remaining digest Actions', () => {
+    const now = new Date('2026-07-21T16:00:00.000Z');
+    const duplicateId = new ObjectId().toString();
+    const remaining = remainingDigestActions([
+      {
+        id: duplicateId,
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'Upcoming item',
+        status: 'open',
+        dueAt: '2026-07-24T10:00:00.000Z',
+        sourceMessageIds: [],
+      } as any,
+      {
+        id: duplicateId,
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'Duplicate upcoming item',
+        status: 'open',
+        dueAt: '2026-07-24T10:00:00.000Z',
+        sourceMessageIds: [],
+      } as any,
+      {
+        id: 'completed',
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'Completed item',
+        status: 'completed',
+        sourceMessageIds: [],
+      } as any,
+      {
+        id: 'deleted',
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'Deleted item',
+        status: 'open',
+        deletedAt: now.toISOString(),
+        sourceMessageIds: [],
+      } as any,
+      {
+        id: 'ended',
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'Ended group item',
+        status: 'open',
+        chatEndedAt: now.toISOString(),
+        sourceMessageIds: [],
+      } as any,
+      {
+        id: 'cancelled-plan',
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'Cancelled plan item',
+        status: 'open',
+        metadata: { planStatus: 'cancelled' },
+        sourceMessageIds: [],
+      } as any,
+      {
+        id: 'today',
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'Today item',
+        status: 'in_progress',
+        dueAt: '2026-07-21T10:00:00.000Z',
+        sourceMessageIds: [],
+      } as any,
+      {
+        id: 'overdue',
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'Overdue item',
+        status: 'open',
+        dueAt: '2026-07-20T10:00:00.000Z',
+        sourceMessageIds: [],
+      } as any,
+      {
+        id: 'none',
+        chatId: 'chat-1',
+        type: 'task',
+        title: 'No due item',
+        status: 'open',
+        sourceMessageIds: [],
+      } as any,
+    ], now);
+
+    expect(remaining.map((action) => action.title)).toEqual([
+      'Overdue item',
+      'Today item',
+      'Upcoming item',
+      'No due item',
+    ]);
+  });
+
+  it('builds grouped text and HTML for the Actions digest', () => {
+    const digest = buildActionsDigestEmail({
+      userName: 'Yugm Patel',
+      userEmail: 'yugm@example.com',
+      now: new Date('2026-07-21T16:00:00.000Z'),
+      actions: [
+        {
+          id: 'a',
+          chatId: 'chat-1',
+          chatTitle: 'Roommates',
+          type: 'task',
+          title: 'Pay utilities',
+          description: 'Split the bill before dinner.',
+          status: 'open',
+          dueAt: '2026-07-20T10:00:00.000Z',
+          sourceMessageIds: [],
+        } as any,
+        {
+          id: 'b',
+          chatId: 'chat-2',
+          chatTitle: 'My Actions',
+          type: 'task',
+          title: 'Renew parking pass',
+          status: 'in_progress',
+          sourceMessageIds: [],
+        } as any,
+      ],
+    });
+
+    expect(digest.count).toBe(2);
+    expect(digest.subject).toBe('You have 2 open Actions in Blabber');
+    expect(digest.text).toContain('Hi Yugm,');
+    expect(digest.text).toContain('Overdue');
+    expect(digest.text).toContain('No due date');
+    expect(digest.text).toContain('Open My Actions');
+    expect(digest.html).toContain('Pay utilities');
+    expect(digest.html).toContain('Renew parking pass');
+    expect(digest.html).toContain('Roommates');
   });
 });

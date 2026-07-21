@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Circle, Clock3, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, Clock3, Mail, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import AppShell from '@/components/ui/AppShell';
 import PageHeader from '@/components/ui/PageHeader';
@@ -9,7 +9,7 @@ import SegmentedTabs from '@/components/ui/SegmentedTabs';
 import BrandBadge from '@/components/ui/BrandBadge';
 import SourceEvidence from '@/components/SourceEvidence';
 import { ActionForm, type ActionOwnerOption } from '@/components/ChatActionsPanel';
-import { respondPlanThisAssignment } from '@/api/client';
+import { apiErrorMessage, emailMyActionsDigest, respondPlanThisAssignment } from '@/api/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { chatActionKeys, useMyActions } from '@/hooks/useChatActions';
 import { canJumpToSource, navigateToSource } from '@/lib/source-jump';
@@ -122,6 +122,7 @@ export default function MyActionsPage() {
   const [editingActionId, setEditingActionId] = useState<string | null>(null);
   const [highlightedActionId, setHighlightedActionId] = useState<string | null>(null);
   const [actionUnavailable, setActionUnavailable] = useState(false);
+  const [digestMessage, setDigestMessage] = useState<{ type: 'success' | 'info' | 'error'; text: string } | null>(null);
   const pendingRevealActionIdRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
   const { actions, isLoading, error, createAction, updateAction, updateActionStatus, deleteAction, isCreatingAction, isUpdating, updateError } = useMyActions();
@@ -129,6 +130,22 @@ export default function MyActionsPage() {
     mutationFn: ({ planId, assignmentId, status }: { planId: string; assignmentId: string; status: 'accepted' | 'declined' }) =>
       respondPlanThisAssignment(planId, assignmentId, status),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: chatActionKeys.mine() }),
+  });
+  const emailDigest = useMutation({
+    mutationFn: emailMyActionsDigest,
+    onMutate: () => setDigestMessage(null),
+    onSuccess: (data) => {
+      setDigestMessage({
+        type: data.sent ? 'success' : 'info',
+        text: data.message || (data.sent ? 'Actions digest sent to your email.' : 'No open Actions to email.'),
+      });
+    },
+    onError: (mutationError) => {
+      setDigestMessage({
+        type: 'error',
+        text: apiErrorMessage(mutationError, 'Could not send digest. Please try again.'),
+      });
+    },
   });
   const targetActionId = searchParams.get('actionId');
 
@@ -252,11 +269,36 @@ export default function MyActionsPage() {
   return (
     <AppShell onNewConversation={() => navigate('/chats')} onChatFilterChange={() => navigate('/chats')} ambient>
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6">
-        <PageHeader title="My Actions" subtitle="What you need to do, and what you created for others." />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <PageHeader title="My Actions" subtitle="What you need to do, and what you created for others." />
+          <button
+            type="button"
+            disabled={emailDigest.isPending}
+            onClick={() => emailDigest.mutate()}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-3 py-2 text-sm font-semibold text-[color:var(--bl-text)] transition hover:bg-[color:var(--bl-hover)] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            <Mail size={16} />
+            {emailDigest.isPending ? 'Sending...' : 'Email me my Actions'}
+          </button>
+        </div>
 
         {actionUnavailable && (
           <div className="rounded-xl border border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] px-4 py-3 text-sm text-[color:var(--bl-text-secondary)]">
             This Action is no longer available.
+          </div>
+        )}
+
+        {digestMessage && (
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm ${
+              digestMessage.type === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200'
+                : digestMessage.type === 'info'
+                  ? 'border-[color:var(--bl-border)] bg-[color:var(--bl-panel)] text-[color:var(--bl-text-secondary)]'
+                  : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200'
+            }`}
+          >
+            {digestMessage.text}
           </div>
         )}
 

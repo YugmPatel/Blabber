@@ -1889,6 +1889,17 @@ export async function fetchMyActions(): Promise<ChatActionsResponse> {
   return data;
 }
 
+export interface EmailMyActionsDigestResponse {
+  sent: boolean;
+  count: number;
+  message: string;
+}
+
+export async function emailMyActionsDigest(): Promise<EmailMyActionsDigestResponse> {
+  const { data } = await apiClient.post<EmailMyActionsDigestResponse>('/api/intelligence/actions/digest/email');
+  return data;
+}
+
 export async function createMyAction(
   payload: CreateChatActionDTO
 ): Promise<{ action: ChatActionItem; duplicate?: boolean }> {
