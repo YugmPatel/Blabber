@@ -471,6 +471,30 @@ describe('chat Actions routes', () => {
     });
   });
 
+  it('preserves the stored Daily Actions digest timezone when PATCH omits timezone', async () => {
+    await request(app)
+      .patch('/intelligence/actions/digest/preferences')
+      .send({ enabled: true, hourLocal: 8, timezone: 'America/Los_Angeles' });
+
+    const response = await request(app)
+      .patch('/intelligence/actions/digest/preferences')
+      .send({ hourLocal: 10 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.preference).toMatchObject({
+      enabled: true,
+      hourLocal: 10,
+      timezone: 'America/Los_Angeles',
+    });
+
+    const getResponse = await request(app).get('/intelligence/actions/digest/preferences');
+    expect(getResponse.body.preference).toMatchObject({
+      enabled: true,
+      hourLocal: 10,
+      timezone: 'America/Los_Angeles',
+    });
+  });
+
   it('validates Daily Actions digest hour and timezone', async () => {
     const hourResponse = await request(app)
       .patch('/intelligence/actions/digest/preferences')
@@ -510,9 +534,12 @@ describe('chat Actions routes', () => {
     const secondRun = await processor.runOnce();
     const nextDayRun = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-22T09:05:00.000Z')).runOnce();
 
-    expect(firstRun).toMatchObject({ checked: 1, reserved: 1, sent: 1 });
-    expect(secondRun).toMatchObject({ checked: 1, reserved: 0, sent: 0 });
-    expect(nextDayRun).toMatchObject({ checked: 1, reserved: 1, sent: 1 });
+    expect(firstRun).toMatchObject({ checked: 1, due: 1, reserved: 1, sent: 1 });
+    const firstDelivery = await getActionEmailDigestDeliveriesCollection().findOne({ userId: mockUserId, localDate: '2026-07-21' });
+    expect(secondRun).toMatchObject({ checked: 1, due: 1, alreadySentToday: 1, reserved: 0, sent: 0 });
+    const deliveryAfterSecondRun = await getActionEmailDigestDeliveriesCollection().findOne({ userId: mockUserId, localDate: '2026-07-21' });
+    expect(deliveryAfterSecondRun?.updatedAt.toISOString()).toBe(firstDelivery?.updatedAt.toISOString());
+    expect(nextDayRun).toMatchObject({ checked: 1, due: 1, reserved: 1, sent: 1 });
     expect(sender.send).toHaveBeenCalledTimes(2);
     expect(sender.send.mock.calls[0][0].subject).toBe('Your Actions are waiting 👀');
     expect(sender.send.mock.calls[0][0].text).toContain('you still have 1 open Action');
@@ -525,6 +552,29 @@ describe('chat Actions routes', () => {
     expect(deliveries.map((delivery) => [delivery.localDate, delivery.status, delivery.count])).toEqual([
       ['2026-07-21', 'sent', 1],
       ['2026-07-22', 'sent', 1],
+    ]);
+  });
+
+  it('daily digest processor respects America/Los_Angeles local hour and localDate', async () => {
+    await enableDailyDigest(mockUserId, { hourLocal: 8, timezone: 'America/Los_Angeles' });
+    await insertGroupAction({ title: 'Book elevator' });
+    const sender = { send: vi.fn(async () => true) };
+
+    const beforeEight = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T14:59:00.000Z')).runOnce();
+    const afterEight = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T15:01:00.000Z')).runOnce();
+    const sameLocalDateLateUtc = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-22T06:30:00.000Z')).runOnce();
+    const nextLocalDate = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-22T15:01:00.000Z')).runOnce();
+
+    expect(beforeEight).toMatchObject({ checked: 1, notDueYet: 1, due: 0, sent: 0 });
+    expect(afterEight).toMatchObject({ checked: 1, due: 1, reserved: 1, sent: 1 });
+    expect(sameLocalDateLateUtc).toMatchObject({ checked: 1, due: 1, alreadySentToday: 1, sent: 0 });
+    expect(nextLocalDate).toMatchObject({ checked: 1, due: 1, reserved: 1, sent: 1 });
+    expect(sender.send).toHaveBeenCalledTimes(2);
+
+    const deliveries = await getActionEmailDigestDeliveriesCollection().find({ userId: mockUserId }).sort({ localDate: 1 }).toArray();
+    expect(deliveries.map((delivery) => [delivery.localDate, delivery.timezone, delivery.status])).toEqual([
+      ['2026-07-21', 'America/Los_Angeles', 'sent'],
+      ['2026-07-22', 'America/Los_Angeles', 'sent'],
     ]);
   });
 
@@ -542,7 +592,7 @@ describe('chat Actions routes', () => {
 
     const result = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T09:05:00.000Z')).runOnce();
 
-    expect(result).toMatchObject({ checked: 1, reserved: 1, skipped: 1, sent: 0 });
+    expect(result).toMatchObject({ checked: 1, due: 1, reserved: 1, skipped: 1, sent: 0 });
     expect(sender.send).not.toHaveBeenCalled();
     const delivery = await getActionEmailDigestDeliveriesCollection().findOne({ userId: otherUserId, localDate: '2026-07-21' });
     expect(delivery).toMatchObject({ status: 'skipped', count: 0, errorCategory: 'no_open_actions' });
@@ -556,7 +606,7 @@ describe('chat Actions routes', () => {
 
     const result = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T09:05:00.000Z')).runOnce();
 
-    expect(result).toMatchObject({ checked: 1, reserved: 1, skipped: 1, sent: 0 });
+    expect(result).toMatchObject({ checked: 1, due: 1, reserved: 1, skipped: 1, sent: 0 });
     expect(sender.send).not.toHaveBeenCalled();
     const delivery = await getActionEmailDigestDeliveriesCollection().findOne({ userId: mockUserId, localDate: '2026-07-21' });
     expect(delivery).toMatchObject({ status: 'skipped', count: 0, errorCategory: 'no_email' });
@@ -569,7 +619,7 @@ describe('chat Actions routes', () => {
 
     const result = await new ActionEmailDigestProcessor(sender, () => new Date('2026-07-21T09:05:00.000Z')).runOnce();
 
-    expect(result).toMatchObject({ checked: 1, reserved: 1, failed: 1, sent: 0 });
+    expect(result).toMatchObject({ checked: 1, due: 1, reserved: 1, failed: 1, sent: 0 });
     const delivery = await getActionEmailDigestDeliveriesCollection().findOne({ userId: mockUserId, localDate: '2026-07-21' });
     expect(delivery).toMatchObject({ status: 'failed', count: 1, errorCategory: 'send_failed' });
   });

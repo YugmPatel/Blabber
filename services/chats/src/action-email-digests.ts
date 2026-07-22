@@ -50,14 +50,23 @@ export class ActionEmailDigestProcessor {
     private readonly now: () => Date = () => new Date()
   ) {}
 
-  async runOnce(): Promise<{ checked: number; reserved: number; sent: number; skipped: number; failed: number }> {
+  async runOnce(): Promise<{
+    checked: number;
+    due: number;
+    notDueYet: number;
+    alreadySentToday: number;
+    reserved: number;
+    sent: number;
+    skipped: number;
+    failed: number;
+  }> {
     const lock = await acquireProcessorLock(this.now());
     if (!lock) {
       logger.info('Action email digest processor skipped; another worker holds the lock');
-      return { checked: 0, reserved: 0, sent: 0, skipped: 0, failed: 0 };
+      return { checked: 0, due: 0, notDueYet: 0, alreadySentToday: 0, reserved: 0, sent: 0, skipped: 0, failed: 0 };
     }
 
-    const stats = { checked: 0, reserved: 0, sent: 0, skipped: 0, failed: 0 };
+    const stats = { checked: 0, due: 0, notDueYet: 0, alreadySentToday: 0, reserved: 0, sent: 0, skipped: 0, failed: 0 };
     try {
       const preferences = await getActionEmailDigestPreferencesCollection()
         .find({ enabled: true })
@@ -69,8 +78,9 @@ export class ActionEmailDigestProcessor {
         try {
           const outcome = await this.processPreference(preference);
           if (!outcome) continue;
-          stats.reserved += 1;
-          stats[outcome] += 1;
+          if (outcome.due) stats.due += 1;
+          if (outcome.reserved) stats.reserved += 1;
+          stats[outcome.status] += 1;
         } catch (error) {
           stats.failed += 1;
           logger.error(
@@ -87,13 +97,18 @@ export class ActionEmailDigestProcessor {
     }
   }
 
-  private async processPreference(preference: ActionEmailDigestPreferenceDocument): Promise<'sent' | 'skipped' | 'failed' | null> {
+  private async processPreference(preference: ActionEmailDigestPreferenceDocument): Promise<{
+    status: 'sent' | 'skipped' | 'failed' | 'notDueYet' | 'alreadySentToday';
+    due?: boolean;
+    reserved?: boolean;
+  } | null> {
     const now = this.now();
     const parts = zonedParts(now, preference.timezone || 'UTC');
-    if (parts.hour < preference.hourLocal) return null;
+    if (parts.hour < preference.hourLocal) return { status: 'notDueYet' };
 
     const delivery = await reserveDelivery(preference, parts.dateKey, now);
-    if (!delivery) return null;
+    if (delivery.status === 'sent') return { status: 'alreadySentToday', due: true };
+    if (delivery.status !== 'pending') return null;
 
     const user = await getDatabase()
       .collection<UserDocument>('users')
@@ -101,14 +116,14 @@ export class ActionEmailDigestProcessor {
     const email = user?.email?.trim();
     if (!email) {
       await markDelivery(delivery, 'skipped', now, 0, 'no_email');
-      return 'skipped';
+      return { status: 'skipped', due: true, reserved: true };
     }
 
     const visibleActions = await getVisibleMyChatActionItems(preference.userId.toString());
     const remaining = remainingDigestActions((visibleActions || []) as DigestActionItem[], now);
     if (remaining.length === 0) {
       await markDelivery(delivery, 'skipped', now, 0, 'no_open_actions');
-      return 'skipped';
+      return { status: 'skipped', due: true, reserved: true };
     }
 
     const digest = buildActionsDigestEmail({
@@ -127,13 +142,13 @@ export class ActionEmailDigestProcessor {
       });
       if (!sent) {
         await markDelivery(delivery, 'failed', now, digest.count, 'send_failed');
-        return 'failed';
+        return { status: 'failed', due: true, reserved: true };
       }
       await markDelivery(delivery, 'sent', now, digest.count);
-      return 'sent';
+      return { status: 'sent', due: true, reserved: true };
     } catch {
       await markDelivery(delivery, 'failed', now, digest.count, 'send_failed');
-      return 'failed';
+      return { status: 'failed', due: true, reserved: true };
     }
   }
 }
@@ -171,7 +186,13 @@ async function reserveDelivery(
   preference: ActionEmailDigestPreferenceDocument,
   localDate: string,
   now: Date
-): Promise<ActionEmailDigestDeliveryDocument | null> {
+): Promise<ActionEmailDigestDeliveryDocument> {
+  const existing = await getActionEmailDigestDeliveriesCollection().findOne({
+    userId: preference.userId,
+    localDate,
+  });
+  if (existing) return existing;
+
   try {
     const result = await getActionEmailDigestDeliveriesCollection().findOneAndUpdate(
       {
@@ -192,9 +213,15 @@ async function reserveDelivery(
       },
       { upsert: true, returnDocument: 'after' }
     );
-    return result?.status === 'pending' ? result : null;
+    return result!;
   } catch (error: any) {
-    if (error?.code === 11000) return null;
+    if (error?.code === 11000) {
+      const existingAfterRace = await getActionEmailDigestDeliveriesCollection().findOne({
+        userId: preference.userId,
+        localDate,
+      });
+      if (existingAfterRace) return existingAfterRace;
+    }
     throw error;
   }
 }

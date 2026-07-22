@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -84,6 +84,12 @@ function renderPage() {
 describe('MyActionsPage email digest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('Intl', {
+      ...Intl,
+      DateTimeFormat: vi.fn(() => ({
+        resolvedOptions: () => ({ timeZone: 'America/Los_Angeles' }),
+      })),
+    });
     mockFetchMyActionsDigestPreference.mockResolvedValue({
       preference: {
         enabled: false,
@@ -127,6 +133,10 @@ describe('MyActionsPage email digest', () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('renders the email digest action', () => {
     renderPage();
 
@@ -154,7 +164,7 @@ describe('MyActionsPage email digest', () => {
     await waitFor(() => expect(mockUpdateMyActionsDigestPreference.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       enabled: true,
       hourLocal: 9,
-      timezone: expect.any(String),
+      timezone: 'America/Los_Angeles',
     })));
     expect(await screen.findByText('Daily Actions digest turned on.')).toBeInTheDocument();
   });
@@ -201,7 +211,7 @@ describe('MyActionsPage email digest', () => {
     await waitFor(() => expect(mockUpdateMyActionsDigestPreference.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
       enabled: false,
       hourLocal: 10,
-      timezone: expect.any(String),
+      timezone: 'America/Los_Angeles',
     })));
   });
 

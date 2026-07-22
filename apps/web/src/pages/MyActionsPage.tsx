@@ -339,7 +339,7 @@ export default function MyActionsPage() {
                     onChange={(event) => updateDigestPreference.mutate({
                       enabled: event.target.checked,
                       hourLocal: digestPreference.hourLocal,
-                      timezone: digestPreference.timezone || browserTimezone(),
+                      timezone: event.target.checked ? browserTimezone() : digestPreference.timezone || browserTimezone(),
                     })}
                     className="h-4 w-4 rounded border-[color:var(--bl-border)] text-teal-600 focus:ring-teal-500"
                   />
@@ -352,7 +352,7 @@ export default function MyActionsPage() {
                   onChange={(event) => updateDigestPreference.mutate({
                     enabled: digestPreference.enabled,
                     hourLocal: Number(event.target.value),
-                    timezone: digestPreference.timezone || browserTimezone(),
+                    timezone: browserTimezone(),
                   })}
                   className="rounded-lg border border-[color:var(--bl-border)] bg-[color:var(--bl-hover)] px-2 py-1 text-xs font-semibold text-[color:var(--bl-text)] outline-none focus:border-teal-400"
                 >
