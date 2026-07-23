@@ -21,6 +21,7 @@ AI-native social messaging platform for chat, reels, planning, actions, and perm
 
 <p align="center">
   <a href="https://app.blabber.dev"><strong>Live App</strong></a>
+  · <a href="https://www.youtube.com/watch?v=Xd1OA7kxYDw"><strong>Full Video Walkthrough</strong></a>
   · <a href="#architecture">Architecture</a>
   · <a href="#features">Features</a>
   · <a href="#tech-stack">Tech Stack</a>
@@ -29,7 +30,9 @@ AI-native social messaging platform for chat, reels, planning, actions, and perm
 </p>
 
 <p align="center">
-  YouTube Walkthrough: Coming soon
+  <a href="https://www.youtube.com/watch?v=Xd1OA7kxYDw">
+    <strong>▶ Watch the Full 52-Minute Product & Engineering Walkthrough</strong>
+  </a>
 </p>
 
 ## Overview
